@@ -324,12 +324,6 @@ public class RelationServiceImpl implements RelationService {
 
             // 回填后尝试更新本地缓存（仅针对大V）
             if (localCache != null && isBigV(userId)) {
-            int idx = switch (idField){
-                case "fromUserId" -> IDX_FOLLOWER;
-                case "toUserId" -> IDX_FOLLOWING;
-                default -> 2; // 给个默认值
-            };
-            if (localCache != null && isBigV(userId, idx)) {
                 maybeUpdateTopCache(userId, key, localCache);
             }
 
