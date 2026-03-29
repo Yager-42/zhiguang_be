@@ -1,11 +1,4 @@
-# 项目详细文档购买：
-**小红书搜：程序员流年**
-
-**项目说明：开源代码中缺少配置文件，购买后获得全部代码**
-
-商品详情：https://www.xiaohongshu.com/goods-detail/691f20586ea74e00019b3a3d
-
-# 文档示例
+# 项目文档
 <div style="display: flex; gap: 10px;">
   <img src="http://zhiguangapp.oss-cn-beijing.aliyuncs.com/posts/262804640385601536/images/20251226/11a8438f.png" width="250" />
   <img src="http://zhiguangapp.oss-cn-beijing.aliyuncs.com/posts/262804640385601536/images/20251226/4035ca79.png" width="250" />
@@ -14,6 +7,16 @@
 
 ![文档1](http://zhiguangapp.oss-cn-beijing.aliyuncs.com/posts/262804640385601536/images/20251226/43eb8fe1.png)
 ![文档2](http://zhiguangapp.oss-cn-beijing.aliyuncs.com/posts/262804640385601536/images/20251226/42b24575.png)
+
+# 项目前端页面展示
+<div style="display: flex; gap: 10px;">
+  <img src="https://free.picui.cn/free/2026/03/29/69c8db2c32d74.png" width="500" />
+  <img src="https://free.picui.cn/free/2026/03/29/69c8db2ead009.png" width="500" />
+  <img src="https://free.picui.cn/free/2026/03/29/69c8db2b93e32.png" width="500" />
+  <img src="https://free.picui.cn/free/2026/03/29/69c8db2b89818.png" width="500" />
+  <img src="https://free.picui.cn/free/2026/03/29/69c8db2bd181e.png" width="500" />
+  <img src="https://free.picui.cn/free/2026/03/29/69c8db2c30a4b.png" width="500" />
+</div>
 
 # 知光平台-知识获取与分享社区
 后端 & 前端开发（前端采用 AI 辅助开发）
