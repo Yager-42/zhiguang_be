@@ -1,0 +1,97 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: zhiguang
+  datasource:
+    url: jdbc:mysql://localhost:3306/zhiguang?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: zhiguang
+    password: zhiguang123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      ack-mode: manual
+    admin:
+      auto-create: true
+  elasticsearch:
+    uris:
+      - http://localhost:9200
+  ai:
+    model:
+      chat: openai
+      embedding: openai
+    openai:
+      api-key: sk-tvldborjnzrlrmngxojevjsxsaijpfuspesvvaqmccroqajt
+      base-url: ${SILICONFLOW_BASE_URL:https://api.siliconflow.com}
+      chat:
+        options:
+          model: ${SILICONFLOW_CHAT_MODEL:Qwen/Qwen3-32B}
+      embedding:
+        options:
+          model: ${SILICONFLOW_EMBEDDING_MODEL:Qwen/Qwen3-Embedding-0.6B}
+          dimensions: ${SILICONFLOW_EMBEDDING_DIMENSIONS:1024}
+    vectorstore:
+      type: elasticsearch
+      elasticsearch:
+        index-name: zhiguang-ai-index
+        dimensions: ${SILICONFLOW_EMBEDDING_DIMENSIONS:1024}
+        initialize-schema: true
+
+mybatis:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+auth:
+  jwt:
+    private-key: classpath:keys/private.pem
+    public-key: classpath:keys/public.pem
+
+storage:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:zhiguang}
+  region: ${MINIO_REGION:us-east-1}
+  public-domain: ${MINIO_PUBLIC_DOMAIN:}
+
+canal:
+  enabled: false
+  host: localhost
+  port: 11111
+  destination: example
+  username: ""
+  password: ""
+  filter: zhiguang.outbox
+  batchSize: 100
+  intervalMs: 1000
+
+counter:
+  rebuild:
+    enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
