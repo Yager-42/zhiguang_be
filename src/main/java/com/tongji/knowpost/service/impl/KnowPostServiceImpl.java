@@ -14,7 +14,7 @@ import com.tongji.knowpost.model.KnowPostDetailRow;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.tongji.counter.service.CounterService;
-import com.tongji.storage.config.OssProperties;
+import com.tongji.storage.MinioStorageService;
 import com.tongji.llm.rag.RagIndexService;
 import com.tongji.relation.outbox.OutboxMapper;
 import com.tongji.cache.hotkey.HotKeyDetector;
@@ -41,7 +41,7 @@ public class KnowPostServiceImpl implements KnowPostService {
     @Resource
     private final SnowflakeIdGenerator idGen;
     private final ObjectMapper objectMapper;
-    private final OssProperties ossProperties;
+    private final MinioStorageService storageService;
     private final CounterService counterService;
     private final UserCounterService userCounterService;
     private final StringRedisTemplate redis;
@@ -59,7 +59,7 @@ public class KnowPostServiceImpl implements KnowPostService {
             KnowPostMapper mapper,
             SnowflakeIdGenerator idGen,
             ObjectMapper objectMapper,
-            OssProperties ossProperties,
+            MinioStorageService storageService,
             CounterService counterService,
             UserCounterService userCounterService,
             StringRedisTemplate redis,
@@ -71,7 +71,7 @@ public class KnowPostServiceImpl implements KnowPostService {
         this.mapper = mapper;
         this.idGen = idGen;
         this.objectMapper = objectMapper;
-        this.ossProperties = ossProperties;
+        this.storageService = storageService;
         this.counterService = counterService;
         this.userCounterService = userCounterService;
         this.redis = redis;
@@ -289,13 +289,7 @@ public class KnowPostServiceImpl implements KnowPostService {
     }
 
     private String publicUrl(String objectKey) {
-        String publicDomain = ossProperties.getPublicDomain();
-
-        if (publicDomain != null && !publicDomain.isBlank()) {
-            return publicDomain.replaceAll("/$", "") + "/" + objectKey;
-        }
-
-        return "https://" + ossProperties.getBucket() + "." + ossProperties.getEndpoint() + "/" + objectKey;
+        return storageService.publicUrl(objectKey);
     }
 
     /**

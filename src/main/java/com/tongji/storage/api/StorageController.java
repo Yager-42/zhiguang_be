@@ -5,7 +5,7 @@ import com.tongji.common.exception.ErrorCode;
 import com.tongji.auth.token.JwtService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPost;
-import com.tongji.storage.OssStorageService;
+import com.tongji.storage.MinioStorageService;
 import com.tongji.storage.api.dto.StoragePresignRequest;
 import com.tongji.storage.api.dto.StoragePresignResponse;
 import jakarta.validation.Valid;
@@ -27,7 +27,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class StorageController {
 
-    private final OssStorageService ossStorageService;
+    private final MinioStorageService storageService;
     private final JwtService jwtService;
     private final KnowPostMapper knowPostMapper;
 
@@ -67,7 +67,7 @@ public class StorageController {
         }
 
         int expiresIn = 600; // 10 分钟
-        String putUrl = ossStorageService.generatePresignedPutUrl(objectKey, request.contentType(), expiresIn);
+        String putUrl = storageService.generatePresignedPutUrl(objectKey, request.contentType(), expiresIn);
         Map<String, String> headers = Map.of("Content-Type", request.contentType());
         return new StoragePresignResponse(objectKey, putUrl, headers, expiresIn);
     }

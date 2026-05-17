@@ -2,8 +2,8 @@ package com.tongji.llm.rag;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
@@ -22,7 +22,7 @@ import java.util.List;
 public class RagQueryService {
     // 向量检索接口（Elasticsearch 向量库封装）
     private final VectorStore vectorStore;
-    // 大模型对话客户端（在 LlmConfig 中通过 @Qualifier 绑定 deepSeekChatModel）
+    // 大模型对话客户端（在 LlmConfig 中通过 @Qualifier 绑定 openAiChatModel）
     private final ChatClient chatClient;
     // 索引服务：确保帖子在问答前已建立/更新索引
     private final RagIndexService indexService;
@@ -48,8 +48,7 @@ public class RagQueryService {
                 .prompt() // 构建对话
                 .system(system)
                 .user(user)
-                .options(DeepSeekChatOptions.builder()
-                        .model("deepseek-chat") // 指定 DeepSeek 模型
+                .options(OpenAiChatOptions.builder()
                         .temperature(0.2)       // 低温度：更稳健、少发散
                         .maxTokens(maxTokens)    // 控制最大输出长度
                         .build())
