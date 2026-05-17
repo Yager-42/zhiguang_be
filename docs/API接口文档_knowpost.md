@@ -31,7 +31,7 @@
     }
     ```
   - 成功响应：`204 No Content`
-  - 生成规则：服务端会根据 `objectKey` 生成 `content_url`（优先使用 `oss.publicDomain`，否则使用 `https://{bucket}.{endpoint}/{objectKey}`），并写入 `content_etag`、`content_size`、`content_sha256`。
+  - 生成规则：服务端会根据 `objectKey` 生成 `content_url`（优先使用 `storage.publicDomain`，否则使用 `{storage.publicEndpoint}/{bucket}/{objectKey}`），并写入 `content_etag`、`content_size`、`content_sha256`。
   - 可能错误：
     - `BAD_REQUEST`：草稿不存在或无权限（`id` 与当前用户不匹配）
 
@@ -89,7 +89,7 @@
     ```json
     {
       "objectKey": "posts/1234567890123/content.md",
-      "putUrl": "https://oss-example.aliyuncs.com/bucket/...",
+      "putUrl": "http://localhost:9000/zhiguang/posts/1234567890123/content.md?...",
       "headers": {
         "Content-Type": "text/markdown"
       },
@@ -109,7 +109,7 @@
 
 #### 典型发布流程
 1. 创建草稿：`POST /api/v1/knowposts/drafts` → 获取 `id`。
-2. 前端直传正文到阿里云 OSS（预签名接口暂未在本文档内定义）。
+2. 前端使用预签名 URL 将正文直传到 MinIO。
 3. 上传成功后回传确认：`POST /api/v1/knowposts/{id}/content/confirm`。
 4. 完善元数据：`PATCH /api/v1/knowposts/{id}`（标题、标签、图片等）。
 5. 发布：`POST /api/v1/knowposts/{id}/publish`。
@@ -144,7 +144,7 @@
     ```json
     {
       "objectKey": "posts/1234567890123/content.md",
-      "putUrl": "https://oss-example.aliyuncs.com/bucket/...",
+      "putUrl": "http://localhost:9000/zhiguang/posts/1234567890123/content.md?...",
       "headers": {
         "Content-Type": "text/markdown"
       },
@@ -200,7 +200,7 @@ flowchart TD
 触发接口2：POST /presign]
     B -->|图片| C2[申请预签名
 触发接口2：POST /presign]
-    C --> D[前端 PUT 直传 OSS]
+    C --> D[前端 PUT 直传 MinIO]
     C2 --> D
     D -->|成功| E[读取 ETag, size, 计算 sha256]
     D -->|失败| X[重试上传或重新获取预签名] --> C
@@ -216,7 +216,7 @@ flowchart TD
 触发接口5：POST /'id'/publish]
     J -->|204| K[状态 = published]
     J -->|400| Z
-N[注意：需在 OSS CORS 暴露 ETag] --- D
+N[注意：需在对象存储 CORS 暴露 ETag] --- D
 ```
 
 ---
@@ -384,7 +384,7 @@ N[注意：需在 OSS CORS 暴露 ETag] --- D
   { "description": "生成的不超过50字的中文描述" }
   ```
 - 说明：
-  - 基于 Spring AI + DeepSeek（OpenAI 兼容接口 `deepseek-chat`）；温度 0.2，服务端再次裁剪至 50 字以内。
+  - 基于 Spring AI OpenAI-compatible 客户端，默认使用 SiliconFlow `Qwen/Qwen3-32B`；温度 0.2，服务端再次裁剪至 50 字以内。
   - 若正文为空或调用失败，返回统一错误码。
   - 该接口仅生成摘要，不做内容保存或审核。
 
@@ -401,7 +401,7 @@ N[注意：需在 OSS CORS 暴露 ETag] --- D
     - `maxTokens`：可选，默认 `1024`，LLM 最大生成长度。
   - 行为：
     - 服务端先基于向量索引检索与问题相关的上下文（按 `postId` 过滤，仅取当前知文的片段）。
-    - 将若干上下文（最多 `topK`）拼接为提示词，调用 DeepSeek 模型进行流式生成。
+    - 将若干上下文（最多 `topK`）拼接为提示词，调用 SiliconFlow/OpenAI-compatible 模型进行流式生成。
     - 以 SSE 的 `data:` 行连续推送生成内容，直到完成或连接关闭。
 
 - SSE 输出示例：

@@ -2,7 +2,7 @@ package com.tongji.profile.api;
 
 import com.tongji.profile.api.dto.ProfilePatchRequest;
 import com.tongji.profile.api.dto.ProfileResponse;
-import com.tongji.storage.OssStorageService;
+import com.tongji.storage.MinioStorageService;
 import com.tongji.auth.token.JwtService;
 import com.tongji.profile.service.ProfileService;
 import jakarta.validation.Valid;
@@ -32,7 +32,7 @@ public class ProfileController {
 
     private final ProfileService profileService;
     private final JwtService jwtService;
-    private final OssStorageService ossStorageService;
+    private final MinioStorageService storageService;
 
     /**
      * 更新个人资料（部分字段 PATCH）。
@@ -65,7 +65,7 @@ public class ProfileController {
     public ProfileResponse uploadAvatar(@AuthenticationPrincipal Jwt jwt,
                                         @RequestPart("file") MultipartFile file) {
         long userId = jwtService.extractUserId(jwt);
-        String url = ossStorageService.uploadAvatar(userId, file);
+        String url = storageService.uploadAvatar(userId, file);
 
         return profileService.updateAvatar(userId, url);
     }
