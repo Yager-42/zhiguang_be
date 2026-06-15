@@ -1,6 +1,6 @@
 # Leaf ID Service Implementation Plan
 
-> **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` if subagents are available, or `superpowers:executing-plans` in the current session. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use `superpowers:subagent-driven-development` only when the user/environment has authorized subagents. Otherwise execute this single plan in the current session with `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the unified Leaf-style `IdService`, migrate current ID call sites, and close `add-leaf-id-service` only after verification evidence exists.
 
@@ -27,14 +27,13 @@ Read before editing:
 
 ## Command Setup
 
-Run before Maven commands:
+Run Maven commands from the repo root. The current workspace root is `/Volumes/lexar/revive/zhiguang_be`; on other machines, use that machine's repo root.
 
-```powershell
-$mvn = Join-Path $env:USERPROFILE 'Desktop\文档\.codex\tools\apache-maven-3.9.6\bin\mvn.cmd'
-Test-Path $mvn
+```bash
+mvn -version
 ```
 
-Expected: `True`.
+Windows PowerShell optional equivalent: `mvn.cmd -version` if `mvn.cmd` is on `PATH`.
 
 ## Files
 
@@ -114,7 +113,7 @@ public interface IdService {
 ```
 
 - [ ] Do not edit OpenSpec design/spec/tasks from this task. OpenSpec task closure is limited to checkbox updates in Task 7 after evidence exists.
-- [ ] Run `& $mvn test`.
+- [ ] Run `mvn test`.
 Expected: `BUILD SUCCESS`, or no YAML/config binding error if unrelated existing tests fail.
 
 ## Task 2: Common Snowflake Implementation
@@ -137,7 +136,7 @@ Expected: `BUILD SUCCESS`, or no YAML/config binding error if unrelated existing
 - [ ] Test Snowflake namespace routing for `POST`, `COMMENT`, `PENDING_COMMENT`, `PUBLISH_ATTEMPT`, `RELATION`, and `OUTBOX_EVENT`.
 - [ ] Test Segment namespaces throw before Segment is connected.
 - [ ] Test default config values and invalid worker/datacenter IDs.
-- [ ] Run `& $mvn -Dtest=SnowflakeIdGeneratorTest test`.
+- [ ] Run `mvn -Dtest=SnowflakeIdGeneratorTest test`.
 Expected: `BUILD SUCCESS`.
 
 ## Task 3: Segment Schema, Mapper, and Range Loader
@@ -205,7 +204,7 @@ public interface LeafAllocMapper {
 - [ ] Create `SegmentRange`, rejecting `startInclusive > endInclusive`.
 - [ ] Create `SegmentLoader` as a functional interface: `SegmentRange load(String bizTag)`.
 - [ ] Create `SegmentLoadException extends RuntimeException`.
-- [ ] Run `& $mvn test`.
+- [ ] Run `mvn test`.
 Expected: `BUILD SUCCESS`.
 
 ## Task 4: Segment Buffer and Generator
@@ -230,7 +229,7 @@ Expected: `BUILD SUCCESS`.
 - [ ] If a private executor is owned by `SegmentIdGenerator`, shut it down in `@PreDestroy`, or inject a Spring-managed executor.
 - [ ] Test unknown biz tag, `updateMaxId != 1`, null select result, and mapper exceptions as `SegmentLoadException`.
 - [ ] Route Segment namespaces in `DefaultIdService`: `RECONCILIATION_TASK -> reconciliation_task`, `ADMIN_OPERATION -> admin_operation`, `AUDIT_LOG -> audit_log`.
-- [ ] Run `& $mvn -Dtest=SegmentBufferTest,SegmentIdGeneratorTest,IdServiceSegmentRoutingTest test`.
+- [ ] Run `mvn -Dtest=SegmentBufferTest,SegmentIdGeneratorTest,IdServiceSegmentRoutingTest test`.
 Expected: `BUILD SUCCESS`.
 
 ## Task 5: Migrate Current Business Call Sites
@@ -243,14 +242,14 @@ Expected: `BUILD SUCCESS`.
 
 - [ ] Confirm ID API exists:
 
-```powershell
-rg -n "interface IdService|enum IdNamespace|POST|RELATION|OUTBOX_EVENT|RECONCILIATION_TASK|ADMIN_OPERATION|AUDIT_LOG" src\main\java\com\tongji\common\id
+```bash
+rg -n "interface IdService|enum IdNamespace|POST|RELATION|OUTBOX_EVENT|RECONCILIATION_TASK|ADMIN_OPERATION|AUDIT_LOG" src/main/java/com/tongji/common/id
 ```
 
 - [ ] Confirm `users.id` remains `AUTO_INCREMENT`:
 
-```powershell
-rg -n "CREATE TABLE IF NOT EXISTS users|AUTO_INCREMENT" db\schema.sql
+```bash
+rg -n "CREATE TABLE IF NOT EXISTS users|AUTO_INCREMENT" db/schema.sql
 ```
 
 - [ ] In `KnowPostServiceImpl`, replace `com.tongji.knowpost.id.SnowflakeIdGenerator` with imports from `com.tongji.common.id.IdService` and `com.tongji.common.id.IdNamespace`.
@@ -258,8 +257,8 @@ rg -n "CREATE TABLE IF NOT EXISTS users|AUTO_INCREMENT" db\schema.sql
 - [ ] Replace knowpost outbox ID generation with `idService.nextId(IdNamespace.OUTBOX_EVENT)`.
 - [ ] Verify the active Leaf OpenSpec accepts the relation row namespace:
 
-```powershell
-rg -n "RELATION|relation row" openspec\changes\add-leaf-id-service\design.md openspec\changes\add-leaf-id-service\specs\id-service\spec.md openspec\changes\add-leaf-id-service\tasks.md
+```bash
+rg -n "RELATION|relation row" openspec/changes/add-leaf-id-service/design.md openspec/changes/add-leaf-id-service/specs/id-service/spec.md openspec/changes/add-leaf-id-service/tasks.md
 ```
 
 Expected: the active OpenSpec shows accepted relation row namespace requirements for `RELATION`.
@@ -271,23 +270,23 @@ Expected: the active OpenSpec shows accepted relation row namespace requirements
 - [ ] Delete `src/main/java/com/tongji/knowpost/id/SnowflakeIdGenerator.java`; do not keep a wrapper.
 - [ ] Verify old references are gone:
 
-```powershell
-Test-Path 'src\main\java\com\tongji\knowpost\id\SnowflakeIdGenerator.java'
+```bash
+test -e src/main/java/com/tongji/knowpost/id/SnowflakeIdGenerator.java
 rg -n "com\.tongji\.knowpost\.id\.SnowflakeIdGenerator|import com\.tongji\.knowpost\.id" src
-rg -n "SnowflakeIdGenerator|ThreadLocalRandom\.current\(\)\.nextLong|idGen" src\main\java\com\tongji\knowpost src\main\java\com\tongji\relation
+rg -n "SnowflakeIdGenerator|ThreadLocalRandom\.current\(\)\.nextLong|idGen" src/main/java/com/tongji/knowpost src/main/java/com/tongji/relation
 ```
 
-Expected: first command returns `False`; both `rg` commands have no matches. The new `com.tongji.common.id.SnowflakeIdGenerator` is allowed.
+Expected: first command exits non-zero because the file is absent; both `rg` commands have no matches. The new `com.tongji.common.id.SnowflakeIdGenerator` is allowed.
 
 - [ ] Verify user module does not use `IdService`:
 
-```powershell
-rg -n "IdService|IdNamespace|nextId\(" src\main\java\com\tongji\user
+```bash
+rg -n "IdService|IdNamespace|nextId\(" src/main/java/com/tongji/user
 ```
 
 Expected: no user-module ID service calls.
 
-- [ ] Run `& $mvn test`.
+- [ ] Run `mvn test`.
 Expected: `BUILD SUCCESS`.
 
 ## Task 6: Smoke, Throughput, and Final Verification
@@ -301,16 +300,16 @@ Expected: `BUILD SUCCESS`.
 - [ ] Snowflake path should generate at least `50_000` positive unique IDs through a Snowflake namespace such as `POST`.
 - [ ] Segment path should generate at least `10_000` positive unique IDs through `RECONCILIATION_TASK`.
 - [ ] Use 5-10 second timeouts. If local environment is slow, reduce counts to `10_000` and `5_000`, and document the adjustment.
-- [ ] Run `& $mvn -Dtest=IdServiceSmokeTest test`.
+- [ ] Run `mvn -Dtest=IdServiceSmokeTest test`.
 Expected: `BUILD SUCCESS`.
 
 - [ ] Run full verification:
 
-```powershell
-& $mvn test
+```bash
+mvn test
 rg -n "com\.tongji\.knowpost\.id\.SnowflakeIdGenerator|import com\.tongji\.knowpost\.id" src db
-rg -n "SnowflakeIdGenerator|ThreadLocalRandom\.current\(\)\.nextLong|idGen" src\main\java\com\tongji\knowpost src\main\java\com\tongji\relation
-rg -n "POST|COMMENT|PENDING_COMMENT|PUBLISH_ATTEMPT|RELATION|OUTBOX_EVENT|RECONCILIATION_TASK|ADMIN_OPERATION|AUDIT_LOG" src\main\java\com\tongji\common\id\IdNamespace.java
+rg -n "SnowflakeIdGenerator|ThreadLocalRandom\.current\(\)\.nextLong|idGen" src/main/java/com/tongji/knowpost src/main/java/com/tongji/relation
+rg -n "POST|COMMENT|PENDING_COMMENT|PUBLISH_ATTEMPT|RELATION|OUTBOX_EVENT|RECONCILIATION_TASK|ADMIN_OPERATION|AUDIT_LOG" src/main/java/com/tongji/common/id/IdNamespace.java
 openspec status --change "add-leaf-id-service" --json
 openspec validate add-leaf-id-service --strict
 ```
@@ -345,18 +344,18 @@ Expected: Maven success, no residual old-package/random-ID search output, all ac
 
 - [ ] Validate markdown:
 
-```powershell
-Get-Content -Raw openspec\changes\add-leaf-id-service\tasks.md
+```bash
+sed -n '1,220p' openspec/changes/add-leaf-id-service/tasks.md
 ```
 
 Expected: checkbox format intact.
 
 - [ ] Rerun final evidence commands:
 
-```powershell
-& $mvn test
+```bash
+mvn test
 rg -n "com\.tongji\.knowpost\.id\.SnowflakeIdGenerator|import com\.tongji\.knowpost\.id" src db
-rg -n "SnowflakeIdGenerator|ThreadLocalRandom\.current\(\)\.nextLong|idGen" src\main\java\com\tongji\knowpost src\main\java\com\tongji\relation
+rg -n "SnowflakeIdGenerator|ThreadLocalRandom\.current\(\)\.nextLong|idGen" src/main/java/com/tongji/knowpost src/main/java/com/tongji/relation
 openspec status --change "add-leaf-id-service" --json
 openspec validate add-leaf-id-service --strict
 ```

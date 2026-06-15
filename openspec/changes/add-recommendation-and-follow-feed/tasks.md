@@ -12,7 +12,7 @@
 
 - [ ] 2.1 消费 `content_published` 事件并异步 upsert Gorse item。
 - [ ] 2.2 用户点赞、收藏、评论、关注时投递 feedback。
-- [ ] 2.3 用户资料变化时同步用户画像字段。
+- [ ] 2.3 从资料更新和头像更新路径投递 `user_profile_updated` 事件，并消费该事件同步用户画像字段。
 - [ ] 2.4 增加推荐事件失败补偿任务。
 - [ ] 2.5 确保只有成功 `publishing -> published` 的帖子触发 Gorse item 和关注流 fanout。
 
@@ -23,7 +23,7 @@
 - [ ] 3.3 实现普通作者 fanout push。
 - [ ] 3.4 实现大 V fanout pull。
 - [ ] 3.5 实现超级大 V 不 push 到粉丝 inbox，但写入 `feed:author:posts:{authorId}` 或等价 pull 索引，并保持热点/推荐可见。
-- [ ] 3.6 实现最近 30 天活跃粉丝优先 push。
+- [ ] 3.6 v1 deferred：最近 30 天活跃粉丝优先 push 本批次不实现；不要把未实现代码标记为完成。
 
 ## 4. Feed Mixing
 

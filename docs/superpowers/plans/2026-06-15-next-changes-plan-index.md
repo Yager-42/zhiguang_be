@@ -1,6 +1,6 @@
 # Next OpenSpec Changes Plan Index
 
-> **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` if subagents are available. Otherwise use `superpowers:executing-plans`. Run one plan at a time and do not mix write scopes.
+> **For agentic workers:** Use `superpowers:subagent-driven-development` only when the user/environment has authorized subagents. Otherwise execute one plan at a time in the current session with `superpowers:executing-plans`; do not mix write scopes.
 
 **Goal:** Provide the current execution entry for `add-leaf-id-service` and the following OpenSpec changes.
 
@@ -23,23 +23,24 @@
 
 ## Shared Context
 
-- Repo root: `E:\idk\zhiguang_be`
+- Repo root for this workspace: `/Volumes/lexar/revive/zhiguang_be`; on other machines, run commands from that machine's repo root.
 - Cross-change mapping: `openspec/11pdf-integration-matrix.md`
 - Execution order: `openspec/changes/execution-order.md`
 - Current authoritative changes: `openspec/changes/*`
 - Old restored reference plans: `docs/superpowers/plans/2026-06-11-*.md`
 - Shared ID package after Leaf implementation: `com.tongji.common.id`
+- Do not add or modify plaintext API keys in `application.yml`. Use environment placeholders such as `${SILICONFLOW_API_KEY:}` or `${OPENAI_API_KEY:}` for SiliconFlow/OpenAI-style keys.
+- This batch of business plans does not upgrade Spring Boot. Any Spring Boot version upgrade must be a separate OpenSpec change to avoid mixing broad dependency churn into feature work.
 
 ## Maven Setup
 
-Run before Maven commands:
+Run Maven commands from the repo root:
 
-```powershell
-$mvn = Join-Path $env:USERPROFILE 'Desktop\文档\.codex\tools\apache-maven-3.9.6\bin\mvn.cmd'
-Test-Path $mvn
+```bash
+mvn -version
 ```
 
-Expected: `True`.
+Windows PowerShell optional equivalent: `mvn.cmd -version` if `mvn.cmd` is on `PATH`.
 
 ## Plan Boundaries
 

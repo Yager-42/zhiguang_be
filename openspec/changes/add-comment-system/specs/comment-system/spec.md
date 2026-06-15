@@ -48,7 +48,7 @@ The system SHALL store comment and reply text in Cassandra and metadata in MySQL
 #### Scenario: Read comments page
 
 - **WHEN** the client requests comments
-- **THEN** the system reads comment metadata from MySQL/Redis
+- **THEN** the system reads comment metadata from MySQL
 - **AND** batch reads text from Cassandra by `comment_id`
 - **AND** MySQL does not store a separate Cassandra `content_key`
 
