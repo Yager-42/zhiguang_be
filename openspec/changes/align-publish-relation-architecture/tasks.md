@@ -14,13 +14,13 @@
 - [ ] 2.3 Implement publish idempotency lookup and persistence keyed by author, post, and `idempotentKey`.
 - [ ] 2.4 Reject publish requests that omit `idempotentKey` before creating attempts or side effects.
 - [ ] 2.5 Add publish status query endpoint returning attempt status, post status, failed step, and retry eligibility.
-- [ ] 2.6 Add publish retry endpoint that accepts only retryable failed attempts and returns the retry `publishAttemptId`.
+- [ ] 2.6 Add publish retry endpoint that accepts only retryable failed attempts, reuses the original attempt row, increments `retry_count`, and returns the same `publishAttemptId`.
 - [ ] 2.7 Add publish attempt persistence and post fields for current attempt, `publishing`, `publish_failed`, and publish failure reason.
 - [ ] 2.8 Ensure `202 Accepted` is returned after attempt acceptance, not after final publication.
 
 ## 3. Publish Manager Flow
 
-- [ ] 3.1 Implement request-path orchestration for lightweight validation, idempotency, attempt creation/reuse, and CAS transition into `publishing`.
+- [ ] 3.1 Implement request-path orchestration for lightweight validation, idempotency, original attempt creation/reuse, retry-count increment on retry, and CAS transition into `publishing`.
 - [ ] 3.2 Run the critical publish flow asynchronously on the publish executor after `202 Accepted`.
 - [ ] 3.3 Implement critical flow transitions from `publishing` to `published` or `publish_failed`.
 - [ ] 3.4 Separate critical publish facts from derivative publish tasks in manager flow and helper contracts.

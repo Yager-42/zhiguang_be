@@ -40,7 +40,7 @@ Publish will require a client-provided `idempotentKey` and return `202 Accepted`
 
 The synchronous request path owns lightweight validation, idempotency lookup, publish attempt creation or reuse, and a CAS state transition such as `draft -> publishing` or retryable `publish_failed -> publishing`. The critical publish flow then runs asynchronously on the publish executor. It validates and persists critical facts, invokes enabled helpers or clients such as media validation and text storage, and eventually marks the attempt as `succeeded` with the post `published` or marks the attempt as `failed` with the post `publish_failed`.
 
-Clients can query status and retry failed attempts. The manager maps repeated initial requests with the same author, post, and idempotency key to the same publish attempt instead of creating duplicate work. Explicit retry is modeled as a retry operation against a failed attempt and may create a new attempt linked to the failed one.
+Clients can query status and retry failed attempts. The manager maps repeated initial requests with the same author, post, and idempotency key to the same publish attempt instead of creating duplicate work. In v1, explicit retry reuses the original failed attempt row, increments `retry_count`, clears retryable failure fields as needed, and moves that same attempt back to `publishing`. It does not create a new attempt for the same idempotency key, and `retry_of_attempt_id` is not used in v1.
 
 Alternative considered: keep `204 No Content`. That hides the actual processing state from clients and makes retry semantics ambiguous. The attempt model provides a stable contract for status, retry, and compensation.
 
@@ -74,7 +74,7 @@ Alternative considered: make all publish side effects part of one transaction. T
 - [Risk] Managers can become oversized if helpers are not extracted. -> Mitigation: tasks require helpers/DAOs/publishers/clients with narrow responsibilities and focused tests.
 - [Risk] Sentinel rules can be misclassified and degrade business validation errors. -> Mitigation: guard adapters must distinguish system failures from expected business exceptions.
 - [Risk] Executor isolation adds configuration and operational overhead. -> Mitigation: start with conservative defaults, explicit bean names, thread name prefixes, and metrics visibility.
-- [Risk] Publish idempotency storage can conflict with retry semantics. -> Mitigation: bind idempotency to the original publish attempt while retry creates explicit retry attempts from a failed state.
+- [Risk] Publish idempotency storage can conflict with retry semantics. -> Mitigation: bind idempotency and retry to the original publish attempt row in v1; retry only increments `retry_count` and reuses the same `publishAttemptId`.
 - [Risk] This architecture change overlaps with other OpenSpec changes. -> Mitigation: keep this change limited to layering, contracts, resilience, and isolation; leave feature-specific data stores and consumers to their own changes.
 
 ## Migration Plan
