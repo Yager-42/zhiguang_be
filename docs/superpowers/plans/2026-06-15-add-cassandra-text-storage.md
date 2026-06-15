@@ -1,6 +1,6 @@
 # Cassandra Text Storage Implementation Plan
 
-> **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` if subagents are available, or `superpowers:executing-plans` in the current session. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use `superpowers:subagent-driven-development` only when the user/environment has authorized subagents. Otherwise execute this single plan in the current session with `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Introduce Cassandra as the fact store for post and comment text while keeping MinIO for media and legacy text fallback.
 
@@ -27,14 +27,13 @@ Prerequisites: `add-leaf-id-service` and `align-publish-relation-architecture` c
 
 ## Command Setup
 
-Run before Maven commands:
+Run Maven commands from the repo root. The current workspace root is `/Volumes/lexar/revive/zhiguang_be`; on other machines, use that machine's repo root.
 
-```powershell
-$mvn = Join-Path $env:USERPROFILE 'Desktop\文档\.codex\tools\apache-maven-3.9.6\bin\mvn.cmd'
-Test-Path $mvn
+```bash
+mvn -version
 ```
 
-Expected: `True`.
+Windows PowerShell optional equivalent: `mvn.cmd -version` if `mvn.cmd` is on `PATH`.
 
 ## Current Design Decision: Business ID Text Keys
 
@@ -80,7 +79,7 @@ OpenSpec is aligned on this point: do not implement `content_key`. Business IDs 
 - [ ] Define hard-delete methods for post and comment text.
 - [ ] Treat missing text as `Optional.empty()` or absent map entry, not an exception.
 - [ ] Treat write failure as `TextWriteException`.
-- [ ] Run `& $mvn -DskipTests compile`.
+- [ ] Run `mvn -DskipTests compile`.
 
 ## Task 3: Cassandra Entities and Service
 
@@ -97,7 +96,7 @@ OpenSpec is aligned on this point: do not implement `content_key`. Business IDs 
 - [ ] Implement Cassandra-first read with MinIO fallback URL for legacy posts.
 - [ ] Implement batch comment reads returning only existing rows.
 - [ ] Implement hard deletes.
-- [ ] Run `& $mvn -Dtest=CassandraTextStorageServiceTest test`.
+- [ ] Run `mvn -Dtest=CassandraTextStorageServiceTest test`.
 
 ## Task 4: Publish Critical Flow Integration
 
@@ -110,7 +109,7 @@ OpenSpec is aligned on this point: do not implement `content_key`. Business IDs 
 - [ ] If Cassandra write fails, mark attempt failed and post `publish_failed`; keep the original HTTP `202` as acceptance only.
 - [ ] Do not write Cassandra during draft creation or content confirm.
 - [ ] Add tests proving text write failure fails the attempt and prevents `published`.
-- [ ] Run `& $mvn -Dtest=*PublishManagerTextStorage* test`.
+- [ ] Run `mvn -Dtest=*PublishManagerTextStorage* test`.
 
 ## Task 5: ES/RAG Cassandra-First Reads
 
@@ -123,7 +122,7 @@ OpenSpec is aligned on this point: do not implement `content_key`. Business IDs 
 - [ ] Replace direct `contentUrl` fetch with `getPostText(postId, contentUrl)`.
 - [ ] Keep description fallback if text is still missing.
 - [ ] Add tests that Cassandra body is preferred and MinIO fallback remains available.
-- [ ] Run `& $mvn -Dtest=*TextStorageSearchRag* test`.
+- [ ] Run `mvn -Dtest=*TextStorageSearchRag* test`.
 
 ## Task 6: Smoke Test and Documentation
 
@@ -133,8 +132,8 @@ OpenSpec is aligned on this point: do not implement `content_key`. Business IDs 
 
 - [ ] Add a Cassandra slice or Testcontainers smoke test for post save/read/delete and comment batch read.
 - [ ] Document local Cassandra startup, schema verification, reset, and cqlsh commands.
-- [ ] Run `& $mvn -Dtest=TextStorageSmokeTest test` if Docker is available.
-- [ ] Run `& $mvn test`.
+- [ ] Run `mvn -Dtest=TextStorageSmokeTest test` if Docker is available.
+- [ ] Run `mvn test`.
 - [ ] Run `openspec status --change "add-cassandra-text-storage" --json`.
 - [ ] Run `openspec validate add-cassandra-text-storage --strict` if supported.
 - [ ] Before updating OpenSpec task checkboxes, verify the implementation did not add `content_key`; business IDs must remain the Cassandra lookup keys.

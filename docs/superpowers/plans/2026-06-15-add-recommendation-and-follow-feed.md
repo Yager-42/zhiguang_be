@@ -1,6 +1,6 @@
 # Recommendation and Follow Feed Implementation Plan
 
-> **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` if subagents are available, or `superpowers:executing-plans` in the current session. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use `superpowers:subagent-driven-development` only when the user/environment has authorized subagents. Otherwise execute this single plan in the current session with `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add adapter-based Gorse recommendations, local follow feed fanout, and a mixed home feed that fills from follow candidates, recommendation candidates, and hot fallback.
 
@@ -22,19 +22,19 @@ Read before editing:
 - `src/main/java/com/tongji/knowpost/service/KnowPostFeedService.java`
 - `src/main/java/com/tongji/knowpost/service/impl/KnowPostFeedServiceImpl.java`
 - `src/main/java/com/tongji/relation/service/RelationService.java`
+- `src/main/java/com/tongji/profile/service/impl/ProfileServiceImpl.java`
 
 Prerequisites: `align-publish-relation-architecture` and `add-comment-system` complete.
 
 ## Command Setup
 
-Run before Maven commands:
+Run Maven commands from the repo root. The current workspace root is `/Volumes/lexar/revive/zhiguang_be`; on other machines, use that machine's repo root.
 
-```powershell
-$mvn = Join-Path $env:USERPROFILE 'Desktop\文档\.codex\tools\apache-maven-3.9.6\bin\mvn.cmd'
-Test-Path $mvn
+```bash
+mvn -version
 ```
 
-Expected: `True`.
+Windows PowerShell optional equivalent: `mvn.cmd -version` if `mvn.cmd` is on `PATH`.
 
 ## Files
 
@@ -50,6 +50,8 @@ Expected: `True`.
 - Modify: `src/main/java/com/tongji/knowpost/mapper/KnowPostMapper.java`
 - Modify: `src/main/resources/mapper/KnowPostMapper.xml`
 - Modify: `src/main/java/com/tongji/counter/service/UserCounterService.java`
+- Modify: `src/main/java/com/tongji/profile/service/impl/ProfileServiceImpl.java`
+- Create: `src/main/java/com/tongji/profile/event/*`
 - Test: `src/test/java/com/tongji/recommendation/*`
 
 ## Task 1: Configuration and Gorse Adapter
@@ -61,7 +63,7 @@ Expected: `True`.
 - [ ] Implement `GorseClient` inside `com.tongji.recommendation.gorse`.
 - [ ] Implement `GorseRecommendationAdapter`; it returns candidates only, never full feed cards.
 - [ ] Add tests for enabled Gorse, disabled fallback, and unavailable fallback.
-- [ ] Run `& $mvn -Dtest=*RecommendationAdapter* test`.
+- [ ] Run `mvn -Dtest=*RecommendationAdapter* test`.
 
 ## Task 2: Follow Feed Redis Structures
 
@@ -78,25 +80,29 @@ Expected: `True`.
 - [ ] For large authors, write author posts only.
 - [ ] For super-large authors, never push to follower inboxes.
 - [ ] For super-large authors, write `feed:author:posts:{authorId}` or an explicitly equivalent pull index so followers can pull the content while reading follow feed; keep the same content eligible for hot and recommendation sources.
-- [ ] Do not implement active-follower priority in v1; current design says skip.
+- [ ] Do not implement active-follower priority in v1; current design says skip, and OpenSpec task 3.6 is deferred/not implemented in this batch.
 - [ ] Add tests for normal author push, large author pull via author posts, and super-large author no-push plus pull/hot/recommendation availability.
-- [ ] Run `& $mvn -Dtest=*FollowFeed* test`.
+- [ ] Run `mvn -Dtest=*FollowFeed* test`.
 
 ## Task 3: Event Consumers
 
 **Files:**
 - Create: `src/main/java/com/tongji/recommendation/consumer/RecommendationContentConsumer.java`
 - Create: `src/main/java/com/tongji/recommendation/consumer/RecommendationFeedbackConsumer.java`
+- Modify: `src/main/java/com/tongji/profile/service/impl/ProfileServiceImpl.java`
+- Create: `src/main/java/com/tongji/profile/event/UserProfileUpdatedEvent.java`
+- Create: `src/main/java/com/tongji/profile/event/UserProfileEventProducer.java`
 
 - [ ] Consume `content_published` events only after successful publish.
 - [ ] Upsert Gorse item asynchronously; on failure, call `ReconciliationService.createTaskIfAbsent` when available.
 - [ ] Feed fanout uses the same successful publish event.
 - [ ] Consume comment feedback and counter feedback events.
 - [ ] Convert likes, favorites, comments, and follows into Gorse feedback types.
-- [ ] Consume user profile change events and sync user snapshot/profile fields to Gorse, matching active task 2.3.
+- [ ] Produce `user_profile_updated` events from profile update and avatar update paths in `ProfileServiceImpl`, through a small profile event producer.
+- [ ] Consume `user_profile_updated` events and sync user snapshot/profile fields to Gorse, matching active task 2.3.
 - [ ] Add tests for user profile update sync to Gorse. Do not mark `openspec/changes/add-recommendation-and-follow-feed/tasks.md` item 2.3 complete until this is implemented or explicitly clarified in OpenSpec.
 - [ ] Keep failures out of the user flow.
-- [ ] Run `& $mvn -Dtest=*Recommendation*Consumer* test`.
+- [ ] Run `mvn -Dtest=*Recommendation*Consumer* test`.
 
 ## Task 4: Feed Hydration and Mixing
 
@@ -114,7 +120,7 @@ Expected: `True`.
 - [ ] Deduplicate by post ID before hydration.
 - [ ] Let `KnowPostFeedService` enforce visibility/deleted filtering during hydration.
 - [ ] Add tests for fill order, deduplication, and visibility filtering.
-- [ ] Run `& $mvn -Dtest=*HomeFeedMixing* test`.
+- [ ] Run `mvn -Dtest=*HomeFeedMixing* test`.
 
 ## Task 5: API Migration
 
@@ -130,8 +136,8 @@ Expected: `True`.
 ## Task 6: Verification and OpenSpec Closure
 
 - [ ] Add verification tests for adapter fallback, normal/large/super-large fanout, mixing dedupe, and visibility filter.
-- [ ] Run `& $mvn -Dtest="*Recommendation*,*FollowFeed*,*HomeFeed*" test`.
-- [ ] Run `& $mvn test`.
+- [ ] Run `mvn -Dtest="*Recommendation*,*FollowFeed*,*HomeFeed*" test`.
+- [ ] Run `mvn test`.
 - [ ] Run `openspec status --change "add-recommendation-and-follow-feed" --json`.
 - [ ] Run `openspec validate add-recommendation-and-follow-feed --strict` if supported.
 - [ ] Mark completed checkboxes in `openspec/changes/add-recommendation-and-follow-feed/tasks.md` only after evidence exists.
