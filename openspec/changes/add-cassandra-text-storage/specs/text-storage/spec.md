@@ -35,7 +35,7 @@ Cassandra SHALL only support ID-based text lookup in the first version.
 #### Scenario: Query comments page
 
 - **WHEN** a client requests a page of comments
-- **THEN** the system queries MySQL/Redis for comment metadata and IDs
+- **THEN** the system queries MySQL for comment metadata and IDs
 - **AND** batch reads comment text from Cassandra by `comment_id`
 
 ### Requirement: Derived indexes SHALL be rebuildable

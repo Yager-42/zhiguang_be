@@ -13,7 +13,8 @@
 发布接口直接写 Kafka（不走 Canal Outbox），消费者批量消费落库。
 
 - **不复用** Canal Outbox 模式，避免中间临时表和 Canal 解析的额外链路
-- 幂等由消费者侧 MySQL 唯一索引保证（见决策 5）
+- 提交幂等先由 `pending_comments` 的 `(creator_id, client_request_id)` 唯一键保证，重复提交复用既有 `pendingCommentId`，不重复发送 Kafka
+- Consumer 侧 `comments` 的 `(creator_id, client_request_id)` 唯一键仅作为重复消息保护
 
 ### 3. 评论列表读路径：纯 MySQL 游标分页
 
@@ -26,12 +27,13 @@ v1 不加 Redis 缓存。`comments` 表建好索引（`post_id + status + create
 - MySQL 标记 `status = deleted`，Cassandra 正文硬删
 - 读接口检测 `status = deleted` 时返回占位符，不返回原始正文
 
-### 5. clientRequestId 幂等：MySQL 唯一索引
+### 5. clientRequestId 幂等：pending 提交去重 + Consumer 重复消息保护
 
-`comments` 表在 `client_request_id` 上建唯一索引。消费者写入时若触发 `DuplicateKeyException`，视为重复消息直接跳过（ack）。
+发布接口先按 `(creator_id, client_request_id)` 查 `pending_comments`。若已有记录，直接返回既有 `pendingCommentId`，不生成新 `comment_id`，也不再次发送 Kafka。
 
 - 持久保证，不依赖 Redis TTL 窗口
-- 比 Redis 去重更简单，无需维护额外 key 生命周期
+- 幂等发生在提交路径，避免重复请求进入异步写链路
+- Consumer 写 `comments` 时保留 `(creator_id, client_request_id)` 唯一键作为 Kafka 重复消息保护，重复消息直接跳过（ack）
 
 ### 6. 计数扩展：复用现有 SDS 结构
 
@@ -62,14 +64,16 @@ v1 不加 Redis 缓存。`comments` 表建好索引（`post_id + status + create
 ```
 客户端 POST /comments
   │
-  ├─ IdService.nextId(COMMENT) → comment_id = pendingCommentId
-  ├─ 写 pending_comment 状态表（status=pending）
+  ├─ 按 creator_id + clientRequestId 查 pending_comments
+  ├─ 已存在：复用 pendingCommentId 返回，不生成新 ID，不发送 Kafka
+  ├─ 不存在：IdService.nextId(COMMENT) → comment_id = pendingCommentId
+  ├─ 写 pending_comments 状态表（post_id、client_request_id、status=pending）
   └─ 发送到 comment-write 主题（包含 comment_id、clientRequestId、body）
        │
        ▼
   Comment Consumer（批量消费）
        ├─ 写 Cassandra comment_text_by_comment_id（body）
-       ├─ 写 MySQL comments（元数据，client_request_id 唯一索引去重）
+       ├─ 写 MySQL comments（元数据，(creator_id, client_request_id) 仅作重复消息保护）
        ├─ 更新 pending_comment 状态为 succeeded
        └─ 发布计数事件（帖子评论数 +1）
             │
@@ -104,19 +108,22 @@ CREATE TABLE comments (
   create_time       DATETIME(3)  NOT NULL,
   update_time       DATETIME(3)  NOT NULL,
   PRIMARY KEY (comment_id),
-  UNIQUE KEY uk_client_request_id (client_request_id),
+  UNIQUE KEY uk_comment_creator_client_request (creator_id, client_request_id),
   KEY idx_post_comments (post_id, status, create_time),
   KEY idx_root_replies  (root_id, status, create_time),
   KEY idx_creator       (creator_id, create_time)
 );
 
 CREATE TABLE pending_comments (
-  pending_comment_id BIGINT      NOT NULL,
-  creator_id         BIGINT      NOT NULL,
-  status             VARCHAR(16) NOT NULL DEFAULT 'pending', -- pending/succeeded/failed
-  create_time        DATETIME(3) NOT NULL,
-  update_time        DATETIME(3) NOT NULL,
-  PRIMARY KEY (pending_comment_id)
+  pending_comment_id BIGINT       NOT NULL,
+  post_id            BIGINT       NOT NULL,
+  creator_id         BIGINT       NOT NULL,
+  client_request_id  VARCHAR(64)  NOT NULL,
+  status             VARCHAR(16)  NOT NULL DEFAULT 'pending', -- pending/succeeded/failed
+  create_time        DATETIME(3)  NOT NULL,
+  update_time        DATETIME(3)  NOT NULL,
+  PRIMARY KEY (pending_comment_id),
+  UNIQUE KEY uk_creator_client_request (creator_id, client_request_id)
 );
 ```
 

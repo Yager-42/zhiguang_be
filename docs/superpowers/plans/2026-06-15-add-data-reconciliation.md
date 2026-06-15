@@ -1,6 +1,6 @@
 # Data Reconciliation Implementation Plan
 
-> **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` if subagents are available, or `superpowers:executing-plans` in the current session. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use `superpowers:subagent-driven-development` only when the user/environment has authorized subagents. Otherwise execute this single plan in the current session with `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a DB-backed reconciliation framework for fact-to-derived inconsistencies with polling, Redis locks, retry/backoff, dead tasks, checkpoint scans, stuck running recovery, and manual rerun APIs.
 
@@ -28,14 +28,13 @@ ID imports must use `com.tongji.common.id.IdService` and `com.tongji.common.id.I
 
 ## Command Setup
 
-Run before Maven commands:
+Run Maven commands from the repo root. The current workspace root is `/Volumes/lexar/revive/zhiguang_be`; on other machines, use that machine's repo root.
 
-```powershell
-$mvn = Join-Path $env:USERPROFILE 'Desktop\文档\.codex\tools\apache-maven-3.9.6\bin\mvn.cmd'
-Test-Path $mvn
+```bash
+mvn -version
 ```
 
-Expected: `True`.
+Windows PowerShell optional equivalent: `mvn.cmd -version` if `mvn.cmd` is on `PATH`.
 
 ## Files
 
@@ -60,7 +59,7 @@ Expected: `True`.
 - [ ] Create models and MyBatis mappers/XML for task, checkpoint, and error log.
 - [ ] Mapper must support `pollPending`, `markRunning`, `markSucceeded`, `markPendingRetry`, `markDead`, `resetDeadToPending`, `findStuckRunning`, `resetRunningToPending`, `existsActiveTask`, and filtered query.
 - [ ] Define mapper state semantics explicitly: `markRunning` is `pending -> running` CAS, `existsActiveTask` only treats `pending` and `running` as active, `resetDeadToPending` clears retry state for manual retry, and `findStuckRunning` is based on stale `updated_at`.
-- [ ] Run `& $mvn -DskipTests compile`.
+- [ ] Run `mvn -DskipTests compile`.
 
 ## Task 2: Reconciliation Service
 
@@ -74,7 +73,7 @@ Expected: `True`.
 - [ ] `createTaskIfAbsent` returns existing/no-op result if pending/running task already exists.
 - [ ] `dead -> pending` manual retry resets retry count and `next_execute_at`.
 - [ ] Add tests for duplicate prevention, manual retry, and target rerun.
-- [ ] Run `& $mvn -Dtest=ReconciliationServiceTest test`.
+- [ ] Run `mvn -Dtest=ReconciliationServiceTest test`.
 
 ## Task 3: Executor and Retry State Machine
 
@@ -92,7 +91,7 @@ Expected: `True`.
 - [ ] On failure at retry limit, mark `dead` and write `reconciliation_error_log`.
 - [ ] Reset stuck `running` tasks older than 10 minutes on a scheduled scan.
 - [ ] Add tests for success, retry, dead, lock skip, lost CAS, and exact retry delays `1, 2, 4, 8, 16` minutes across consecutive failures.
-- [ ] Run `& $mvn -Dtest=ReconciliationTaskExecutorTest test`.
+- [ ] Run `mvn -Dtest=ReconciliationTaskExecutorTest test`.
 
 ## Task 4: Concrete Reconcilers
 
@@ -109,7 +108,7 @@ Expected: `True`.
 - [ ] `cassandra_text` for comment records dead/operator-visible error if no source event or body exists.
 - [ ] `gorse_item_upsert`, `gorse_feedback`, and `follow_inbox` can be implemented after recommendation/feed classes exist; otherwise leave them unregistered and covered by task dead/error behavior.
 - [ ] Add smoke tests for at least ES, RAG, and Cassandra text.
-- [ ] Run `& $mvn -Dtest=ReconcilerTest test`.
+- [ ] Run `mvn -Dtest=ReconcilerTest test`.
 
 ## Task 5: Checkpointed Scans
 
@@ -127,7 +126,7 @@ Expected: `True`.
 - [ ] Reset checkpoint to `0` after completing a full pass.
 - [ ] Stuck `publishing` posts must respect publish attempt semantics: fail/surface retry work, never directly mark published.
 - [ ] Add checkpoint tests.
-- [ ] Run `& $mvn -Dtest=*ReconciliationScan* test`.
+- [ ] Run `mvn -Dtest=*ReconciliationScan* test`.
 
 ## Task 6: Failure Hooks and API
 
@@ -151,8 +150,8 @@ Expected: `True`.
 - [ ] Run state machine tests.
 - [ ] Run checkpoint tests.
 - [ ] Run at least three domain smoke tests.
-- [ ] Run `& $mvn -Dtest="*Reconciliation*" test`.
-- [ ] Run `& $mvn test`.
+- [ ] Run `mvn -Dtest="*Reconciliation*" test`.
+- [ ] Run `mvn test`.
 - [ ] Run `openspec status --change "add-data-reconciliation" --json`.
 - [ ] Run `openspec validate add-data-reconciliation --strict` if supported.
 - [ ] Mark completed checkboxes in `openspec/changes/add-data-reconciliation/tasks.md` only after evidence exists.

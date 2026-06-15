@@ -2,9 +2,9 @@
 
 ## 1. Data Model
 
-- [ ] 1.1 新增评论元数据表，包含 `comment_id`、`post_id`、`root_id`、`parent_id`、`creator_id`、`client_request_id`、状态、计数字段和时间；不新增 `content_key`，评论正文用 `comment_id` 直接查询 Cassandra。
+- [ ] 1.1 新增评论元数据表，包含 `comment_id`、`post_id`、`root_id`、`parent_id`、`creator_id`、`client_request_id`、状态、计数字段和时间，并用唯一键 `(creator_id, client_request_id)` 作为重复消息保护；不新增 `content_key`，评论正文用 `comment_id` 直接查询 Cassandra。
 - [ ] 1.2 为一级评论分页、二级回复分页、作者查询建立索引。
-- [ ] 1.3 新增评论提交状态表或状态字段，支持 pending/succeeded/failed 查询。
+- [ ] 1.3 新增 `pending_comments` 评论提交状态表，包含 `pending_comment_id`、`creator_id`、`post_id`、`client_request_id`、状态和时间，并用唯一键 `(creator_id, client_request_id)` 支持 pending/succeeded/failed 查询与提交幂等。
 
 ## 2. API
 
@@ -17,9 +17,9 @@
 ## 3. Async Write
 
 - [ ] 3.1 定义评论写入 Kafka 事件模型。
-- [ ] 3.2 发布接口写入 Kafka，并保证 `clientRequestId` 幂等。
+- [ ] 3.2 发布接口先按 `(creator_id, client_request_id)` 查找并复用已有 `pendingCommentId`；重复请求返回已有 pending/status，不重复写 Kafka。
 - [ ] 3.3 实现批量消费者，写 Cassandra 正文和 MySQL 元数据。
-- [ ] 3.4 实现失败重试、死信主题和失败状态回写。
+- [ ] 3.4 实现失败重试、死信主题和失败状态回写；消费者遇到 `(creator_id, client_request_id)` 唯一键 `DuplicateKeyException` 时视为已有评论/提交成功并 ack，不写出不同 `comment_id` 的孤儿 Cassandra 正文。
 
 ## 4. Counting and Interaction
 
