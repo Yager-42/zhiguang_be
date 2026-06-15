@@ -53,7 +53,9 @@ The follow feed SHALL be generated from local relation and publish events, not f
 
 - **WHEN** an author has at least 500,000 followers
 - **THEN** the system does not fanout push to follower inboxes
-- **AND** the post is available through pull, hot, and recommendation sources
+- **AND** the system records the post in `feed:author:posts:{authorId}` or an explicitly equivalent pull index
+- **AND** users can pull the post while reading their follow feed
+- **AND** the post remains eligible for hot and recommendation sources
 
 ### Requirement: Home feed SHALL mix multiple sources
 

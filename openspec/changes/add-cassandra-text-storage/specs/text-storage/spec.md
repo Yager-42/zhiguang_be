@@ -16,7 +16,7 @@ The system SHALL use Cassandra as the fact store for published post text and com
 
 - **WHEN** a comment or reply is accepted for persistence
 - **THEN** the system writes the text to Cassandra using `comment_id` as the primary lookup key
-- **AND** MySQL stores comment metadata and the Cassandra content key
+- **AND** MySQL stores comment metadata only; Cassandra lookup uses the same `comment_id` business ID
 
 ### Requirement: Media SHALL remain in object storage
 

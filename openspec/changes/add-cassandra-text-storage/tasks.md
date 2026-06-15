@@ -16,7 +16,7 @@
 
 - [ ] 3.1 定义 `TextStorageService`，支持保存、读取、批量读取、删除/软删正文。
 - [ ] 3.2 实现 `CassandraTextStorageService`。
-- [ ] 3.3 为发布正文和评论正文定义独立 key 规则。
+- [ ] 3.3 为发布正文和评论正文定义业务 ID 查询规则：帖子正文使用 `post_id`，评论/回复正文使用 `comment_id`，不新增 MySQL `content_key`。
 - [ ] 3.4 增加写失败、读失败、缺正文的异常类型。
 
 ## 4. Integration

@@ -49,7 +49,8 @@ The system SHALL store comment and reply text in Cassandra and metadata in MySQL
 
 - **WHEN** the client requests comments
 - **THEN** the system reads comment metadata from MySQL/Redis
-- **AND** batch reads text from Cassandra
+- **AND** batch reads text from Cassandra by `comment_id`
+- **AND** MySQL does not store a separate Cassandra `content_key`
 
 ### Requirement: Comments SHALL support soft deletion
 
