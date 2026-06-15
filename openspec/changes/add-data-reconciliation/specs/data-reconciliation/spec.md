@@ -40,8 +40,14 @@ The system SHALL support scheduled scans, failure-generated tasks, manual reruns
 
 #### Scenario: Derived task fails
 
-- **WHEN** a publish pipeline ES indexing step fails after publish
+- **WHEN** a publish-derived ES indexing step fails after the post has reached `published`
 - **THEN** a reconciliation task is created for ES indexing
+
+#### Scenario: Publishing attempt is stuck
+
+- **WHEN** a post remains in `publishing` beyond the configured timeout
+- **THEN** reconciliation or startup repair marks the related attempt as failed or schedules operator-visible retry work
+- **AND** it does not publish the post without rerunning the critical publish flow
 
 #### Scenario: Manual rerun
 

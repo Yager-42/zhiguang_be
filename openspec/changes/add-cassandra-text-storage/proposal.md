@@ -15,7 +15,7 @@
 ## Impact
 
 - 新增 Cassandra 本地环境、配置、客户端和健康检查。
-- 发布流程需要将文字正文写入 Cassandra，再由 pipeline 解析并构建 ES/RAG。
+- 发布关键流程需要在 attempt 被受理后将文字正文写入 Cassandra；写入成功后才能把帖子从 `publishing` 推进到 `published`，随后由 ES/RAG 派生任务从 Cassandra 读取正文。
 - 评论系统需要将评论正文写入 Cassandra，MySQL 评论表只保存正文 key 和元数据。
 - 数据对齐服务需要检测 MySQL 元数据与 Cassandra 正文是否缺失或不一致。
 

@@ -15,7 +15,7 @@
 ## Impact
 
 - 新增 `reconciliation_task`、`reconciliation_checkpoint`、`reconciliation_error_log`。
-- 发布 pipeline、推荐事件、ES/RAG 任务失败时需要创建补偿任务。
+- 发布派生任务、推荐事件、ES/RAG 任务失败时需要创建补偿任务；发布关键事实失败由 publish attempt 状态机处理。
 - 需要为各领域实现差异检测和修复器。
 - 管理接口需要支持按目标 ID 或任务 ID 手动重跑。
 

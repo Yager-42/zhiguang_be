@@ -430,3 +430,129 @@ pending -> running -> failed -> dead
 | `split-to-microservices` | Gateway、Nacos、服务边界拆分 | 后续演进，不作为第一批实现 |
 
 **依赖顺序：** Cassandra/Leaf -> 评论 -> 发布 Pipeline -> 推荐/关注流 -> 数据对齐；微服务拆分独立作为后续演进。
+
+---
+
+# 11.pdf 架构对齐追问
+
+本节记录围绕 `11.pdf` 的架构思想如何引入当前项目的后续追问。目标是把 PDF 中的分层、限流熔断、线程池隔离、幂等、状态机、异步补偿和基础设施隔离，转成当前项目可执行的 OpenSpec 方案。
+
+## Q26. 架构对齐是否作为独立 change，还是并入现有 changes
+
+**问题：** `11.pdf` 的架构对齐要新建一个总控型 OpenSpec change，还是把它拆散并入现有 `eventize-publish-pipeline`、`add-recommendation-and-follow-feed`、`add-data-reconciliation` 等 changes？
+
+**推荐答案：** 新建一个总控型 change：`align-publish-relation-architecture`，只负责架构边界、分层约束、基础设施护栏和发布/关系链路的第一批对齐；已有业务 changes 继续保留为能力落地 change。
+
+**最终选择：** 要，新建独立 OpenSpec change：`align-publish-relation-architecture`。
+
+**原因：** `11.pdf` 的重点是架构方法，而不是单一业务功能。如果直接塞进已有 changes，分层、限流熔断、幂等、线程池隔离、降级和补偿这些横切约束容易分散。单独建一个对齐 change，可以把它作为后续实现的架构约束，不替代已有业务 changes。
+
+## Q27. 是否强制引入 Manager 编排层
+
+**问题：** 当前项目没有成体系的 `Manager` 层，`KnowPostServiceImpl` 和 `RelationServiceImpl` 直接承担了入口编排、事务、缓存、Outbox、异步触发和部分抗高并发逻辑。对齐 `11.pdf` 时，是否要强制引入 `Manager` 编排层？
+
+**推荐答案：** 要。第一版在发布链路和关系链路引入 `Manager` 层，Controller/Service 接口只作为入口适配，Manager 负责业务编排、事务边界、降级兜底、限流熔断入口和调用 Helper/DAO/Publisher。Helper/Strategy/DAO 只做单一职责能力。
+
+**最终选择：** 要。发布链路和关系链路都强制引入 `Manager` 编排层。
+
+**原因：** 如果不引入 Manager 层，只在现有 ServiceImpl 里继续拆 Helper，PDF 的核心分层价值会落不下去。Manager 层能把“请求编排”和“具体能力”切开，也便于后续微服务拆分时把 Manager 转成应用服务边界。
+
+## Q28. Controller 是否直接调用 Manager
+
+**问题：** 引入 Manager 层后，Controller 是继续依赖现有 `KnowPostService` / `RelationService` 接口，由 ServiceImpl 委托 Manager；还是直接改 Controller 依赖 `KnowPostManager` / `RelationManager`？
+
+**推荐答案：** 允许破坏性修改后，Controller 直接依赖 `KnowPostManager` / `RelationManager`，删除或迁移原有 `KnowPostService` / `RelationService` 接口和 Impl。Manager 成为唯一应用编排层，避免 Service 与 Manager 两层职责重叠。
+
+**最终选择：** 允许破坏性修改。Controller 直接依赖 Manager，原 Service 层不再保留为兼容门面。
+
+**原因：** `KnowPostService` 和 `RelationService` 当前主要只被对应 Controller 与 Impl 使用，引用面较小。保留 Service 门面会形成 `Controller -> Service -> Manager` 的重复层，容易让实现者继续把业务写回 ServiceImpl。既然允许破坏性修改，就应直接收敛为 `Controller -> Manager -> Helper/DAO/Publisher`。
+
+**目标结构：**
+
+```text
+Controller
+  -> Manager        # 唯一业务编排层：事务、状态机、幂等、限流熔断、降级、调用顺序
+     -> Helper      # 单项业务能力：缓存、对象验收、正文解析、权限检查等
+     -> DAO/Mapper  # 数据访问
+     -> Publisher   # Outbox/Kafka/派生事件
+     -> Client      # 外部依赖适配，如 ES/RAG/Cassandra/MinIO/Gorse
+```
+
+## Q29. 发布接口是否改成异步受理语义
+
+**问题：** 发布链路是否从当前 `204 No Content` 改成 `202 Accepted + publishAttemptId`，并补充状态查询/重试接口？
+
+**推荐答案：** 改成 `202 Accepted + publishAttemptId`。发布请求先完成关键校验与主事实落库，随后返回受理结果；派生任务异步执行，状态通过查询接口确认。
+
+**最终选择：** 改。发布接口改成 `202 Accepted + publishAttemptId`，并补充发布状态查询/重试接口。
+
+**原因：** `11.pdf` 的发布流水线本身就是“主事实与派生任务分离”的模型。改成 `202` 后，`Manager`、状态机、补偿任务、重试和前端乐观展示都能统一。如果继续保留 `204`，就会把异步事实和同步响应混在一起，后续 spec 会不够干净。
+
+## Q30. 线程池是否按链路隔离
+
+**问题：** 当前项目只有一个全局 `taskExecutor`，Canal bridge 也在用它。对齐 `11.pdf` 时，线程池要不要按链路隔离，例如发布、关系、异步消费分别使用独立线程池？
+
+**推荐答案：** 要，按链路隔离。发布链路、关系事件处理、Canal/Outbox 消费、后台补偿任务分别使用独立线程池或至少独立 executor bean，不共享一个全局业务池。
+
+**最终选择：** 要。发布链路、关系事件处理、Canal/Outbox 消费、后台补偿任务按链路隔离线程池。
+
+**原因：** `11.pdf` 的核心防护之一就是资源隔离。现在一个全局线程池会让 Canal、后台补偿、异步索引和业务派生任务互相影响。链路级隔离能防止某条高峰链路拖垮其他链路，也能让降级策略、拒绝策略和监控指标按链路单独观测。
+
+## Q31. 是否引入统一熔断层
+
+**问题：** 当前项目已有 Redisson 限流，但没有统一熔断层。对齐 `11.pdf` 时，是否要引入统一熔断层，例如通过 Resilience4j 或同等机制包住外部依赖调用？
+
+**推荐答案：** 要。限流、熔断、线程隔离应该一起进入架构约束。外部依赖调用（ES、RAG、Cassandra、MinIO、Gorse、Canal/Kafka 适配边界）需要统一的熔断与降级层。
+
+**最终选择：** 要。统一熔断层选择 Sentinel；业务代码通过本地 `ResilienceGuard`/`DegradeGuard` 类接口隔离 Sentinel，不直接把 Manager 绑死在 Sentinel 注解上。
+
+**原因：** `11.pdf` 里限流和熔断是两层护栏。当前项目只有 Redisson 限流，缺少系统性熔断，就会把外部依赖异常直接传回主链路。引入统一熔断层后，Manager 才能把“关键主事实”和“可降级派生动作”区别对待，并记录清晰的 fallback 语义。
+
+**组件选择说明：** 当前项目没有 Sentinel/Resilience4j 依赖。考虑国内高并发项目表达、热点参数限流、熔断降级和控制台生态，第一版选择 Sentinel。Nacos 只作为未来微服务/配置中心方向，不作为本次 Sentinel 落地前置依赖。
+
+## Q32. 发布与关系链路是否要求显式幂等键
+
+**问题：** `11.pdf` 强调客户端传 `idempotentKey`，服务端在锁内检查并缓存结果。当前项目要不要在发布与关系链路也要求显式幂等键？
+
+**推荐答案：** 发布链路要求幂等键，关系链路不要求客户端显式传幂等键。发布接口改成 `202 + publishAttemptId` 后，客户端重试、网络超时和重复点击都需要稳定拿到同一个 attempt；关系链路可以用 `fromUserId + toUserId + action` 与数据库唯一约束/状态更新实现天然幂等。
+
+**最终选择：** 按推荐执行。发布链路要求客户端显式传 `idempotentKey`；关系链路不要求客户端显式传幂等键，使用 `fromUserId + toUserId + action`、数据库唯一约束和状态更新保证幂等。
+
+**原因：** 发布是长链路，涉及对象验收、状态机、派生任务和重试，显式幂等键能避免重复创建 attempt。关注/取关是短链路，本身具有明确目标状态，强制客户端传 key 会增加 API 成本但收益有限。
+
+## Q33. OpenSpec changes 队列如何去重与排序
+
+**问题：** `openspec/changes` 里已有 `add-leaf-id-service`、`add-cassandra-text-storage`、`eventize-publish-pipeline`、`align-publish-relation-architecture`、`add-comment-system`、`add-recommendation-and-follow-feed`、`add-data-reconciliation`、`split-to-microservices`。新增 `align-publish-relation-architecture` 后，哪些 change 冗余，哪些应合并，执行顺序怎么排？
+
+**推荐答案：** 不直接删除 `eventize-publish-pipeline`，而是把它拆分并降级为“发布业务状态机/派生任务细节”的补充来源；由 `align-publish-relation-architecture` 作为发布与关系链路的第一主线 change。`split-to-microservices` 不进入第一批实现，只作为架构约束/roadmap。执行顺序按“基础设施 -> 架构边界 -> 正文事实源 -> 发布业务细节 -> 评论 -> 推荐/关注流 -> 对账 -> 微服务规划”推进。
+
+**最终选择：** 同意按推荐方案整理。若吸收时出现语义冲突，需要先询问用户意见。当前已确认的关键冲突是发布 `202` 语义：采用真正异步 attempt-based，`202 Accepted` 只表示请求已受理，不表示帖子已经发布成功；关键发布流程失败时通过 attempt/status 暴露失败并进入 retry。
+
+当前建议执行以下清理与排序：
+
+```text
+0. 队列清理
+   - 保留 align-publish-relation-architecture 作为主线
+   - 将 eventize-publish-pipeline 拆分吸收，不再作为独立完整 change 执行
+   - 将 split-to-microservices 标记为 roadmap/architecture-only，不参与第一批代码落地
+
+1. add-leaf-id-service
+2. align-publish-relation-architecture
+3. add-cassandra-text-storage
+4. 从 eventize-publish-pipeline 抽取剩余发布业务细节，合并进 align 或新建更小 change
+5. add-comment-system
+6. add-recommendation-and-follow-feed
+7. add-data-reconciliation
+8. split-to-microservices
+```
+
+**原因：**
+
+- 当前代码已经有 `SnowflakeIdGenerator`，但只服务知文，关系 Outbox 还在用 `ThreadLocalRandom`，发布 attempt、评论、对账都需要统一 ID，所以 `add-leaf-id-service` 是低耦合且应先做的基础设施。
+- 当前发布接口仍是 `204 No Content`，`KnowPostServiceImpl.publish()` 直接把草稿改为 `published`，同时同步/旁路触发 Outbox 和 RAG，缺少 attempt、幂等键、状态查询、重试与主事实/派生任务边界。因此 `align-publish-relation-architecture` 应先建立 Manager、状态契约、线程池隔离和 Sentinel Guard。
+- `eventize-publish-pipeline` 与 `align-publish-relation-architecture` 在 `202 Accepted`、`publishAttemptId`、状态查询、重试、关键步骤/派生步骤分离上重复；但它还包含 CAS SQL、`publishing` 卡死恢复、`content_published` 主题、派生消费者与 `reconciliation_task` 写入策略，这些不能丢，应作为细节被吸收。
+- Cassandra 是正文事实源，评论和发布正文都依赖它；但 Cassandra 的真实写入应在 Manager/状态机边界稳定后接入，否则会把正文存储失败语义塞回旧 Service。
+- 评论系统依赖 `IdService` 和 `TextStorageService`，并会产生新的计数、推荐反馈和对账目标，所以应排在 Leaf 与 Cassandra 之后。
+- 推荐/关注流依赖发布事件、关系事件和评论反馈稳定后再做，否则 Gorse item、feedback、follow inbox 的补偿边界会反复改。
+- 对账系统应在主要事实源和派生源出现后做。它可以先有框架，但完整 reconcilers 要等 Cassandra、评论、发布派生、推荐/关注流落地后才有真实目标。
+- 微服务拆分现在只是约束：禁止跨边界 JOIN、外部依赖走 Adapter、跨边界写入走事件、ID 通过 namespace 生成。不应现在拆服务或引入 Gateway/Nacos。
