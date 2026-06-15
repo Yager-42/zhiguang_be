@@ -31,6 +31,13 @@ The recommendation adapter SHALL not hydrate post details or decide final mixed 
 
 The follow feed SHALL be generated from local relation and publish events, not from Gorse.
 
+#### Scenario: Published content event is consumed
+
+- **WHEN** a post successfully transitions from `publishing` to `published`
+- **THEN** the system emits or consumes a `content_published` event
+- **AND** follow feed fanout decisions are based on that event
+- **AND** failed publish attempts do not enter follower inboxes or author post sets
+
 #### Scenario: Normal author publishes
 
 - **WHEN** an author with fewer than 10,000 followers publishes

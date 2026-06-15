@@ -21,9 +21,10 @@
 
 ## 4. Integration
 
-- [ ] 4.1 调整知文发布请求，使文字正文进入 Cassandra，媒体附件继续走 MinIO。
+- [ ] 4.1 将 publish attempt 的关键发布流程接入 `TextStorageService`，使文字正文进入 Cassandra，媒体附件继续走 MinIO。
 - [ ] 4.2 调整搜索索引与 RAG 索引构建，从 Cassandra 读取文字正文。
 - [ ] 4.3 为评论系统提供正文写入与批量读取能力。
+- [ ] 4.4 确保 Cassandra 写失败会使 attempt 失败并阻止 `publishing -> published`，而不是改变初始 `202 Accepted` 语义。
 
 ## 5. Verification
 
