@@ -16,7 +16,7 @@
 
 ## 3. Integration
 
-- [ ] 3.1 `post_id`、`comment_id`、`pending_comment_id`、`publish_attempt_id`、`outbox_id` 使用 Snowflake。
+- [ ] 3.1 `post_id`、`comment_id`、`pending_comment_id`、`publish_attempt_id`、`relation_id`（如 `following.id`）、`outbox_id` 使用 Snowflake；关系行 ID 使用 `IdNamespace.RELATION`，关系 outbox ID 使用 `IdNamespace.OUTBOX_EVENT`，不得复用 `OUTBOX_EVENT` 生成关系行 ID。
 - [ ] 3.2 `reconciliation_task_id`、`admin_operation_id`、`audit_log_id` 使用 Segment。
 - [ ] 3.3 保持 `user_id` 当前自增策略不变。
 

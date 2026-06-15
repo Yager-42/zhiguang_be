@@ -56,7 +56,7 @@ feed:
 |--------|------|-----------|
 | < 10,000 | 普通作者 | Push：写入所有粉丝 `feed:inbox:{userId}` |
 | 10,000 – 499,999 | 大 V | Pull：写入 `feed:author:posts:{authorId}`，粉丝读 Feed 时主动拉取 |
-| ≥ 500,000 | 超级大 V | 不 push、不写 author posts；内容通过热点和 Gorse 推荐覆盖 |
+| ≥ 500,000 | 超级大 V | 不 push 到粉丝 inbox；写入 `feed:author:posts:{authorId}` 或等价 pull 索引，供关注流 pull，同时可进入热点和 Gorse 推荐 |
 
 ---
 
@@ -65,7 +65,7 @@ feed:
 | Key | 类型 | 说明 | 上限 |
 |-----|------|------|------|
 | `feed:inbox:{userId}` | ZSet | 普通作者 fanout push 收件箱，score=publish_time | 500 条 |
-| `feed:author:posts:{authorId}` | ZSet | 大V 最近发布集合，供粉丝 pull，score=publish_time | 500 条 |
+| `feed:author:posts:{authorId}` | ZSet | 大V/超级大V 最近发布集合，供粉丝 pull，score=publish_time | 500 条 |
 
 ---
 
@@ -80,7 +80,7 @@ publish pipeline → content-published Kafka
        └─ fanout push / 写 author posts（按作者分级）
               ├─ 普通作者：ZADD feed:inbox:{粉丝id} + ZREMRANGEBYRANK 裁剪
               ├─ 大V：ZADD feed:author:posts:{authorId} + 裁剪
-              └─ 超级大V：跳过
+              └─ 超级大V：不写粉丝 inbox；ZADD feed:author:posts:{authorId} + 裁剪，并继续进入热点/Gorse 推荐
 ```
 
 ### 行为反馈投递 Gorse
@@ -98,7 +98,7 @@ GET /api/v1/knowposts/feed
   │
   ├─ 1. 取关注流候选
   │    ├─ 普通作者内容：读 feed:inbox:{userId} ZSet
-  │    └─ 大V内容：读 feed:author:posts:{authorId}（遍历关注的大V）
+  │    └─ 大V/超级大V内容：读 feed:author:posts:{authorId} 或等价 pull 索引（遍历关注的大V/超级大V）
   │
   ├─ 2. Gorse 推荐候选（不足时补）
   │    └─ RecommendationEngine.recommend(userId, count)

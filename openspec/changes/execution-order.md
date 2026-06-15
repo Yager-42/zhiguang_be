@@ -19,7 +19,7 @@
 
 | 变更 | 说明 |
 |------|------|
-| `add-leaf-id-service` | 统一 ID 生成接口，替换散落的 Snowflake/随机 ID；为 post、publish attempt、comment、outbox、reconciliation 提供 namespace。 |
+| `add-leaf-id-service` | 统一 ID 生成接口，替换散落的 Snowflake/随机 ID；为 post、publish attempt、comment、relation、outbox、reconciliation 提供 namespace。 |
 
 ### 阶段 2 — 发布/关系架构主线
 

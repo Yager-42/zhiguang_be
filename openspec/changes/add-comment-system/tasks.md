@@ -2,7 +2,7 @@
 
 ## 1. Data Model
 
-- [ ] 1.1 新增评论元数据表，包含 `comment_id`、`post_id`、`root_id`、`parent_id`、`creator_id`、`content_key`、状态、计数字段和时间。
+- [ ] 1.1 新增评论元数据表，包含 `comment_id`、`post_id`、`root_id`、`parent_id`、`creator_id`、`client_request_id`、状态、计数字段和时间；不新增 `content_key`，评论正文用 `comment_id` 直接查询 Cassandra。
 - [ ] 1.2 为一级评论分页、二级回复分页、作者查询建立索引。
 - [ ] 1.3 新增评论提交状态表或状态字段，支持 pending/succeeded/failed 查询。
 
