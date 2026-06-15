@@ -22,7 +22,7 @@
 - [ ] 3.2 实现 `feed:author:posts:{authorId}` 作者最近发布集合。
 - [ ] 3.3 实现普通作者 fanout push。
 - [ ] 3.4 实现大 V fanout pull。
-- [ ] 3.5 实现超级大 V 只进入 pull/推荐。
+- [ ] 3.5 实现超级大 V 不 push 到粉丝 inbox，但写入 `feed:author:posts:{authorId}` 或等价 pull 索引，并保持热点/推荐可见。
 - [ ] 3.6 实现最近 30 天活跃粉丝优先 push。
 
 ## 4. Feed Mixing
