@@ -11,10 +11,11 @@
 ## 2. Triggers
 
 - [ ] 2.1 实现定时扫描任务。
-- [ ] 2.2 发布 pipeline 派生任务失败时生成补偿任务。
+- [ ] 2.2 发布成功后的派生任务失败时生成补偿任务。
 - [ ] 2.3 Gorse、ES、RAG 投递失败时生成补偿任务。
 - [ ] 2.4 服务启动后扫描卡住的 `publishing`、`processing`、`running` 任务。
 - [ ] 2.5 提供手动重跑接口。
+- [ ] 2.6 扫描卡住的 `publishing` 帖子时遵守 publish attempt 状态机，只标记失败或生成重试入口，不直接重放发布。
 
 ## 3. Reconcilers
 
