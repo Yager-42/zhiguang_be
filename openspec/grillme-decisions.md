@@ -556,3 +556,31 @@ Controller
 - 推荐/关注流依赖发布事件、关系事件和评论反馈稳定后再做，否则 Gorse item、feedback、follow inbox 的补偿边界会反复改。
 - 对账系统应在主要事实源和派生源出现后做。它可以先有框架，但完整 reconcilers 要等 Cassandra、评论、发布派生、推荐/关注流落地后才有真实目标。
 - 微服务拆分现在只是约束：禁止跨边界 JOIN、外部依赖走 Adapter、跨边界写入走事件、ID 通过 namespace 生成。不应现在拆服务或引入 Gateway/Nacos。
+
+## Q34. 被删除的旧 6.09/6.11 plan 如何处理
+
+**问题：** `f330bce6a93b5c0fa8aeed33f7fa873b871348fd` 删除了 9 份旧 plan：
+
+- `2026-06-09-add-cassandra-text-storage.md`
+- `2026-06-09-add-leaf-id-service.md`
+- `2026-06-11-add-cassandra-text-storage.md`
+- `2026-06-11-add-comment-system.md`
+- `2026-06-11-add-data-reconciliation.md`
+- `2026-06-11-add-leaf-id-service.md`
+- `2026-06-11-add-recommendation-and-follow-feed.md`
+- `2026-06-11-eventize-publish-pipeline.md`
+- `2026-06-11-split-to-microservices.md`
+
+这些旧 plan 是基于旧版 changes 写的；但 `11.pdf` 的架构思想应当结合当前 changes 和可用的旧 plan 任务拆解一起落地。是否要恢复旧 plan，还是只把旧 plan 作为参考来重写新版 plan？
+
+**推荐答案：** 不恢复旧 plan 到当前 `docs/superpowers/plans` 执行入口；从 `f330bce^` 读取旧 plan 作为参考资料，以当前 `openspec/changes` 为事实源，重新生成新版 plan。
+
+**最终选择：** 选择推荐方案。旧 plan 只作为参考，不恢复为当前执行入口；新版 plan 以当前 changes、`11.pdf` 决策和旧 plan 中仍有效的任务拆解共同生成。
+
+**原因：** 旧 plan 携带旧版 OpenSpec 决策，直接恢复会把已经更新或归档的语义重新带回执行入口，尤其是 publish pipeline、Manager/Service 边界、Sentinel guard、Cassandra 事实源和 reconciliation 边界。把旧 plan 作为参考可以保留其中有价值的测试与任务粒度，同时避免旧决策污染当前 changes。
+## Q35. 11.pdf 如何融入当前 changes 和 plan
+
+**问题：** 如果希望使用 `11.pdf` 融入其他 plan，在当前 `openspec/changes` 的指导下，应该直接改每个 plan，还是先建立跨 change 的映射和约束？
+**推荐答案：** 先建立跨 change 的 `11.pdf` 映射/约束文档，再按映射轻量调整各 plan。`changes` 是权威需求边界，`11.pdf` 是架构思想来源，plan 是执行脚本。
+**最终选择：** 选择推荐方案：先做跨 change 映射/约束文档，再按映射轻量调整各 plan。
+**原因：** 这样可以避免每个 plan 都各自解释 `11.pdf`，也避免把同一类架构思想重复塞进多个 change。`11.pdf` 只决定架构边界、执行约束和落点归属；如果它和当前 change 冲突，以当前 change 为准，无法判断时再询问用户。

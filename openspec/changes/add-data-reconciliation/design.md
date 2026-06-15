@@ -19,7 +19,11 @@ Spring `@Scheduled` 定期扫描 `status='pending'` 且 `next_execute_at <= NOW(
 | 4 | 8 分钟 |
 | 5 | 16 分钟 → 超出进入 `dead` |
 
-`next_execute_at = NOW() + 2^(retry_count) 分钟`
+`retry_count` 存储已经记录的失败次数。一次失败发生时，先读取本次失败前的 `old_retry_count`：
+
+- 当 `old_retry_count < 5` 时，`delay_minutes = 2^(old_retry_count)`，然后把 `retry_count` 更新为 `old_retry_count + 1`，并设置 `next_execute_at = NOW() + delay_minutes 分钟`。
+- 因此连续失败的等待时间明确为 1、2、4、8、16 分钟；也可以在更新后用 `2^(new_retry_count - 1)` 得到相同延迟。
+- 当 `old_retry_count >= 5` 时，不再调度下一次执行，任务进入 `dead` 并记录错误日志。
 
 ### 3. 定时扫描：游标分页 + Checkpoint
 
@@ -54,10 +58,10 @@ pending
 running
   ├─ 执行成功 ──────────────────────────▶ succeeded（终态）
   │
-  ├─ 执行失败，retry_count < 5
-  │    └─ retry_count++，计算 next_execute_at ──▶ pending
+  ├─ 执行失败，old_retry_count < 5
+  │    └─ 按 old_retry_count 计算 1/2/4/8/16 分钟延迟，再 retry_count++ ──▶ pending
   │
-  ├─ 执行失败，retry_count = 5 ──────────▶ dead
+  ├─ 执行失败，old_retry_count >= 5 ─────▶ dead
   │
   └─ 超时未完成（定时扫描检测）──────────▶ pending（retry_count 不变）
 
@@ -149,9 +153,10 @@ CREATE TABLE reconciliation_error_log (
          ├─ 对每个任务抢 Redis 锁 recon:lock:{taskId}
          │    ├─ 抢到 → UPDATE status='running' → 执行修复器
          │    │         ├─ 成功 → UPDATE status='succeeded'，释放锁
-         │    │         └─ 失败 → retry_count++，UPDATE status='pending'，
-         │    │                   next_execute_at=指数退避，释放锁
-         │    │                   retry_count=5 → UPDATE status='dead'，写 error_log
+         │    │         └─ 失败 → old_retry_count < 5 时按旧值计算指数退避，
+         │    │                   UPDATE status='pending'，retry_count=old+1，
+         │    │                   next_execute_at=NOW()+1/2/4/8/16 分钟，释放锁
+         │    │                   old_retry_count >= 5 时 UPDATE status='dead'，写 error_log
          │    └─ 未抢到 → 跳过（其他实例正在执行）
 
 定时扫描（每5分钟）

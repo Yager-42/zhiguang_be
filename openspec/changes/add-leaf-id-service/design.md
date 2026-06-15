@@ -7,6 +7,7 @@
 删除现有 `SnowflakeIdGenerator` 具体类，统一由 `IdService` 内部实现 Snowflake 逻辑。
 
 - `KnowPostServiceImpl` 改注入 `IdService`，使用 `IdNamespace.POST` / `IdNamespace.OUTBOX_EVENT`
+- `RelationServiceImpl` 关系行 ID（例如 `following.id`）从 `ThreadLocalRandom` 迁移到 `IdService.nextId(IdNamespace.RELATION)`；关系 outbox ID 使用 `IdNamespace.OUTBOX_EVENT`，不得复用 `OUTBOX_EVENT` 生成关系行 ID。
 - 不保留原类，不做包装层，彻底清理硬编码配置
 
 ### 2. workerId / datacenterId：application.yml 静态配置
@@ -31,6 +32,7 @@ public enum IdNamespace {
     COMMENT(IdMode.SNOWFLAKE),
     PENDING_COMMENT(IdMode.SNOWFLAKE),
     PUBLISH_ATTEMPT(IdMode.SNOWFLAKE),
+    RELATION(IdMode.SNOWFLAKE),
     OUTBOX_EVENT(IdMode.SNOWFLAKE),
 
     // Segment：低频后台任务
@@ -119,6 +121,8 @@ INSERT INTO leaf_alloc (biz_tag, max_id, step, description) VALUES
 | 模块 | 旧方式 | 新方式 |
 |------|--------|--------|
 | `KnowPostServiceImpl` | `SnowflakeIdGenerator.nextId()` | `idService.nextId(POST / OUTBOX_EVENT)` |
+| `RelationServiceImpl` 关系行（如 `following.id`） | `ThreadLocalRandom.current().nextLong(...)` | `idService.nextId(RELATION)` |
+| `RelationServiceImpl` 关系 outbox | 随机 / 本地生成 | `idService.nextId(OUTBOX_EVENT)` |
 | 评论系统 | 无 | `idService.nextId(COMMENT / PENDING_COMMENT)` |
 | Publish Pipeline | 无 | `idService.nextId(PUBLISH_ATTEMPT)` |
 | 对账系统 | 无 | `idService.nextId(RECONCILIATION_TASK)` |
