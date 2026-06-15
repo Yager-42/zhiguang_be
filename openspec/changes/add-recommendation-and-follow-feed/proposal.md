@@ -17,7 +17,7 @@
 
 - 新增 Gorse 配置、客户端、Adapter 和失败降级策略。
 - 新增关注流 inbox、author posts、active followers Redis 数据结构。
-- 发布 pipeline 需要投递 `content_published`。
+- 发布 pipeline 需要在帖子成功进入 `published` 后投递 `content_published`。
 - 评论/点赞/收藏/关注需要投递用户反馈事件。
 - 数据对齐服务需要补投 Gorse 物品、用户和反馈数据。
 

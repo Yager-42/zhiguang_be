@@ -2,13 +2,14 @@
 
 ## 关键决策
 
-### 1. 正文写入时机：Publish 时
+### 1. 正文写入时机：Publish attempt 的关键流程
 
-文字正文在**发布时**由 publish pipeline 同步写入 Cassandra，草稿阶段不写。
+文字正文在 publish attempt 被受理后的**关键发布流程**中写入 Cassandra，草稿阶段不写。初始发布 HTTP 请求已按 `align-publish-relation-architecture` 变更返回 `202 Accepted + publishAttemptId`；Cassandra 写入属于后台关键流程的一部分。
 
 - 客户端仍通过 presigned PUT 上传文件到 MinIO（流程不变）
 - `/content/confirm` 流程不变，MySQL 继续存 `content_object_key`
-- 发布时 pipeline 从 MinIO 读取文字内容，同步写入 Cassandra
+- publish attempt 进入 `publishing` 后，关键流程从 MinIO 读取文字内容并写入 Cassandra
+- Cassandra 写入成功后，发布状态机才能继续推进到 `published`
 - 之后 ES/RAG pipeline 从 Cassandra 读取正文构建索引
 
 ### 2. MinIO 文字文件：废弃但不删
@@ -39,12 +40,12 @@ MySQL **不新增** `content_key` 列，直接用现有业务 ID 查询 Cassandr
 
 写入审计和补偿扫描由 `add-data-reconciliation` 统一负责，v1 不重复建日志表。
 
-### 6. Cassandra 写失败：阻断发布
+### 6. Cassandra 写失败：阻断发布完成
 
-发布时 Cassandra 写入失败 → **整个发布请求失败**，返回错误，客户端重试。
+发布关键流程中 Cassandra 写入失败 -> attempt 标记为 `failed`，帖子标记为 `publish_failed`，客户端通过发布状态接口看到失败并走 retry。它不会改变初始 publish HTTP 请求已经返回 `202 Accepted` 的事实。
 
 - Cassandra 是正文事实源，缺失则 ES/RAG 无法构建，发布内容实际不可用
-- 与 `eventize-publish-pipeline` 的"校验通过才发布"原则一致
+- 与 `align-publish-relation-architecture` 的 attempt 状态机一致：关键事实缺失时不得执行 `publishing -> published`
 
 ### 7. 删除行为：硬删
 
@@ -81,9 +82,11 @@ MySQL **不新增** `content_key` 列，直接用现有业务 ID 查询 Cassandr
          ▼
        Publish 请求
          │
-         ├─ 从 MinIO 读取文字内容
-         ├─ 写入 Cassandra post_text_by_post_id（失败则阻断）
-         └─ MySQL 更新 status = published
+         ├─ 接受 attempt，返回 202 + publishAttemptId
+         └─ 后台关键发布流程
+              ├─ 从 MinIO 读取文字内容
+              ├─ 写入 Cassandra post_text_by_post_id（失败则 attempt=failed/post=publish_failed）
+              └─ MySQL 更新 status = published
                │
                ▼
             Kafka 事件 → ES/RAG pipeline → 从 Cassandra 读正文 → 建索引

@@ -10,10 +10,11 @@
 
 ## 2. Gorse Event Integration
 
-- [ ] 2.1 发布内容时同步或异步 upsert Gorse item。
+- [ ] 2.1 消费 `content_published` 事件并异步 upsert Gorse item。
 - [ ] 2.2 用户点赞、收藏、评论、关注时投递 feedback。
 - [ ] 2.3 用户资料变化时同步用户画像字段。
 - [ ] 2.4 增加推荐事件失败补偿任务。
+- [ ] 2.5 确保只有成功 `publishing -> published` 的帖子触发 Gorse item 和关注流 fanout。
 
 ## 3. Follow Feed
 
