@@ -67,6 +67,15 @@ public interface RelationMapper {
                         @Param("toUserId") Long toUserId);
 
     /**
+     * 查询当前有效关注关系的主键 ID。
+     * @param fromUserId 发起者
+     * @param toUserId 目标者
+     * @return 有效关系主键，若不存在则为空
+     */
+    Long findActiveFollowingId(@Param("fromUserId") Long fromUserId,
+                               @Param("toUserId") Long toUserId);
+
+    /**
      * 列出关注用户ID（偏移分页）。
      * @param fromUserId 发起者
      * @param limit 上限
@@ -122,4 +131,3 @@ public interface RelationMapper {
      */
     int countFollowerActive(@Param("toUserId") Long toUserId);
 }
-

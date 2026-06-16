@@ -2,22 +2,56 @@ package com.tongji.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
 
 @Configuration
 public class ThreadPoolConfig {
+
     @Bean(name = "taskExecutor")
     public ThreadPoolTaskExecutor taskExecutor() {
+        return buildExecutor(10, 50, 200, 30, "task-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
+    }
+
+    @Bean(name = "publishExecutor")
+    public TaskExecutor publishExecutor() {
+        return buildExecutor(8, 16, 100, 60, "publish-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
+    }
+
+    @Bean(name = "relationEventExecutor")
+    public TaskExecutor relationEventExecutor() {
+        return buildExecutor(4, 8, 200, 60, "relation-event-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
+    }
+
+    @Bean(name = "canalOutboxExecutor")
+    public TaskExecutor canalOutboxExecutor() {
+        return buildExecutor(2, 4, 50, 60, "canal-outbox-", new ThreadPoolExecutor.AbortPolicy(), 60);
+    }
+
+    @Bean(name = "reconciliationExecutor")
+    public TaskExecutor reconciliationExecutor() {
+        return buildExecutor(2, 4, 100, 60, "reconciliation-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
+    }
+
+    private ThreadPoolTaskExecutor buildExecutor(int corePoolSize,
+                                                 int maxPoolSize,
+                                                 int queueCapacity,
+                                                 int keepAliveSeconds,
+                                                 String threadNamePrefix,
+                                                 RejectedExecutionHandler rejectionHandler,
+                                                 int awaitTerminationSeconds) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(10);
-        executor.setMaxPoolSize(50);
-        executor.setQueueCapacity(200);
-        executor.setKeepAliveSeconds(30);
-        executor.setThreadNamePrefix("NoteExecutor-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setCorePoolSize(corePoolSize);
+        executor.setMaxPoolSize(maxPoolSize);
+        executor.setQueueCapacity(queueCapacity);
+        executor.setKeepAliveSeconds(keepAliveSeconds);
+        executor.setThreadNamePrefix(threadNamePrefix);
+        executor.setRejectedExecutionHandler(rejectionHandler);
         executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(60);
+        executor.setAwaitTerminationSeconds(awaitTerminationSeconds);
         executor.initialize();
         return executor;
     }

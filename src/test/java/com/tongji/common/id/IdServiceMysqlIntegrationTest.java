@@ -5,6 +5,7 @@ import com.tongji.common.id.segment.SegmentAllocator;
 import com.tongji.common.id.segment.SegmentIdGenerator;
 import com.tongji.common.id.segment.SegmentIdProperties;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
@@ -17,6 +18,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.test.context.TestPropertySource;
 
 import java.util.HashSet;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "id.segment.wait-timeout-ms=500",
         "id.segment.preload-threads=1"
 })
+@EnabledIf("mysqlReachable")
 class IdServiceMysqlIntegrationTest {
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -64,6 +68,15 @@ class IdServiceMysqlIntegrationTest {
 
         long afterMaxId = leafAllocMapper.selectByBizTag("reconciliation_task").getMaxId();
         assertThat(afterMaxId).isGreaterThan(beforeMaxId);
+    }
+
+    static boolean mysqlReachable() {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress("127.0.0.1", 3306), 500);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     @Configuration
