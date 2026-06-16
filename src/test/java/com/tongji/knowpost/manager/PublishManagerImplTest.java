@@ -9,13 +9,19 @@ import com.tongji.counter.service.UserCounterService;
 import com.tongji.knowpost.api.dto.PublishAcceptedResponse;
 import com.tongji.knowpost.api.dto.PublishStatusResponse;
 import com.tongji.knowpost.mapper.KnowPostMapper;
+import com.tongji.knowpost.model.KnowPost;
 import com.tongji.knowpost.publish.ContentPublishedPublisher;
 import com.tongji.knowpost.publish.PublishAttempt;
 import com.tongji.knowpost.publish.PublishAttemptMapper;
+import com.tongji.storage.MinioStorageService;
+import com.tongji.storage.config.StorageProperties;
+import com.tongji.storage.text.TextStorageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -26,10 +32,7 @@ import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -42,12 +45,16 @@ class PublishManagerImplTest {
     private KnowPostMapper knowPostMapper;
     @Mock
     private PublishAttemptMapper publishAttemptMapper;
+    @Mock
+    private TextStorageService textStorageService;
 
     private CapturingTaskExecutor capturingTaskExecutor;
     private CapturingTaskExecutor reconciliationTaskExecutor;
     private StubPublishAttemptService publishAttemptService;
     private RecordingContentPublishedPublisher contentPublishedPublisher;
     private RecordingResilienceGuard resilienceGuard;
+    private StubMinioStorageService minioStorageService;
+    private StubRestTemplate restTemplate;
     private PublishManager manager;
 
     @BeforeEach
@@ -58,14 +65,17 @@ class PublishManagerImplTest {
         publishAttemptService = new StubPublishAttemptService();
         contentPublishedPublisher = new RecordingContentPublishedPublisher();
         resilienceGuard = new RecordingResilienceGuard();
-        manager = new PublishManagerImpl(
-                publishAttemptService,
-                contentPublishedPublisher,
-                userCounterService,
-                resilienceGuard,
-                capturingTaskExecutor,
-                reconciliationTaskExecutor
-        );
+        minioStorageService = new StubMinioStorageService();
+        restTemplate = new StubRestTemplate();
+        when(knowPostMapper.findById(9L)).thenReturn(KnowPost.builder()
+                .id(9L)
+                .creatorId(7L)
+                .contentUrl("https://cdn.example.com/posts/9.md")
+                .contentSha256("sha-9")
+                .status("publishing")
+                .build());
+        restTemplate.responseBody = "post-body";
+        manager = newManager(capturingTaskExecutor, reconciliationTaskExecutor);
     }
 
     @Test
@@ -78,6 +88,7 @@ class PublishManagerImplTest {
         assertThat(publishAttemptService.acceptResult).isNull();
         assertThat(contentPublishedPublisher.derivedFailures).isEmpty();
         verifyNoInteractions(userCounterService);
+        verifyNoInteractions(textStorageService);
     }
 
     @Test
@@ -89,6 +100,7 @@ class PublishManagerImplTest {
         assertThat(response.publishAttemptId()).isEqualTo("88");
         assertThat(capturingTaskExecutor.tasks).hasSize(1);
         assertThat(publishAttemptService.completedCalls).isZero();
+        verifyNoInteractions(textStorageService);
     }
 
     @Test
@@ -100,18 +112,18 @@ class PublishManagerImplTest {
         assertThat(response.publishAttemptId()).isEqualTo("88");
         assertThat(capturingTaskExecutor.tasks).isEmpty();
         assertThat(publishAttemptService.completedCalls).isZero();
+        verifyNoInteractions(textStorageService);
+    }
+
+    @Test
+    void publishManagerDoesNotExposePublicSixArgumentBypassConstructor() {
+        assertThat(java.util.Arrays.stream(PublishManagerImpl.class.getConstructors()))
+                .noneMatch(constructor -> constructor.getParameterCount() == 6);
     }
 
     @Test
     void acceptPublishMarksAttemptFailedWhenCriticalWorkThrows() {
-        PublishManager directManager = new PublishManagerImpl(
-                publishAttemptService,
-                contentPublishedPublisher,
-                userCounterService,
-                resilienceGuard,
-                Runnable::run,
-                Runnable::run
-        );
+        PublishManager directManager = newManager(Runnable::run, Runnable::run);
         RuntimeException failure = new RuntimeException("critical failure");
         publishAttemptService.acceptResult = new PublishAcceptance(attempt(88L, 9L, 7L), true);
         publishAttemptService.completeFailure = failure;
@@ -125,14 +137,7 @@ class PublishManagerImplTest {
 
     @Test
     void acceptPublishRecordsDerivedFailureWithoutRollingBackPublishedState() {
-        PublishManager directManager = new PublishManagerImpl(
-                publishAttemptService,
-                contentPublishedPublisher,
-                userCounterService,
-                resilienceGuard,
-                Runnable::run,
-                Runnable::run
-        );
+        PublishManager directManager = newManager(Runnable::run, Runnable::run);
         publishAttemptService.acceptResult = new PublishAcceptance(attempt(88L, 9L, 7L), true);
         doThrow(new RuntimeException("counter unavailable")).when(userCounterService).incrementPosts(7L, 1);
 
@@ -176,6 +181,7 @@ class PublishManagerImplTest {
         assertThat(response.publishAttemptId()).isEqualTo("88");
         assertThat(capturingTaskExecutor.tasks).hasSize(1);
         assertThat(publishAttemptService.completedCalls).isZero();
+        verifyNoInteractions(textStorageService);
     }
 
     @Test
@@ -186,6 +192,7 @@ class PublishManagerImplTest {
         PublishStatusResponse status = manager.getPublishStatus(7L, 9L, 88L);
 
         assertThat(status).isSameAs(expected);
+        verifyNoInteractions(textStorageService);
     }
 
     @Test
@@ -193,14 +200,7 @@ class PublishManagerImplTest {
         publishAttemptService.recoveredCount = 2;
         String callerThread = Thread.currentThread().getName();
         ThreadRecordingTaskExecutor recordingExecutor = new ThreadRecordingTaskExecutor("reconciliation-test");
-        PublishManager threadedManager = new PublishManagerImpl(
-                publishAttemptService,
-                contentPublishedPublisher,
-                userCounterService,
-                resilienceGuard,
-                capturingTaskExecutor,
-                recordingExecutor
-        );
+        PublishManager threadedManager = newManager(capturingTaskExecutor, recordingExecutor);
 
         int recovered = ((PublishManagerImpl) threadedManager).recoverStuckPublishing();
 
@@ -209,18 +209,12 @@ class PublishManagerImplTest {
         assertThat(publishAttemptService.recoverThreadName).startsWith("reconciliation-test");
         assertThat(publishAttemptService.recoverThreadName).isNotEqualTo(callerThread);
         assertThat(recordingExecutor.executedTasks).isEqualTo(1);
+        verifyNoInteractions(textStorageService);
     }
 
     @Test
     void acceptPublishPersistsFallbackWhenDerivedFailurePublicationAlsoFails() {
-        PublishManager directManager = new PublishManagerImpl(
-                publishAttemptService,
-                contentPublishedPublisher,
-                userCounterService,
-                resilienceGuard,
-                Runnable::run,
-                Runnable::run
-        );
+        PublishManager directManager = newManager(Runnable::run, Runnable::run);
         publishAttemptService.acceptResult = new PublishAcceptance(attempt(88L, 9L, 7L), true);
         doThrow(new RuntimeException("counter unavailable")).when(userCounterService).incrementPosts(7L, 1);
         contentPublishedPublisher.derivedFailureException = new RuntimeException("outbox unavailable");
@@ -236,6 +230,21 @@ class PublishManagerImplTest {
             assertThat(fallback.nextRetryHint).isNotNull();
         });
         assertThat(publishAttemptService.failedAttemptId).isNull();
+    }
+
+    private PublishManager newManager(TaskExecutor publishExecutor, TaskExecutor reconciliationExecutor) {
+        return new PublishManagerImpl(
+                publishAttemptService,
+                contentPublishedPublisher,
+                userCounterService,
+                resilienceGuard,
+                publishExecutor,
+                reconciliationExecutor,
+                textStorageService,
+                knowPostMapper,
+                minioStorageService,
+                restTemplate
+        );
     }
 
     private static PublishAttempt attempt(Long attemptId, Long postId, Long creatorId) {
@@ -276,6 +285,21 @@ class PublishManagerImplTest {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException(exception);
             }
+        }
+    }
+
+    private static final class StubRestTemplate extends RestTemplate {
+        private String responseBody;
+
+        @Override
+        public <T> T getForObject(String url, Class<T> responseType, Object... uriVariables) throws RestClientException {
+            return responseType.cast(responseBody);
+        }
+    }
+
+    private static final class StubMinioStorageService extends MinioStorageService {
+        private StubMinioStorageService() {
+            super(new StorageProperties());
         }
     }
 
