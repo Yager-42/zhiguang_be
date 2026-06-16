@@ -2,15 +2,8 @@ package com.tongji.relation.service.impl;
 
 import com.tongji.relation.mapper.RelationMapper;
 import com.tongji.relation.service.RelationService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tongji.common.id.IdNamespace;
-import com.tongji.common.id.IdService;
-import com.tongji.relation.event.RelationEvent;
-import com.tongji.relation.outbox.OutboxMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import com.tongji.user.mapper.UserMapper;
 import com.tongji.user.domain.User;
 import com.tongji.profile.api.dto.ProfileResponse;
@@ -33,19 +26,14 @@ import org.springframework.data.redis.core.RedisCallback;
 /**
  * 关系服务实现。
  * 设计要点：
- * - 写路径：关注/取消关注经 Lua 令牌桶限流后入库，并以 Outbox 事件异步驱动粉丝表更新与缓存维护；
  * - 读路径：优先读取 Redis ZSet（关注/粉丝）并按需回填，支持偏移与游标两种分页；大V用户启用本地 Top 缓存；
  * - 计数：用户维度计数（关注/粉丝等）通过独立服务维护，阈值判断如“大V”基于 SDS 段值；
- * - 并发与一致性：回填后设置短 TTL，降低陈旧风险；Outbox 事件消费者提供幂等与去重保障。
+ * - 并发与一致性：回填后设置短 TTL，降低陈旧风险。
  */
 @Service
 public class RelationServiceImpl implements RelationService {
     private final RelationMapper mapper;
-    private final OutboxMapper outboxMapper;
     private final StringRedisTemplate redis;
-    private final DefaultRedisScript<Long> tokenScript;
-    private final ObjectMapper objectMapper;
-    private final IdService idService;
     private final Cache<Long, List<Long>> flwsTopCache;
     private final Cache<Long, List<Long>> fansTopCache;
     private final UserMapper userMapper;
@@ -54,89 +42,17 @@ public class RelationServiceImpl implements RelationService {
     /**
      * 关系服务实现构造函数。
      * @param mapper 关系表数据访问
-     * @param outboxMapper Outbox 事件写入访问
      * @param redis Redis 客户端
-     * @param objectMapper JSON 序列化器
+     * @param userMapper 用户数据访问
      */
     public RelationServiceImpl(RelationMapper mapper,
-                               OutboxMapper outboxMapper,
                                StringRedisTemplate redis,
-                               ObjectMapper objectMapper,
-                               IdService idService,
                                UserMapper userMapper) {
         this.mapper = mapper;
-        this.outboxMapper = outboxMapper;
         this.redis = redis;
-        this.objectMapper = objectMapper;
-        this.idService = idService;
-        this.tokenScript = new DefaultRedisScript<>();
-        this.tokenScript.setResultType(Long.class);
-        this.tokenScript.setScriptText(TOKEN_BUCKET_LUA);
         this.flwsTopCache = Caffeine.newBuilder().maximumSize(1000).expireAfterWrite(Duration.ofMinutes(10)).build();
         this.fansTopCache = Caffeine.newBuilder().maximumSize(1000).expireAfterWrite(Duration.ofMinutes(10)).build();
         this.userMapper = userMapper;
-    }
-
-    /**
-     * 关注操作，限流通过令牌桶，并写入 Outbox 以异步构建缓存与粉丝表。
-     * @param fromUserId 发起关注的用户ID
-     * @param toUserId 被关注的用户ID
-     * @return 是否关注成功
-     */
-    @Override
-    @Transactional
-    public boolean follow(long fromUserId, long toUserId) {
-        // Lua 脚本令牌桶限流
-        Long ok = redis.execute(tokenScript, List.of("rl:follow:" + fromUserId), "100", "1");
-        if (ok == 0L) {
-            return false;
-        }
-
-        long id = idService.nextId(IdNamespace.RELATION);
-        int inserted = mapper.insertFollowing(id, fromUserId, toUserId, 1);
-
-        if (inserted > 0) {
-            try {
-                Long outId = idService.nextId(IdNamespace.OUTBOX_EVENT);
-                String payload = objectMapper.writeValueAsString(new RelationEvent("FollowCreated", fromUserId, toUserId, id));
-                outboxMapper.insert(outId, "following", id, "FollowCreated", payload);
-            } catch (Exception ignored) {}
-
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * 取消关注操作，并写入 Outbox 事件。
-     * @param fromUserId 发起取消关注的用户ID
-     * @param toUserId 被取消关注的用户ID
-     * @return 是否取消成功
-     */
-    @Override
-    @Transactional
-    public boolean unfollow(long fromUserId, long toUserId) {
-        int updated = mapper.cancelFollowing(fromUserId, toUserId);
-        if (updated > 0) {
-            try {
-                Long outId = idService.nextId(IdNamespace.OUTBOX_EVENT);
-                String payload = objectMapper.writeValueAsString(new RelationEvent("FollowCanceled", fromUserId, toUserId, null));
-                outboxMapper.insert(outId, "following", null, "FollowCanceled", payload);
-            } catch (Exception ignored) {}
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * 判断是否已关注。
-     * @param fromUserId 关注发起者
-     * @param toUserId 被关注者
-     * @return 是否已关注
-     */
-    @Override
-    public boolean isFollowing(long fromUserId, long toUserId) {
-        return mapper.existsFollowing(fromUserId, toUserId) > 0;
     }
 
     /**
@@ -181,24 +97,6 @@ public class RelationServiceImpl implements RelationService {
                 fansTopCache,
                 userId
         );
-    }
-
-    /**
-     * 查询双方关系状态。
-     * @param userId 当前用户ID
-     * @param otherUserId 对方用户ID
-     * @return 三态关系：following/followedBy/mutual
-     */
-    @Override
-    public Map<String, Boolean> relationStatus(long userId, long otherUserId) {
-        boolean following = isFollowing(userId, otherUserId);
-        boolean followedBy = isFollowing(otherUserId, userId);
-        boolean mutual = following && followedBy;
-        Map<String, Boolean> m = new LinkedHashMap<>();
-        m.put("following", following);
-        m.put("followedBy", followedBy);
-        m.put("mutual", mutual);
-        return m;
     }
 
     /**
@@ -422,24 +320,4 @@ public class RelationServiceImpl implements RelationService {
         for (String s : allSet) all.add(Long.valueOf(s));
         cache.put(userId, all);
     }
-
-    private static final String TOKEN_BUCKET_LUA = """
-            
-            local key = KEYS[1]
-            local capacity = tonumber(ARGV[1])
-            local rate = tonumber(ARGV[2])
-            local now = redis.call('TIME')[1]
-            local last = redis.call('HGET', key, 'last')
-            local tokens = redis.call('HGET', key, 'tokens')
-            if not last then last = now; tokens = capacity end
-            local elapsed = tonumber(now) - tonumber(last)
-            local add = elapsed * rate
-            tokens = math.min(capacity, tonumber(tokens) + add)
-            if tokens < 1 then redis.call('HSET', key, 'last', now); redis.call('HSET', key, 'tokens', tokens); return 0 end
-            tokens = tokens - 1
-            redis.call('HSET', key, 'last', now)
-            redis.call('HSET', key, 'tokens', tokens)
-            redis.call('PEXPIRE', key, 60000)
-            return 1
-            """;
 }

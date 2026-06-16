@@ -6,12 +6,17 @@ import com.tongji.knowpost.api.dto.KnowPostDraftCreateResponse;
 import com.tongji.knowpost.api.dto.KnowPostPatchRequest;
 import com.tongji.knowpost.api.dto.KnowPostTopPatchRequest;
 import com.tongji.knowpost.api.dto.KnowPostVisibilityPatchRequest;
+import com.tongji.knowpost.api.dto.PublishAcceptedResponse;
+import com.tongji.knowpost.api.dto.PublishRequest;
+import com.tongji.knowpost.api.dto.PublishStatusResponse;
 import com.tongji.knowpost.api.dto.FeedPageResponse;
+import com.tongji.knowpost.manager.PublishManager;
 import com.tongji.knowpost.service.KnowPostService;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -27,6 +32,7 @@ public class KnowPostController {
     private final KnowPostService service;
     private final KnowPostFeedService feedService;
     private final JwtService jwtService;
+    private final PublishManager publishManager;
 
     /**
      * 创建草稿，返回新 ID。默认类型为 image_text。
@@ -66,11 +72,29 @@ public class KnowPostController {
      * 发布帖子（状态置为 published）。
      */
     @PostMapping("/{id}/publish")
-    public ResponseEntity<Void> publish(@PathVariable("id") long id,
-                                        @AuthenticationPrincipal Jwt jwt) {
+    public ResponseEntity<PublishAcceptedResponse> publish(@PathVariable("id") long id,
+                                                           @Valid @RequestBody PublishRequest request,
+                                                           @AuthenticationPrincipal Jwt jwt) {
         long userId = jwtService.extractUserId(jwt);
-        service.publish(userId, id);
-        return ResponseEntity.noContent().build();
+        PublishAcceptedResponse response = publishManager.acceptPublish(userId, id, request.idempotentKey());
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+    }
+
+    @GetMapping("/{id}/publish/status")
+    public PublishStatusResponse publishStatus(@PathVariable("id") long id,
+                                               @RequestParam("attemptId") long attemptId,
+                                               @AuthenticationPrincipal Jwt jwt) {
+        long userId = jwtService.extractUserId(jwt);
+        return publishManager.getPublishStatus(userId, id, attemptId);
+    }
+
+    @PostMapping("/{id}/publish/{attemptId}/retry")
+    public ResponseEntity<PublishAcceptedResponse> retryPublish(@PathVariable("id") long id,
+                                                                @PathVariable("attemptId") long attemptId,
+                                                                @AuthenticationPrincipal Jwt jwt) {
+        long userId = jwtService.extractUserId(jwt);
+        PublishAcceptedResponse response = publishManager.retryPublish(userId, id, attemptId);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 
     /**

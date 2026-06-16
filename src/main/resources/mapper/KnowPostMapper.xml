@@ -19,6 +19,8 @@
         <result property="imgUrls" column="img_urls" />
         <result property="videoUrl" column="video_url" />
         <result property="status" column="status" />
+        <result property="publishAttemptId" column="publish_attempt_id" />
+        <result property="publishFailedReason" column="publish_failed_reason" />
         <result property="createTime" column="create_time" />
         <result property="updateTime" column="update_time" />
         <result property="publishTime" column="publish_time" />
@@ -69,6 +71,59 @@
         UPDATE know_posts
         SET status = 'published', publish_time = NOW(), update_time = NOW()
         WHERE id = #{id} AND creator_id = #{creatorId}
+    </update>
+
+    <update id="startPublishing">
+        UPDATE know_posts
+        SET status = 'publishing',
+            publish_attempt_id = #{publishAttemptId},
+            publish_failed_reason = NULL,
+            update_time = NOW()
+        WHERE id = #{id}
+          AND creator_id = #{creatorId}
+          AND status = 'draft'
+    </update>
+
+    <update id="completePublish">
+        UPDATE know_posts
+        SET status = 'published',
+            publish_time = NOW(),
+            publish_failed_reason = NULL,
+            update_time = NOW()
+        WHERE id = #{id}
+          AND creator_id = #{creatorId}
+          AND status = 'publishing'
+          AND publish_attempt_id = #{publishAttemptId}
+    </update>
+
+    <update id="failPublish">
+        UPDATE know_posts
+        SET status = 'publish_failed',
+            publish_failed_reason = #{publishFailedReason},
+            update_time = NOW()
+        WHERE id = #{id}
+          AND creator_id = #{creatorId}
+          AND status = 'publishing'
+          AND publish_attempt_id = #{publishAttemptId}
+    </update>
+
+    <select id="findPublishStatus" resultMap="KnowPostResultMap">
+        SELECT *
+        FROM know_posts
+        WHERE id = #{id}
+          AND creator_id = #{creatorId}
+        LIMIT 1
+    </select>
+
+    <update id="retryPublishing">
+        UPDATE know_posts
+        SET status = 'publishing',
+            publish_failed_reason = NULL,
+            update_time = NOW()
+        WHERE id = #{id}
+          AND creator_id = #{creatorId}
+          AND status = 'publish_failed'
+          AND publish_attempt_id = #{publishAttemptId}
     </update>
 
     <!-- 设置置顶 -->

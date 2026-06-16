@@ -31,6 +31,8 @@ public class KnowPost {
     private String imgUrls;
     private String videoUrl;
     private String status;
+    private Long publishAttemptId;
+    private String publishFailedReason;
     private Instant createTime;
     private Instant updateTime;
     private Instant publishTime;

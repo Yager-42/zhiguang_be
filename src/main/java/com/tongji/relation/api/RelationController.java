@@ -1,8 +1,9 @@
 package com.tongji.relation.api;
 
-import com.tongji.relation.service.RelationService;
 import com.tongji.auth.token.JwtService;
 import com.tongji.profile.api.dto.ProfileResponse;
+import com.tongji.relation.manager.RelationManager;
+import com.tongji.relation.service.RelationService;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,13 +24,15 @@ import java.nio.charset.StandardCharsets;
 @RestController
 @RequestMapping("/api/v1/relation")
 public class RelationController {
+    private final RelationManager relationManager;
     private final RelationService relationService;
     private final JwtService jwtService;
     private final StringRedisTemplate redis;
     private final com.tongji.counter.service.UserCounterService userCounterService;
     private final com.tongji.relation.mapper.RelationMapper relationMapper;
 
-    public RelationController(RelationService relationService, JwtService jwtService, StringRedisTemplate redis, com.tongji.counter.service.UserCounterService userCounterService, com.tongji.relation.mapper.RelationMapper relationMapper) {
+    public RelationController(RelationManager relationManager, RelationService relationService, JwtService jwtService, StringRedisTemplate redis, com.tongji.counter.service.UserCounterService userCounterService, com.tongji.relation.mapper.RelationMapper relationMapper) {
+        this.relationManager = relationManager;
         this.relationService = relationService;
         this.jwtService = jwtService;
         this.redis = redis;
@@ -46,7 +49,7 @@ public class RelationController {
     @PostMapping("/follow")
     public boolean follow(@RequestParam("toUserId") long toUserId, @AuthenticationPrincipal Jwt jwt) {
         long uid = jwtService.extractUserId(jwt);
-        return relationService.follow(uid, toUserId);
+        return relationManager.follow(uid, toUserId).success();
     }
 
     /**
@@ -58,7 +61,7 @@ public class RelationController {
     @PostMapping("/unfollow")
     public boolean unfollow(@RequestParam("toUserId") long toUserId, @AuthenticationPrincipal Jwt jwt) {
         long uid = jwtService.extractUserId(jwt);
-        return relationService.unfollow(uid, toUserId);
+        return relationManager.unfollow(uid, toUserId).success();
     }
 
     /**
@@ -70,7 +73,7 @@ public class RelationController {
     @GetMapping("/status")
     public Map<String, Boolean> status(@RequestParam("toUserId") long toUserId, @AuthenticationPrincipal Jwt jwt) {
         long uid = jwtService.extractUserId(jwt);
-        return relationService.relationStatus(uid, toUserId);
+        return relationManager.status(uid, toUserId);
     }
 
     /**
