@@ -3,6 +3,8 @@ package com.tongji.relation.service.impl;
 import com.tongji.relation.mapper.RelationMapper;
 import com.tongji.relation.service.RelationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.common.id.IdNamespace;
+import com.tongji.common.id.IdService;
 import com.tongji.relation.event.RelationEvent;
 import com.tongji.relation.outbox.OutboxMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -22,7 +24,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.sql.Timestamp;
 import java.util.Date;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntFunction;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -44,6 +45,7 @@ public class RelationServiceImpl implements RelationService {
     private final StringRedisTemplate redis;
     private final DefaultRedisScript<Long> tokenScript;
     private final ObjectMapper objectMapper;
+    private final IdService idService;
     private final Cache<Long, List<Long>> flwsTopCache;
     private final Cache<Long, List<Long>> fansTopCache;
     private final UserMapper userMapper;
@@ -60,11 +62,13 @@ public class RelationServiceImpl implements RelationService {
                                OutboxMapper outboxMapper,
                                StringRedisTemplate redis,
                                ObjectMapper objectMapper,
+                               IdService idService,
                                UserMapper userMapper) {
         this.mapper = mapper;
         this.outboxMapper = outboxMapper;
         this.redis = redis;
         this.objectMapper = objectMapper;
+        this.idService = idService;
         this.tokenScript = new DefaultRedisScript<>();
         this.tokenScript.setResultType(Long.class);
         this.tokenScript.setScriptText(TOKEN_BUCKET_LUA);
@@ -88,12 +92,12 @@ public class RelationServiceImpl implements RelationService {
             return false;
         }
 
-        long id = ThreadLocalRandom.current().nextLong(Long.MAX_VALUE);
+        long id = idService.nextId(IdNamespace.RELATION);
         int inserted = mapper.insertFollowing(id, fromUserId, toUserId, 1);
 
         if (inserted > 0) {
             try {
-                Long outId = ThreadLocalRandom.current().nextLong(Long.MAX_VALUE);
+                Long outId = idService.nextId(IdNamespace.OUTBOX_EVENT);
                 String payload = objectMapper.writeValueAsString(new RelationEvent("FollowCreated", fromUserId, toUserId, id));
                 outboxMapper.insert(outId, "following", id, "FollowCreated", payload);
             } catch (Exception ignored) {}
@@ -115,7 +119,7 @@ public class RelationServiceImpl implements RelationService {
         int updated = mapper.cancelFollowing(fromUserId, toUserId);
         if (updated > 0) {
             try {
-                Long outId = ThreadLocalRandom.current().nextLong(Long.MAX_VALUE);
+                Long outId = idService.nextId(IdNamespace.OUTBOX_EVENT);
                 String payload = objectMapper.writeValueAsString(new RelationEvent("FollowCanceled", fromUserId, toUserId, null));
                 outboxMapper.insert(outId, "following", null, "FollowCanceled", payload);
             } catch (Exception ignored) {}

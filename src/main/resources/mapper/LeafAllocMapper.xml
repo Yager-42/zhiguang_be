@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.common.id.segment.LeafAllocMapper">
+    <update id="updateMaxId">
+        UPDATE leaf_alloc
+        SET max_id = max_id + step
+        WHERE biz_tag = #{bizTag}
+    </update>
+
+    <select id="selectByBizTag" resultType="com.tongji.common.id.segment.LeafAlloc">
+        SELECT biz_tag AS bizTag,
+               max_id AS maxId,
+               step AS step
+        FROM leaf_alloc
+        WHERE biz_tag = #{bizTag}
+    </select>
+</mapper>
