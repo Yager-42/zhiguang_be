@@ -163,7 +163,7 @@ Windows PowerShell optional equivalent: `mvn.cmd -version` if `mvn.cmd` is on `P
 - [ ] Verify active Leaf implementation and accepted OpenSpec include the accepted relation row namespace:
 
 ```bash
-rg -n "RELATION|relation row" openspec/changes/add-leaf-id-service/design.md openspec/changes/add-leaf-id-service/specs/id-service/spec.md openspec/changes/add-leaf-id-service/tasks.md src/main/java/com/tongji/common/id/IdNamespace.java
+rg -n "RELATION|relation row" openspec/changes/archive/2026-06-16-add-leaf-id-service/design.md openspec/specs/id-service/spec.md docs/superpowers/plans/2026-06-15-add-leaf-id-service.md src/main/java/com/tongji/common/id/IdNamespace.java
 ```
 
 Expected: both OpenSpec and implementation show `RELATION` as the accepted Snowflake namespace for relation row IDs.

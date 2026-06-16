@@ -174,37 +174,6 @@ public class KnowPostServiceImpl implements KnowPostService {
     }
 
     /**
-     * 发布草稿，设置状态与发布时间。
-     */
-    @Transactional
-    public void publish(long creatorId, long id) {
-        int updated = mapper.publish(id, creatorId);
-
-        if (updated == 0) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "草稿不存在或无权限");
-        }
-        try {
-            userCounterService.incrementPosts(creatorId, 1);
-        } catch (Exception ignored) {}
-
-        // 写入 Outbox 事件，驱动搜索索引增量更新
-        try {
-            long outId = idService.nextId(IdNamespace.OUTBOX_EVENT);
-            String payload = objectMapper.writeValueAsString(Map.of("entity", "knowpost", "op", "upsert", "id", id));
-            outboxMapper.insert(outId, "knowpost", id, "KnowPostPublished", payload);
-        } catch (Exception e) {
-            log.warn("Outbox event after publish failed, post {}: {}", id, e.getMessage());
-        }
-
-        // 发布成功后触发一次预索引，减少首次问答冷启动
-        try {
-            ragIndexService.ensureIndexed(id);
-        } catch (Exception e) {
-            log.warn("Pre-index after publish failed, post {}: {}", id, e.getMessage());
-        }
-    }
-
-    /**
      * 设置置顶。
      */
     @Transactional

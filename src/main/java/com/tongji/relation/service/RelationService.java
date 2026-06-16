@@ -1,35 +1,13 @@
 package com.tongji.relation.service;
 
 import java.util.List;
-import java.util.Map;
 import com.tongji.profile.api.dto.ProfileResponse;
 
 /**
  * 关系服务接口。
- * 能力：关注/取消关注、关系查询、关注/粉丝列表（偏移与游标），以及用户资料视图的聚合组装。
+ * 能力：关注/粉丝读取、分页查询，以及用户资料视图聚合。
  */
 public interface RelationService {
-    /**
-     * 关注操作。
-     * @param fromUserId 发起关注的用户ID
-     * @param toUserId 被关注的用户ID
-     * @return 是否关注成功
-     */
-    boolean follow(long fromUserId, long toUserId);
-    /**
-     * 取消关注。
-     * @param fromUserId 发起取消的用户ID
-     * @param toUserId 被取消的用户ID
-     * @return 是否取消成功
-     */
-    boolean unfollow(long fromUserId, long toUserId);
-    /**
-     * 判断是否已关注。
-     * @param fromUserId 关注发起者
-     * @param toUserId 被关注者
-     * @return 是否已关注
-     */
-    boolean isFollowing(long fromUserId, long toUserId);
     /**
      * 获取关注列表（偏移分页）。
      * @param userId 用户ID
@@ -46,13 +24,6 @@ public interface RelationService {
      * @return 粉丝用户ID列表
      */
     List<Long> followers(long userId, int limit, int offset);
-    /**
-     * 查询双方关系三态。
-     * @param userId 当前用户ID
-     * @param otherUserId 对方用户ID
-     * @return following/followedBy/mutual 三态
-     */
-    Map<String, Boolean> relationStatus(long userId, long otherUserId);
     /**
      * 游标分页关注列表。
      * @param userId 用户ID
@@ -90,4 +61,3 @@ public interface RelationService {
      */
     List<ProfileResponse> followersProfiles(long userId, int limit, int offset, Long cursor);
 }
-
