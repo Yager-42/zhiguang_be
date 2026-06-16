@@ -6,16 +6,23 @@ import com.tongji.common.resilience.ResilienceGuard;
 import com.tongji.counter.service.UserCounterService;
 import com.tongji.knowpost.api.dto.PublishAcceptedResponse;
 import com.tongji.knowpost.api.dto.PublishStatusResponse;
+import com.tongji.knowpost.mapper.KnowPostMapper;
+import com.tongji.knowpost.model.KnowPost;
 import com.tongji.knowpost.publish.ContentPublishedPublisher;
 import com.tongji.knowpost.publish.PublishAttempt;
+import com.tongji.storage.MinioStorageService;
+import com.tongji.storage.text.TextStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 @Service
@@ -29,19 +36,53 @@ public class PublishManagerImpl implements PublishManager {
     private final ResilienceGuard resilienceGuard;
     private final TaskExecutor publishExecutor;
     private final TaskExecutor reconciliationExecutor;
+    private final TextStorageService textStorageService;
+    private final KnowPostMapper knowPostMapper;
+    private final MinioStorageService minioStorageService;
+    private final RestTemplate restTemplate;
 
+    @Autowired
     public PublishManagerImpl(PublishAttemptService publishAttemptService,
                               ContentPublishedPublisher contentPublishedPublisher,
                               UserCounterService userCounterService,
                               ResilienceGuard resilienceGuard,
                               @Qualifier("publishExecutor") TaskExecutor publishExecutor,
-                              @Qualifier("reconciliationExecutor") TaskExecutor reconciliationExecutor) {
-        this.publishAttemptService = publishAttemptService;
-        this.contentPublishedPublisher = contentPublishedPublisher;
-        this.userCounterService = userCounterService;
-        this.resilienceGuard = resilienceGuard;
-        this.publishExecutor = publishExecutor;
-        this.reconciliationExecutor = reconciliationExecutor;
+                              @Qualifier("reconciliationExecutor") TaskExecutor reconciliationExecutor,
+                              TextStorageService textStorageService,
+                              KnowPostMapper knowPostMapper,
+                              MinioStorageService minioStorageService) {
+        this(publishAttemptService,
+                contentPublishedPublisher,
+                userCounterService,
+                resilienceGuard,
+                publishExecutor,
+                reconciliationExecutor,
+                textStorageService,
+                knowPostMapper,
+                minioStorageService,
+                new RestTemplate());
+    }
+
+    PublishManagerImpl(PublishAttemptService publishAttemptService,
+                       ContentPublishedPublisher contentPublishedPublisher,
+                       UserCounterService userCounterService,
+                       ResilienceGuard resilienceGuard,
+                       TaskExecutor publishExecutor,
+                       TaskExecutor reconciliationExecutor,
+                       TextStorageService textStorageService,
+                       KnowPostMapper knowPostMapper,
+                       MinioStorageService minioStorageService,
+                       RestTemplate restTemplate) {
+        this.publishAttemptService = Objects.requireNonNull(publishAttemptService, "publishAttemptService");
+        this.contentPublishedPublisher = Objects.requireNonNull(contentPublishedPublisher, "contentPublishedPublisher");
+        this.userCounterService = Objects.requireNonNull(userCounterService, "userCounterService");
+        this.resilienceGuard = Objects.requireNonNull(resilienceGuard, "resilienceGuard");
+        this.publishExecutor = Objects.requireNonNull(publishExecutor, "publishExecutor");
+        this.reconciliationExecutor = Objects.requireNonNull(reconciliationExecutor, "reconciliationExecutor");
+        this.textStorageService = Objects.requireNonNull(textStorageService, "textStorageService");
+        this.knowPostMapper = Objects.requireNonNull(knowPostMapper, "knowPostMapper");
+        this.minioStorageService = Objects.requireNonNull(minioStorageService, "minioStorageService");
+        this.restTemplate = Objects.requireNonNull(restTemplate, "restTemplate");
     }
 
     @Override
@@ -89,6 +130,7 @@ public class PublishManagerImpl implements PublishManager {
 
     private void runPublish(long authorId, long postId, long attemptId) {
         try {
+            storePostText(postId);
             publishAttemptService.completePublish(authorId, postId, attemptId);
         } catch (Exception e) {
             String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
@@ -101,6 +143,29 @@ public class PublishManagerImpl implements PublishManager {
         }
 
         reconciliationExecutor.execute(() -> runDerivedPublishWork(authorId, postId, attemptId));
+    }
+
+    private void storePostText(long postId) {
+        KnowPost post = knowPostMapper.findById(postId);
+        if (post == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "知文不存在");
+        }
+        String contentUrl = resolveContentUrl(post);
+        String body = restTemplate.getForObject(contentUrl, String.class);
+        if (body == null) {
+            throw new IllegalStateException("Fetched post body is empty");
+        }
+        textStorageService.savePostText(postId, body, post.getContentSha256());
+    }
+
+    private String resolveContentUrl(KnowPost post) {
+        if (post.getContentUrl() != null && !post.getContentUrl().isBlank()) {
+            return post.getContentUrl();
+        }
+        if (post.getContentObjectKey() != null && !post.getContentObjectKey().isBlank()) {
+            return minioStorageService.publicUrl(post.getContentObjectKey());
+        }
+        throw new BusinessException(ErrorCode.BAD_REQUEST, "正文内容地址不存在");
     }
 
     private void runDerivedPublishWork(long authorId, long postId, long attemptId) {

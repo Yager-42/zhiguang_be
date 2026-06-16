@@ -64,6 +64,38 @@ services:
       timeout: 10s
       retries: 20
 
+  cassandra:
+    image: cassandra:4.1
+    container_name: zhiguang-cassandra
+    restart: unless-stopped
+    environment:
+      CASSANDRA_CLUSTER_NAME: zhiguang
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+      TZ: Asia/Shanghai
+    ports:
+      - "9042:9042"
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+
+  cassandra-init:
+    image: cassandra:4.1
+    container_name: zhiguang-cassandra-init
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ./db/cassandra/init.cql:/init.cql:ro
+    entrypoint: ["cqlsh", "cassandra", "-f", "/init.cql"]
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.2.1
     container_name: zhiguang-elasticsearch
@@ -124,5 +156,6 @@ services:
 volumes:
   mysql-data:
   redis-data:
+  cassandra-data:
   elasticsearch-data:
   minio-data:
