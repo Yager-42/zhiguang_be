@@ -9,26 +9,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.counter.service.CounterService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPostDetailRow;
+import com.tongji.storage.text.TextStorageService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.RestTemplate;
 import jakarta.annotation.PostConstruct;
 
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import com.tongji.knowpost.model.KnowPostFeedRow;
 
 /**
@@ -44,7 +35,7 @@ public class SearchIndexService {
     private final KnowPostMapper knowPostMapper;
     private final CounterService counterService;
     private final ObjectMapper objectMapper;
-    private final RestTemplate http = new RestTemplate();
+    private final TextStorageService textStorageService;
 
     /**
      * 启动时若索引为空，进行历史数据回灌（分页）。
@@ -102,8 +93,8 @@ public class SearchIndexService {
                 doc.put("is_top", row.getIsTop());
             }
 
-            // 正文优先拉取 contentUrl，失败则使用描述
-            String body = fetchContentSafe(row.getContentUrl());
+            // 正文优先读取正文存储，缺失时退回描述
+            String body = textStorageService.getPostText(id, row.getContentUrl()).orElse(null);
             if (body == null || body.isBlank()) {
                 body = row.getDescription();
             }
@@ -152,91 +143,6 @@ public class SearchIndexService {
         } catch (Exception e) {
             log.error("Index soft delete failed for post {}: {}", id, e.getMessage());
         }
-    }
-
-    /**
-     * 安全拉取正文内容：失败返回 null，不中断索引流程。
-     */
-    private String fetchContentSafe(String url) {
-        if (url == null || url.isBlank()) {
-            return null;
-        }
-
-        try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setAccept(List.of(MediaType.TEXT_HTML, MediaType.TEXT_PLAIN, MediaType.APPLICATION_JSON));
-            ResponseEntity<byte[]> resp = http.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
-            byte[] bytes = resp.getBody();
-            if (bytes == null || bytes.length == 0) {
-                return null;
-            }
-            MediaType contentType = resp.getHeaders().getContentType();
-            Charset headerCharset = (contentType != null) ? contentType.getCharset() : null;
-            Charset metaCharset = sniffHtmlCharset(bytes);
-            Charset charset = pickCharset(bytes, headerCharset, metaCharset);
-            return new String(bytes, charset);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private Charset pickCharset(byte[] bytes, Charset headerCharset, Charset metaCharset) {
-        if (metaCharset != null) {
-            return metaCharset;
-        }
-        if (headerCharset == null) {
-            Charset utf8 = StandardCharsets.UTF_8;
-            Charset gb18030 = Charset.forName("GB18030");
-            return countReplacementChars(new String(bytes, utf8)) <= countReplacementChars(new String(bytes, gb18030)) ? utf8 : gb18030;
-        }
-        if (isLikelyWrongCharsetHeader(headerCharset)) {
-            Charset utf8 = StandardCharsets.UTF_8;
-            Charset gb18030 = Charset.forName("GB18030");
-            int repUtf8 = countReplacementChars(new String(bytes, utf8));
-            int repGb = countReplacementChars(new String(bytes, gb18030));
-            int repHeader = countReplacementChars(new String(bytes, headerCharset));
-            if (repUtf8 <= repGb && repUtf8 <= repHeader) return utf8;
-            if (repGb <= repHeader) return gb18030;
-        }
-        return headerCharset;
-    }
-
-    private boolean isLikelyWrongCharsetHeader(Charset charset) {
-        return StandardCharsets.ISO_8859_1.equals(charset) || StandardCharsets.US_ASCII.equals(charset);
-    }
-
-    private Charset sniffHtmlCharset(byte[] bytes) {
-        int limit = Math.min(bytes.length, 8192);
-        String head = new String(bytes, 0, limit, StandardCharsets.ISO_8859_1);
-        Matcher m = Pattern.compile("charset\\s*=\\s*['\\\"]?([a-zA-Z0-9_\\-]+)", Pattern.CASE_INSENSITIVE).matcher(head);
-        if (!m.find()) {
-            return null;
-        }
-        String cs = m.group(1);
-        if (cs == null || cs.isBlank()) {
-            return null;
-        }
-        cs = cs.trim();
-        if ("utf8".equalsIgnoreCase(cs)) {
-            return StandardCharsets.UTF_8;
-        }
-        if ("gbk".equalsIgnoreCase(cs) || "gb2312".equalsIgnoreCase(cs) || "gb18030".equalsIgnoreCase(cs)) {
-            return Charset.forName("GB18030");
-        }
-        try {
-            return Charset.forName(cs);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private int countReplacementChars(String s) {
-        if (s == null || s.isEmpty()) return 0;
-        int cnt = 0;
-        for (int i = 0; i < s.length(); i++) {
-            if (s.charAt(i) == '\uFFFD') cnt++;
-        }
-        return cnt;
     }
 
     /**
