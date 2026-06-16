@@ -32,6 +32,17 @@ spring:
       ack-mode: manual
     admin:
       auto-create: true
+  cassandra:
+    contact-points: localhost
+    port: 9042
+    local-datacenter: datacenter1
+    keyspace-name: zhiguang
+    schema-action: none
+    connection:
+      connect-timeout: 10s
+      init-query-timeout: 10s
+    request:
+      timeout: 10s
   elasticsearch:
     uris:
       - http://localhost:9200

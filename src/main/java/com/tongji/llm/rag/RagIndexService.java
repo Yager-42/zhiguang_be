@@ -6,6 +6,7 @@ import co.elastic.clients.elasticsearch.core.search.Hit;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPostDetailRow;
 import com.tongji.config.EsProperties;
+import com.tongji.storage.text.TextStorageService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +14,6 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
 
@@ -31,8 +31,8 @@ public class RagIndexService {
     private final VectorStore vectorStore;
     // 数据访问：根据 postId 查询知文详情（含 contentUrl、指纹等）
     private final KnowPostMapper knowPostMapper;
-    // 拉取 Markdown 正文内容
-    private final RestTemplate http = new RestTemplate();
+    // 正文存储：优先 Cassandra，缺失时可回退 legacy contentUrl
+    private final TextStorageService textStorageService;
     // 直接使用 ES 客户端做指纹判断和删除旧切片
     private final ElasticsearchClient es;
     // ES 相关配置（索引名等）
@@ -56,12 +56,6 @@ public class RagIndexService {
             return 0;
         }
 
-        // 内容地址缺失则无法抓取正文
-        if (!StringUtils.hasText(row.getContentUrl())) {
-            log.warn("Post {} missing contentUrl or not found", postId);
-            return 0;
-        }
-
         // 指纹检测：如未变化则跳过重建
         String currentSha = row.getContentSha256();
         String currentEtag = row.getContentEtag();
@@ -71,7 +65,7 @@ public class RagIndexService {
         }
 
         // 抓取 Markdown 正文
-        String text = fetchContent(row.getContentUrl());
+        String text = textStorageService.getPostText(postId, row.getContentUrl()).orElse(null);
         if (!StringUtils.hasText(text)) {
             log.warn("Post {} content empty", postId);
             return 0;
@@ -92,7 +86,9 @@ public class RagIndexService {
             meta.put("position", i);
             meta.put("contentEtag", currentEtag);
             meta.put("contentSha256", currentSha);
-            meta.put("contentUrl", row.getContentUrl());
+            if (row.getContentUrl() != null) {
+                meta.put("contentUrl", row.getContentUrl());
+            }
             meta.put("title", row.getTitle());
             docs.add(new Document(chunks.get(i), meta));
         }
@@ -165,18 +161,6 @@ public class RagIndexService {
     private static String asString(Object o) {
         // 统一处理 null → String 的转换
         return o == null ? null : String.valueOf(o);
-    }
-
-    /**
-     * 拉取正文内容（Markdown 文本）。
-     */
-    private String fetchContent(String url) {
-        try {
-            return http.getForObject(url, String.class);
-        } catch (Exception e) {
-            log.error("Fetch content failed: {}", e.getMessage());
-            return null;
-        }
     }
 
     /**
