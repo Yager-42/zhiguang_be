@@ -5,9 +5,10 @@ import com.tongji.counter.service.UserCounterService;
 import com.tongji.knowpost.service.KnowPostService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.common.id.IdNamespace;
+import com.tongji.common.id.IdService;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
-import com.tongji.knowpost.id.SnowflakeIdGenerator;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPost;
 import com.tongji.knowpost.model.KnowPostDetailRow;
@@ -18,7 +19,6 @@ import com.tongji.storage.MinioStorageService;
 import com.tongji.llm.rag.RagIndexService;
 import com.tongji.relation.outbox.OutboxMapper;
 import com.tongji.cache.hotkey.HotKeyDetector;
-import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -38,8 +38,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class KnowPostServiceImpl implements KnowPostService {
 
     private final KnowPostMapper mapper;
-    @Resource
-    private final SnowflakeIdGenerator idGen;
+    private final IdService idService;
     private final ObjectMapper objectMapper;
     private final MinioStorageService storageService;
     private final CounterService counterService;
@@ -57,7 +56,7 @@ public class KnowPostServiceImpl implements KnowPostService {
     // 手动编写构造器，Spring的@Qualifier直接标注在参数上（核心）
     public KnowPostServiceImpl(
             KnowPostMapper mapper,
-            SnowflakeIdGenerator idGen,
+            IdService idService,
             ObjectMapper objectMapper,
             MinioStorageService storageService,
             CounterService counterService,
@@ -69,7 +68,7 @@ public class KnowPostServiceImpl implements KnowPostService {
             OutboxMapper outboxMapper
     ) {
         this.mapper = mapper;
-        this.idGen = idGen;
+        this.idService = idService;
         this.objectMapper = objectMapper;
         this.storageService = storageService;
         this.counterService = counterService;
@@ -85,7 +84,7 @@ public class KnowPostServiceImpl implements KnowPostService {
      */
     @Transactional
     public long createDraft(long creatorId) {
-        long id = idGen.nextId();
+        long id = idService.nextId(IdNamespace.POST);
         Instant now = Instant.now();
         KnowPost post = KnowPost.builder()
                 .id(id)
@@ -164,7 +163,7 @@ public class KnowPostServiceImpl implements KnowPostService {
 
         // 元数据变更后写入 Outbox 事件，驱动搜索索引更新
         try {
-            long outId = idGen.nextId();
+            long outId = idService.nextId(IdNamespace.OUTBOX_EVENT);
             String payload = objectMapper.writeValueAsString(Map.of("entity", "knowpost", "op", "upsert", "id", id));
             outboxMapper.insert(outId, "knowpost", id, "KnowPostMetadataUpdated", payload);
         } catch (Exception e) {
@@ -190,7 +189,7 @@ public class KnowPostServiceImpl implements KnowPostService {
 
         // 写入 Outbox 事件，驱动搜索索引增量更新
         try {
-            long outId = idGen.nextId();
+            long outId = idService.nextId(IdNamespace.OUTBOX_EVENT);
             String payload = objectMapper.writeValueAsString(Map.of("entity", "knowpost", "op", "upsert", "id", id));
             outboxMapper.insert(outId, "knowpost", id, "KnowPostPublished", payload);
         } catch (Exception e) {
@@ -255,7 +254,7 @@ public class KnowPostServiceImpl implements KnowPostService {
 
         // 写入 Outbox 事件，驱动搜索索引软删
         try {
-            long outId = idGen.nextId();
+            long outId = idService.nextId(IdNamespace.OUTBOX_EVENT);
             String payload = objectMapper.writeValueAsString(Map.of("entity", "knowpost", "op", "delete", "id", id));
             outboxMapper.insert(outId, "knowpost", id, "KnowPostDeleted", payload);
         } catch (Exception e) {
