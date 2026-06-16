@@ -57,7 +57,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
      */
     public CanalKafkaBridge(KafkaTemplate<String, String> kafka,
                             ObjectMapper objectMapper,
-                            @Qualifier("taskExecutor") TaskExecutor taskExecutor,
+                            @Qualifier("canalOutboxExecutor") TaskExecutor taskExecutor,
                             @Value("${canal.enabled}") boolean enabled,
                             @Value("${canal.host}") String host,
                             @Value("${canal.port}") int port,

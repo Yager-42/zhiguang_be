@@ -8,8 +8,13 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 import com.tongji.common.util.OutboxMessageUtil;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 
 /**
  * Canal Outbox 消费者。
@@ -19,15 +24,20 @@ import com.tongji.common.util.OutboxMessageUtil;
 public class CanalOutboxConsumer {
     private final ObjectMapper objectMapper;
     private final RelationEventProcessor processor;
+    private final TaskExecutor taskExecutor;
 
     /**
      * Outbox 消费者构造函数。
      * @param objectMapper JSON 序列化器
      * @param processor 关系事件处理器
+     * @param taskExecutor 关系事件执行器
      */
-    public CanalOutboxConsumer(ObjectMapper objectMapper, RelationEventProcessor processor) {
+    public CanalOutboxConsumer(ObjectMapper objectMapper,
+                               RelationEventProcessor processor,
+                               @Qualifier("relationEventExecutor") TaskExecutor taskExecutor) {
         this.objectMapper = objectMapper;
         this.processor = processor;
+        this.taskExecutor = taskExecutor;
     }
 
     /**
@@ -44,16 +54,46 @@ public class CanalOutboxConsumer {
                 ack.acknowledge();
                 return;
             }
+            List<RelationEvent> events = new ArrayList<>();
             for (JsonNode row : rows) {
                 JsonNode payloadNode = row.get("payload");
                 if (payloadNode == null) {
                     continue;
                 }
-                
-                RelationEvent evt = objectMapper.readValue(payloadNode.asText(), RelationEvent.class);
-                processor.process(evt);
+
+                events.add(objectMapper.readValue(payloadNode.asText(), RelationEvent.class));
             }
-            ack.acknowledge();
+            if (events.isEmpty()) {
+                ack.acknowledge();
+                return;
+            }
+
+            CountDownLatch completionLatch = new CountDownLatch(events.size());
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+            for (RelationEvent event : events) {
+                try {
+                    taskExecutor.execute(() -> {
+                        try {
+                            processor.process(event);
+                        } catch (Throwable throwable) {
+                            failure.compareAndSet(null, throwable);
+                        } finally {
+                            completionLatch.countDown();
+                        }
+                    });
+                } catch (Throwable throwable) {
+                    failure.compareAndSet(null, throwable);
+                    while (completionLatch.getCount() > 0) {
+                        completionLatch.countDown();
+                    }
+                    break;
+                }
+            }
+
+            completionLatch.await();
+            if (failure.get() == null) {
+                ack.acknowledge();
+            }
         } catch (Exception ignored) {}
     }
 }

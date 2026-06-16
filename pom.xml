@@ -230,6 +230,13 @@
             <version>1.1.8</version>
         </dependency>
 
+        <!-- Sentinel Core：限流/熔断底层能力，供本地 resilience adapter 使用 -->
+        <dependency>
+            <groupId>com.alibaba.csp</groupId>
+            <artifactId>sentinel-core</artifactId>
+            <version>1.8.10</version>
+        </dependency>
+
     </dependencies>
 
     <build>

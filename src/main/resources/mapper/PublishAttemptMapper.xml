@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.knowpost.publish.PublishAttemptMapper">
+
+    <resultMap id="PublishAttemptResultMap" type="com.tongji.knowpost.publish.PublishAttempt">
+        <id property="attemptId" column="attempt_id" />
+        <result property="postId" column="post_id" />
+        <result property="creatorId" column="creator_id" />
+        <result property="idempotentKey" column="idempotent_key" />
+        <result property="status" column="status" />
+        <result property="failedStep" column="failed_step" />
+        <result property="errorMessage" column="error_message" />
+        <result property="fallbackTaskType" column="fallback_task_type" />
+        <result property="fallbackTargetType" column="fallback_target_type" />
+        <result property="fallbackTargetId" column="fallback_target_id" />
+        <result property="fallbackFailureReason" column="fallback_failure_reason" />
+        <result property="fallbackNextRetryAt" column="fallback_next_retry_at" />
+        <result property="retryCount" column="retry_count" />
+        <result property="createdAt" column="created_at" />
+        <result property="updatedAt" column="updated_at" />
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.knowpost.publish.PublishAttempt">
+        INSERT INTO publish_attempt (
+            attempt_id, post_id, creator_id, idempotent_key, status, failed_step,
+            error_message, fallback_task_type, fallback_target_type, fallback_target_id,
+            fallback_failure_reason, fallback_next_retry_at, retry_count, created_at, updated_at
+        ) VALUES (
+            #{attemptId}, #{postId}, #{creatorId}, #{idempotentKey}, #{status}, #{failedStep},
+            #{errorMessage}, #{fallbackTaskType}, #{fallbackTargetType}, #{fallbackTargetId},
+            #{fallbackFailureReason}, #{fallbackNextRetryAt}, #{retryCount}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="findByIdempotencyKey" resultMap="PublishAttemptResultMap">
+        SELECT *
+        FROM publish_attempt
+        WHERE creator_id = #{creatorId}
+          AND post_id = #{postId}
+          AND idempotent_key = #{idempotentKey}
+        LIMIT 1
+    </select>
+
+    <select id="findById" resultMap="PublishAttemptResultMap">
+        SELECT *
+        FROM publish_attempt
+        WHERE attempt_id = #{attemptId}
+        LIMIT 1
+    </select>
+
+    <update id="markSucceeded">
+        UPDATE publish_attempt
+        SET status = 'succeeded',
+            failed_step = NULL,
+            error_message = NULL,
+            fallback_task_type = NULL,
+            fallback_target_type = NULL,
+            fallback_target_id = NULL,
+            fallback_failure_reason = NULL,
+            fallback_next_retry_at = NULL,
+            updated_at = NOW()
+        WHERE attempt_id = #{attemptId}
+    </update>
+
+    <update id="markFailed">
+        UPDATE publish_attempt
+        SET status = 'failed',
+            failed_step = #{failedStep},
+            error_message = #{errorMessage},
+            updated_at = NOW()
+        WHERE attempt_id = #{attemptId}
+    </update>
+
+    <select id="findStatusById" resultMap="PublishAttemptResultMap">
+        SELECT attempt_id, post_id, creator_id, idempotent_key, status, failed_step,
+               error_message, retry_count, created_at, updated_at
+        FROM publish_attempt
+        WHERE attempt_id = #{attemptId}
+        LIMIT 1
+    </select>
+
+    <update id="restartFailedAttempt">
+        UPDATE publish_attempt
+        SET status = 'publishing',
+            failed_step = NULL,
+            error_message = NULL,
+            fallback_task_type = NULL,
+            fallback_target_type = NULL,
+            fallback_target_id = NULL,
+            fallback_failure_reason = NULL,
+            fallback_next_retry_at = NULL,
+            retry_count = retry_count + 1,
+            updated_at = NOW()
+        WHERE attempt_id = #{attemptId}
+          AND status = 'failed'
+    </update>
+
+    <select id="findStuckPublishingAttempts" resultMap="PublishAttemptResultMap">
+        SELECT *
+        FROM publish_attempt
+        WHERE status = 'publishing'
+          AND updated_at &lt; #{updatedBefore}
+    </select>
+
+    <update id="updateDerivedFailureFallback">
+        UPDATE publish_attempt
+        SET fallback_task_type = #{taskType},
+            fallback_target_type = #{targetType},
+            fallback_target_id = #{targetId},
+            fallback_failure_reason = #{failureReason},
+            fallback_next_retry_at = #{nextRetryAt},
+            updated_at = NOW()
+        WHERE attempt_id = #{attemptId}
+    </update>
+</mapper>

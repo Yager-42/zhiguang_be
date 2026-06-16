@@ -21,6 +21,25 @@ public interface KnowPostMapper {
 
     int publish(@Param("id") Long id, @Param("creatorId") Long creatorId);
 
+    int startPublishing(@Param("id") Long id,
+                        @Param("creatorId") Long creatorId,
+                        @Param("publishAttemptId") Long publishAttemptId);
+
+    int completePublish(@Param("id") Long id,
+                        @Param("creatorId") Long creatorId,
+                        @Param("publishAttemptId") Long publishAttemptId);
+
+    int failPublish(@Param("id") Long id,
+                    @Param("creatorId") Long creatorId,
+                    @Param("publishAttemptId") Long publishAttemptId,
+                    @Param("publishFailedReason") String publishFailedReason);
+
+    KnowPost findPublishStatus(@Param("id") Long id, @Param("creatorId") Long creatorId);
+
+    int retryPublishing(@Param("id") Long id,
+                        @Param("creatorId") Long creatorId,
+                        @Param("publishAttemptId") Long publishAttemptId);
+
     // 首页 Feed 列表（已发布、公开可见），置顶优先，其次按发布时间倒序。
     List<KnowPostFeedRow> listFeedPublic(@Param("limit") int limit,
                                          @Param("offset") int offset);
