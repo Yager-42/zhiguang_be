@@ -61,6 +61,11 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
 
+id:
+  snowflake:
+    worker-id: ${SNOWFLAKE_WORKER_ID:1}
+    datacenter-id: ${SNOWFLAKE_DATACENTER_ID:1}
+
 auth:
   jwt:
     private-key: classpath:keys/private.pem

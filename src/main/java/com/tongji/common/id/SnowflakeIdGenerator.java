@@ -1,14 +1,11 @@
-package com.tongji.knowpost.id;
+package com.tongji.common.id;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-/**
- * 线程安全的雪花算法 ID 生成器。
- * 41 位时间戳 + 5 位数据中心 + 5 位工作节点 + 12 位序列。
- */
-@Component
+@Component("commonSnowflakeIdGenerator")
 public class SnowflakeIdGenerator {
-    private static final long EPOCH = 1704067200000L; // 2024-01-01 00:00:00 UTC
+    static final long EPOCH = 1704067200000L;
 
     private static final long WORKER_ID_BITS = 5L;
     private static final long DATACENTER_ID_BITS = 5L;
@@ -28,15 +25,16 @@ public class SnowflakeIdGenerator {
     private long lastTimestamp = -1L;
     private long sequence = 0L;
 
-    public SnowflakeIdGenerator() {
-        this(1, 1);
+    @Autowired
+    public SnowflakeIdGenerator(SnowflakeProperties properties) {
+        this(properties.getDatacenterId(), properties.getWorkerId());
     }
 
     public SnowflakeIdGenerator(long datacenterId, long workerId) {
-        if (workerId > MAX_WORKER_ID || workerId < 0) {
+        if (workerId < 0 || workerId > MAX_WORKER_ID) {
             throw new IllegalArgumentException("workerId out of range");
         }
-        if (datacenterId > MAX_DATACENTER_ID || datacenterId < 0) {
+        if (datacenterId < 0 || datacenterId > MAX_DATACENTER_ID) {
             throw new IllegalArgumentException("datacenterId out of range");
         }
         this.datacenterId = datacenterId;
@@ -46,41 +44,24 @@ public class SnowflakeIdGenerator {
     public synchronized long nextId() {
         long timestamp = currentTime();
 
-//        if (timestamp < lastTimestamp) {
-//            throw new IllegalStateException("Clock moved backwards. Refusing to generate id");
-//        }
-        // 等待时钟追回的方案
         if (timestamp < lastTimestamp) {
             long offset = lastTimestamp - timestamp;
-
-            // 1. 小幅度回拨（比如 NTP 校时导致的 1~5ms 间抖动）：等待一会儿再试
-            if (offset <= 5) {
-                try {
-                    // 睡 offset 毫秒，给系统时钟一点时间“追上来”
-                    Thread.sleep(offset);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException("Thread interrupted while waiting for clock to catch up", e);
-                }
-
+            if (offset <= 5L) {
+                waitForClock(offset);
                 timestamp = currentTime();
                 if (timestamp < lastTimestamp) {
-                    // 等完还是没追上，说明问题较严重，直接拒绝
-                    throw new IllegalStateException(
+                    throw new ClockBackwardException(
                             "Clock is still behind after waiting. last=" + lastTimestamp + ", now=" + timestamp);
                 }
             } else {
-                // 2. 回拨幅度太大，直接拒绝，避免线程长时间阻塞
-                throw new IllegalStateException(
+                throw new ClockBackwardException(
                         "Clock moved backwards too much. Refusing to generate id. offset=" + offset + "ms");
             }
         }
 
-        // 处理同一毫秒内的并发请求：序列号逻辑
-        if (lastTimestamp == timestamp) {
+        if (timestamp == lastTimestamp) {
             sequence = (sequence + 1) & SEQUENCE_MASK;
-            if (sequence == 0) {
-                // 这一毫秒的 4096 个名额用完了
+            if (sequence == 0L) {
                 timestamp = waitNextMillis(lastTimestamp);
             }
         } else {
@@ -89,11 +70,27 @@ public class SnowflakeIdGenerator {
 
         lastTimestamp = timestamp;
 
-        // 组装 64 位 ID
         return ((timestamp - EPOCH) << TIMESTAMP_LEFT_SHIFT)
                 | (datacenterId << DATACENTER_ID_SHIFT)
                 | (workerId << WORKER_ID_SHIFT)
                 | sequence;
+    }
+
+    long currentTime() {
+        return System.currentTimeMillis();
+    }
+
+    void sleepMillis(long millis) throws InterruptedException {
+        Thread.sleep(millis);
+    }
+
+    private void waitForClock(long offset) {
+        try {
+            sleepMillis(offset);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ClockBackwardException("Interrupted while waiting for clock to catch up", e);
+        }
     }
 
     private long waitNextMillis(long lastTimestamp) {
@@ -102,9 +99,5 @@ public class SnowflakeIdGenerator {
             timestamp = currentTime();
         }
         return timestamp;
-    }
-
-    private long currentTime() {
-        return System.currentTimeMillis();
     }
 }

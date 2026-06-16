@@ -108,3 +108,20 @@ CREATE TABLE IF NOT EXISTS follower (
     KEY idx_to_created (to_user_id, created_at, from_user_id, rel_status),
     KEY idx_from (from_user_id, to_user_id, rel_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS leaf_alloc (
+    biz_tag VARCHAR(128) NOT NULL,
+    max_id BIGINT NOT NULL DEFAULT 1,
+    step INT NOT NULL DEFAULT 1000,
+    description VARCHAR(256) NULL,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (biz_tag)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO leaf_alloc (biz_tag, max_id, step, description) VALUES
+    ('reconciliation_task', 1, 1000, 'Reconciliation task ID'),
+    ('admin_operation', 1, 1000, 'Admin operation ID'),
+    ('audit_log', 1, 1000, 'Audit log ID')
+ON DUPLICATE KEY UPDATE
+    step = VALUES(step),
+    description = VALUES(description);
