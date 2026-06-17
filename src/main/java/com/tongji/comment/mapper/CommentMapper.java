@@ -1,0 +1,30 @@
+package com.tongji.comment.mapper;
+
+import com.tongji.comment.model.Comment;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Mapper
+public interface CommentMapper {
+    int insert(Comment comment);
+
+    Comment findById(@Param("commentId") Long commentId);
+
+    List<Comment> listTopLevelByPost(@Param("postId") Long postId,
+                                      @Param("cursorCreateTime") LocalDateTime cursorCreateTime,
+                                      @Param("cursorCommentId") Long cursorCommentId,
+                                      @Param("limit") int limit);
+
+    List<Comment> listRepliesByRoot(@Param("rootId") Long rootId,
+                                     @Param("cursorCreateTime") LocalDateTime cursorCreateTime,
+                                     @Param("cursorCommentId") Long cursorCommentId,
+                                     @Param("limit") int limit);
+
+    int softDelete(@Param("commentId") Long commentId, @Param("creatorId") Long creatorId);
+
+    List<Long> listCommentIdsCursor(@Param("cursorCommentId") Long cursorCommentId,
+                                    @Param("limit") int limit);
+}
