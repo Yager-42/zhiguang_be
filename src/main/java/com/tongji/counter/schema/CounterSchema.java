@@ -21,10 +21,12 @@ public final class CounterSchema {
 
     public static final int IDX_LIKE = 1;
     public static final int IDX_FAV = 2;
+    public static final int IDX_COMMENT = 3;
 
     public static final Map<String, Integer> NAME_TO_IDX = Map.of(
             "like", IDX_LIKE,
-            "fav", IDX_FAV
+            "fav", IDX_FAV,
+            "comment", IDX_COMMENT
     );
 
     public static final Set<String> SUPPORTED_METRICS = NAME_TO_IDX.keySet(); // 对外可请求的指标集合
