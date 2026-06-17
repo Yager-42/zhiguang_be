@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.comment.mapper.CommentMapper">
+
+    <resultMap id="CommentResultMap" type="com.tongji.comment.model.Comment">
+        <id property="commentId" column="comment_id" />
+        <result property="postId" column="post_id" />
+        <result property="rootId" column="root_id" />
+        <result property="parentId" column="parent_id" />
+        <result property="creatorId" column="creator_id" />
+        <result property="clientRequestId" column="client_request_id" />
+        <result property="status" column="status" />
+        <result property="likeCount" column="like_count" />
+        <result property="replyCount" column="reply_count" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.comment.model.Comment">
+        INSERT INTO comments (
+            comment_id, post_id, root_id, parent_id, creator_id, client_request_id,
+            status, like_count, reply_count, create_time, update_time
+        ) VALUES (
+            #{commentId}, #{postId}, #{rootId}, #{parentId}, #{creatorId}, #{clientRequestId},
+            #{status}, #{likeCount}, #{replyCount}, #{createTime}, #{updateTime}
+        )
+    </insert>
+
+    <select id="findById" resultMap="CommentResultMap">
+        SELECT *
+        FROM comments
+        WHERE comment_id = #{commentId}
+        LIMIT 1
+    </select>
+
+    <select id="listTopLevelByPost" resultMap="CommentResultMap">
+        SELECT *
+        FROM comments
+        WHERE post_id = #{postId}
+          AND parent_id = 0
+        <if test="cursorCreateTime != null and cursorCommentId != null">
+          AND (create_time &lt; #{cursorCreateTime}
+               OR (create_time = #{cursorCreateTime} AND comment_id &lt; #{cursorCommentId}))
+        </if>
+        ORDER BY create_time DESC, comment_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="listRepliesByRoot" resultMap="CommentResultMap">
+        SELECT *
+        FROM comments
+        WHERE root_id = #{rootId}
+          AND parent_id != 0
+        <if test="cursorCreateTime != null and cursorCommentId != null">
+          AND (create_time &lt; #{cursorCreateTime}
+               OR (create_time = #{cursorCreateTime} AND comment_id &lt; #{cursorCommentId}))
+        </if>
+        ORDER BY create_time DESC, comment_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <update id="softDelete">
+        UPDATE comments
+        SET status = 1,
+            update_time = NOW(3)
+        WHERE comment_id = #{commentId}
+          AND creator_id = #{creatorId}
+          AND status = 0
+    </update>
+
+    <select id="listCommentIdsCursor" resultType="long">
+        SELECT comment_id
+        FROM comments
+        <where>
+            <if test="cursorCommentId != null">
+                comment_id &gt; #{cursorCommentId}
+            </if>
+        </where>
+        ORDER BY comment_id ASC
+        LIMIT #{limit}
+    </select>
+</mapper>

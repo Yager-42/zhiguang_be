@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -128,18 +129,35 @@ class TextStorageSmokeTest {
         private static final Duration STARTUP_TIMEOUT = Duration.ofMinutes(2);
         private static final Duration POLL_INTERVAL = Duration.ofSeconds(2);
         private static final Pattern PORT_PATTERN = Pattern.compile("(\\d+)\\s*$");
+        private static final String DEFAULT_EXTERNAL_HOST = "127.0.0.1";
+        private static final int DEFAULT_EXTERNAL_PORT = 9042;
 
         private final String containerName = "zhiguang-cassandra-smoke-" + UUID.randomUUID().toString().replace("-", "");
+        private final Function<String[], String> commandRunner;
+        private final ExternalCassandraProbe externalProbe;
         private String host = "127.0.0.1";
         private int port;
         private boolean started;
+
+        DockerCliCassandraSupport() {
+            this(DockerCliCassandraSupport::runCommand, DockerCliCassandraSupport::externalCassandraReady);
+        }
+
+        DockerCliCassandraSupport(Function<String[], String> commandRunner, ExternalCassandraProbe externalProbe) {
+            this.commandRunner = commandRunner;
+            this.externalProbe = externalProbe;
+        }
 
         synchronized void startIfNeeded() {
             if (started) {
                 return;
             }
 
-            runCommand("docker", "run",
+            if (useExternalIfReady()) {
+                return;
+            }
+
+            runDocker("run",
                     "-d",
                     "--rm",
                     "--name", containerName,
@@ -173,7 +191,7 @@ class TextStorageSmokeTest {
                 return;
             }
             try {
-                runCommand("docker", "rm", "-f", containerName);
+                runDocker("rm", "-f", containerName);
             } catch (IllegalStateException ignored) {
                 // Container may already be gone if startup failed or Docker cleaned it up.
             } finally {
@@ -181,12 +199,47 @@ class TextStorageSmokeTest {
             }
         }
 
+        private boolean useExternalIfReady() {
+            String externalHost = System.getProperty("cassandra.host",
+                    System.getenv().getOrDefault("CASSANDRA_HOST", DEFAULT_EXTERNAL_HOST));
+            int externalPort = Integer.parseInt(System.getProperty("cassandra.port",
+                    System.getenv().getOrDefault("CASSANDRA_PORT", String.valueOf(DEFAULT_EXTERNAL_PORT))));
+            if (externalProbe.isReady(externalHost, externalPort, getLocalDatacenter())) {
+                this.host = externalHost;
+                this.port = externalPort;
+                return true;
+            }
+            return false;
+        }
+
+        private static boolean externalCassandraReady(String host, int port, String localDatacenter) {
+            if (!isReachable(host, port)) {
+                return false;
+            }
+            try (CqlSession ignored = CqlSession.builder()
+                    .addContactPoint(new InetSocketAddress(host, port))
+                    .withLocalDatacenter(localDatacenter)
+                    .build()) {
+                return true;
+            } catch (RuntimeException ignored) {
+                return false;
+            }
+        }
+
+        private static boolean isReachable(String host, int port) {
+            try (java.net.Socket socket = new java.net.Socket()) {
+                socket.connect(new InetSocketAddress(host, port), 500);
+                return true;
+            } catch (IOException ignored) {
+                return false;
+            }
+        }
+
         private int waitForMappedPort() {
             Instant deadline = Instant.now().plus(STARTUP_TIMEOUT);
             while (Instant.now().isBefore(deadline)) {
                 try {
-                    String output = runCommand(
-                            "docker",
+                    String output = runDocker(
                             "inspect",
                             "--format",
                             "{{(index (index .NetworkSettings.Ports \"9042/tcp\") 0).HostPort}}",
@@ -208,13 +261,20 @@ class TextStorageSmokeTest {
             Instant deadline = Instant.now().plus(STARTUP_TIMEOUT);
             while (Instant.now().isBefore(deadline)) {
                 try {
-                    runCommand("docker", "exec", containerName, "cqlsh", "-e", "DESCRIBE KEYSPACES");
+                    runDocker("exec", containerName, "cqlsh", "-e", "DESCRIBE KEYSPACES");
                     return;
                 } catch (IllegalStateException ignored) {
                     sleep();
                 }
             }
             throw new IllegalStateException("Timed out waiting for Cassandra to accept cqlsh connections");
+        }
+
+        private String runDocker(String... arguments) {
+            String[] command = new String[arguments.length + 1];
+            command[0] = "docker";
+            System.arraycopy(arguments, 0, command, 1, arguments.length);
+            return commandRunner.apply(command);
         }
 
         private static String runCommand(String... command) {
@@ -243,6 +303,10 @@ class TextStorageSmokeTest {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("Interrupted while waiting for Cassandra startup", e);
             }
+        }
+
+        interface ExternalCassandraProbe {
+            boolean isReady(String host, int port, String localDatacenter);
         }
     }
 }

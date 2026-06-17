@@ -110,6 +110,37 @@ CREATE TABLE IF NOT EXISTS outbox (
     KEY ix_outbox_ct (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS comments (
+    comment_id BIGINT UNSIGNED NOT NULL,
+    post_id BIGINT UNSIGNED NOT NULL,
+    root_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    parent_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    creator_id BIGINT UNSIGNED NOT NULL,
+    client_request_id VARCHAR(64) NOT NULL,
+    status TINYINT NOT NULL DEFAULT 0,
+    like_count INT NOT NULL DEFAULT 0,
+    reply_count INT NOT NULL DEFAULT 0,
+    create_time DATETIME(3) NOT NULL,
+    update_time DATETIME(3) NOT NULL,
+    PRIMARY KEY (comment_id),
+    UNIQUE KEY uk_comment_creator_client_request (creator_id, client_request_id),
+    KEY idx_post_comments (post_id, parent_id, create_time, comment_id),
+    KEY idx_root_replies (root_id, create_time, comment_id),
+    KEY idx_creator (creator_id, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pending_comments (
+    pending_comment_id BIGINT UNSIGNED NOT NULL,
+    post_id BIGINT UNSIGNED NOT NULL,
+    creator_id BIGINT UNSIGNED NOT NULL,
+    client_request_id VARCHAR(64) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    create_time DATETIME(3) NOT NULL,
+    update_time DATETIME(3) NOT NULL,
+    PRIMARY KEY (pending_comment_id),
+    UNIQUE KEY uk_pending_comment_client_request (creator_id, client_request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS following (
     id BIGINT UNSIGNED NOT NULL,
     from_user_id BIGINT UNSIGNED NOT NULL,
