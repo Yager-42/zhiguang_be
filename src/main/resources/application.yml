@@ -67,6 +67,11 @@ spring:
         dimensions: ${SILICONFLOW_EMBEDDING_DIMENSIONS:1024}
         initialize-schema: true
 
+comment:
+  kafka:
+    write-topic: comment-write
+    feedback-topic: comment-feedback
+
 mybatis:
   mapper-locations: classpath*:mapper/**/*.xml
   configuration:
