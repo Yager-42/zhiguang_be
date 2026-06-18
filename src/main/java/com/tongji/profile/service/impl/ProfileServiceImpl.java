@@ -2,6 +2,8 @@ package com.tongji.profile.service.impl;
 
 import com.tongji.profile.api.dto.ProfilePatchRequest;
 import com.tongji.profile.api.dto.ProfileResponse;
+import com.tongji.profile.event.UserProfileUpdatedEvent;
+import com.tongji.profile.event.UserProfileUpdatedProducer;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ import com.tongji.profile.service.ProfileService;
 public class ProfileServiceImpl implements ProfileService {
 
     private final UserMapper userMapper;
+    private final UserProfileUpdatedProducer userProfileUpdatedProducer;
 
     /**
      * 按用户 ID 查询用户实体。
@@ -96,7 +99,7 @@ public class ProfileServiceImpl implements ProfileService {
 
         // 更新后回读，保证返回数据为最新快照
         User updated = userMapper.findById(userId);
-
+        userProfileUpdatedProducer.publish(UserProfileUpdatedEvent.from(updated));
         return toResponse(updated);
     }
 
@@ -157,6 +160,7 @@ public class ProfileServiceImpl implements ProfileService {
 
         // 更新后回读，保证返回最新头像地址
         User updated = userMapper.findById(userId);
+        userProfileUpdatedProducer.publish(UserProfileUpdatedEvent.from(updated));
         return toResponse(updated);
     }
 
