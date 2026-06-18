@@ -1,5 +1,6 @@
 package com.tongji.relation.service;
 
+import com.tongji.recommendation.feed.FollowedAuthorRow;
 import java.util.List;
 import com.tongji.profile.api.dto.ProfileResponse;
 
@@ -60,4 +61,16 @@ public interface RelationService {
      * @return 粉丝用户的资料视图列表
      */
     List<ProfileResponse> followersProfiles(long userId, int limit, int offset, Long cursor);
+
+    List<Long> listFollowedLargeAuthorsForFeed(long userId,
+                                               java.sql.Timestamp cursorCreatedAt,
+                                               Long cursorToUserId,
+                                               int limit);
+
+    List<FollowedAuthorRow> listFollowedLargeAuthorRowsForFeed(long userId,
+                                                               java.sql.Timestamp cursorCreatedAt,
+                                                               Long cursorToUserId,
+                                                               int limit);
+
+    java.sql.Timestamp findFollowedAuthorCursorCreatedAt(long userId, long followedAuthorId);
 }

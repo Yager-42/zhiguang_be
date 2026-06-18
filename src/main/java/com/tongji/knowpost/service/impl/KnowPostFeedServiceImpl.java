@@ -21,8 +21,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -492,6 +494,39 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
             ));
         }
         return items;
+    }
+
+    @Override
+    public List<FeedItemResponse> getFeedByIds(List<Long> ids, Long currentUserIdNullable, FeedVisibilityScope scope) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        List<Long> orderedIds = ids.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (orderedIds.isEmpty()) {
+            return List.of();
+        }
+        List<KnowPostFeedRow> rows = mapper.listFeedByIds(
+                orderedIds,
+                currentUserIdNullable,
+                scope == FeedVisibilityScope.FOLLOW
+        );
+        Map<Long, KnowPostFeedRow> rowById = new HashMap<>(rows.size());
+        for (KnowPostFeedRow row : rows) {
+            if (row.getId() != null) {
+                rowById.put(row.getId(), row);
+            }
+        }
+        List<KnowPostFeedRow> orderedRows = new ArrayList<>(orderedIds.size());
+        for (Long id : orderedIds) {
+            KnowPostFeedRow row = rowById.get(id);
+            if (row != null) {
+                orderedRows.add(row);
+            }
+        }
+        return mapRowsToItems(orderedRows, currentUserIdNullable, false);
     }
 
 

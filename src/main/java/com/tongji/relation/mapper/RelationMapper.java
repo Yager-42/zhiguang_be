@@ -1,9 +1,12 @@
 package com.tongji.relation.mapper;
 
+import com.tongji.recommendation.feed.FanoutFollowerRow;
+import com.tongji.recommendation.feed.FollowedAuthorRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.MapKey;
 
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
 
@@ -130,4 +133,17 @@ public interface RelationMapper {
      * 统计粉丝数（有效关系）。
      */
     int countFollowerActive(@Param("toUserId") Long toUserId);
+
+    List<FanoutFollowerRow> listFollowersForFanout(@Param("toUserId") Long toUserId,
+                                                   @Param("cursorCreatedAt") java.sql.Timestamp cursorCreatedAt,
+                                                   @Param("cursorFromUserId") Long cursorFromUserId,
+                                                   @Param("limit") int limit);
+
+    List<FollowedAuthorRow> listFollowedAuthorsForFeed(@Param("fromUserId") Long fromUserId,
+                                                       @Param("cursorCreatedAt") java.sql.Timestamp cursorCreatedAt,
+                                                       @Param("cursorToUserId") Long cursorToUserId,
+                                                       @Param("limit") int limit);
+
+    Timestamp findFollowedAuthorCreatedAt(@Param("fromUserId") Long fromUserId,
+                                          @Param("toUserId") Long toUserId);
 }
