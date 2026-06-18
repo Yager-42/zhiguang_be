@@ -1,6 +1,9 @@
 package com.tongji.knowpost.api;
 
 import com.tongji.auth.token.JwtService;
+import com.tongji.common.exception.BusinessException;
+import com.tongji.common.exception.ErrorCode;
+import com.tongji.knowpost.api.dto.FeedItemResponse;
 import com.tongji.knowpost.api.dto.KnowPostContentConfirmRequest;
 import com.tongji.knowpost.api.dto.KnowPostDraftCreateResponse;
 import com.tongji.knowpost.api.dto.KnowPostPatchRequest;
@@ -14,8 +17,11 @@ import com.tongji.knowpost.manager.PublishManager;
 import com.tongji.knowpost.service.KnowPostService;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
+import com.tongji.recommendation.HomeFeedMixingService;
+import com.tongji.recommendation.feed.FollowFeedService;
+import com.tongji.recommendation.feed.TimelinePage;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,16 +29,38 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/v1/knowposts")
 @Validated
-@RequiredArgsConstructor
 public class KnowPostController {
+
+    private static final int FOLLOW_FEED_SIZE = 20;
 
     private final KnowPostService service;
     private final KnowPostFeedService feedService;
     private final JwtService jwtService;
     private final PublishManager publishManager;
+    private final HomeFeedMixingService homeFeedMixingService;
+    private final FollowFeedService followFeedService;
+    private final boolean mixedHomeFeedEnabled;
+
+    public KnowPostController(KnowPostService service,
+                              KnowPostFeedService feedService,
+                              JwtService jwtService,
+                              PublishManager publishManager,
+                              HomeFeedMixingService homeFeedMixingService,
+                              FollowFeedService followFeedService,
+                              @Value("${feed.home.mixed-enabled:false}") boolean mixedHomeFeedEnabled) {
+        this.service = service;
+        this.feedService = feedService;
+        this.jwtService = jwtService;
+        this.publishManager = publishManager;
+        this.homeFeedMixingService = homeFeedMixingService;
+        this.followFeedService = followFeedService;
+        this.mixedHomeFeedEnabled = mixedHomeFeedEnabled;
+    }
 
     /**
      * 创建草稿，返回新 ID。默认类型为 image_text。
@@ -140,7 +168,108 @@ public class KnowPostController {
                                  @RequestParam(value = "size", defaultValue = "20") int size,
                                  @AuthenticationPrincipal Jwt jwt) {
         Long userId = (jwt == null) ? null : jwtService.extractUserId(jwt);
+        if (userId != null && mixedHomeFeedEnabled) {
+            return homeFeedMixingService.getHomeFeed(userId);
+        }
         return feedService.getPublicFeed(page, size, userId);
+    }
+
+    @GetMapping("/feed/follow")
+    public FeedPageResponse followFeed(@RequestParam(value = "cursor", required = false) String cursor,
+                                       @AuthenticationPrincipal Jwt jwt) {
+        long userId = jwtService.extractUserId(jwt);
+        validateCursor(cursor);
+        List<FeedItemResponse> items = new java.util.ArrayList<>(FOLLOW_FEED_SIZE);
+        String currentCursor = cursor;
+        while (items.size() < FOLLOW_FEED_SIZE) {
+            TimelinePage timelinePage = followFeedService.getTimeline(userId, currentCursor, FOLLOW_FEED_SIZE);
+            if (timelinePage == null || timelinePage.items() == null) {
+                return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, false, null);
+            }
+            List<Long> ids = timelinePage.items().stream()
+                    .map(item -> item.contentId())
+                    .toList();
+            List<FeedItemResponse> hydrated = feedService.getFeedByIds(ids, userId, KnowPostFeedService.FeedVisibilityScope.FOLLOW);
+            if (hydrated == null) {
+                hydrated = List.of();
+            }
+            int need = FOLLOW_FEED_SIZE - items.size();
+            if (hydrated.size() >= need) {
+                items.addAll(hydrated.subList(0, need));
+                String lastIncludedCursor = cursorForLastIncludedRawItem(
+                        timelinePage.items(),
+                        hydrated.get(need - 1).id(),
+                        null
+                );
+                boolean hasMoreInCurrentBatch = hasMoreAfterIncludedItem(timelinePage.items(), hydrated.get(need - 1).id());
+                String nextCursor = (hasMoreInCurrentBatch || timelinePage.nextCursor() != null)
+                        ? lastIncludedCursor
+                        : null;
+                return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, nextCursor != null, nextCursor);
+            }
+            items.addAll(hydrated);
+            if (timelinePage.nextCursor() == null) {
+                return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, false, null);
+            }
+            currentCursor = timelinePage.nextCursor();
+        }
+        return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, false, null);
+    }
+
+    private String cursorForLastIncludedRawItem(List<com.tongji.recommendation.feed.TimelineItem> rawItems,
+                                                String lastIncludedId,
+                                                String fallbackCursor) {
+        if (lastIncludedId == null) {
+            return fallbackCursor;
+        }
+        try {
+            long includedContentId = Long.parseLong(lastIncludedId);
+            for (com.tongji.recommendation.feed.TimelineItem rawItem : rawItems) {
+                if (rawItem.contentId() == includedContentId) {
+                    return rawItem.publishTs().toEpochMilli() + ":" + rawItem.contentId();
+                }
+            }
+        } catch (NumberFormatException ignored) {
+            return fallbackCursor;
+        }
+        return fallbackCursor;
+    }
+
+    private boolean hasMoreAfterIncludedItem(List<com.tongji.recommendation.feed.TimelineItem> rawItems,
+                                             String lastIncludedId) {
+        if (rawItems == null || lastIncludedId == null) {
+            return false;
+        }
+        try {
+            long includedContentId = Long.parseLong(lastIncludedId);
+            for (int i = 0; i < rawItems.size(); i++) {
+                if (rawItems.get(i).contentId() == includedContentId) {
+                    return i < rawItems.size() - 1;
+                }
+            }
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+        return false;
+    }
+
+    private void validateCursor(String cursor) {
+        if (cursor == null) {
+            return;
+        }
+        if (cursor.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "cursor 非法");
+        }
+        int separator = cursor.indexOf(':');
+        if (separator <= 0 || separator == cursor.length() - 1) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "cursor 非法");
+        }
+        try {
+            Long.parseLong(cursor.substring(0, separator));
+            Long.parseLong(cursor.substring(separator + 1));
+        } catch (NumberFormatException ex) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "cursor 非法");
+        }
     }
 
     /**
