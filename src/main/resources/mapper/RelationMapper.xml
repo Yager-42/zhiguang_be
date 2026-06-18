@@ -65,4 +65,41 @@
     <select id="countFollowerActive" resultType="int">
         SELECT COUNT(1) FROM follower WHERE to_user_id=#{toUserId} AND rel_status=1
     </select>
+
+    <select id="listFollowersForFanout" resultType="com.tongji.recommendation.feed.FanoutFollowerRow">
+        SELECT from_user_id AS fromUserId, created_at AS createdAt
+        FROM follower
+        WHERE to_user_id=#{toUserId}
+          AND rel_status=1
+          AND (
+                #{cursorCreatedAt} IS NULL
+                OR created_at &lt; #{cursorCreatedAt}
+                OR (created_at = #{cursorCreatedAt} AND from_user_id &lt; #{cursorFromUserId})
+              )
+        ORDER BY created_at DESC, from_user_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="listFollowedAuthorsForFeed" resultType="com.tongji.recommendation.feed.FollowedAuthorRow">
+        SELECT to_user_id AS toUserId, created_at AS createdAt
+        FROM following
+        WHERE from_user_id=#{fromUserId}
+          AND rel_status=1
+          AND (
+                #{cursorCreatedAt} IS NULL
+                OR created_at &lt; #{cursorCreatedAt}
+                OR (created_at = #{cursorCreatedAt} AND to_user_id &lt; #{cursorToUserId})
+              )
+        ORDER BY created_at DESC, to_user_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="findFollowedAuthorCreatedAt" resultType="java.sql.Timestamp">
+        SELECT created_at
+        FROM following
+        WHERE from_user_id=#{fromUserId}
+          AND to_user_id=#{toUserId}
+          AND rel_status=1
+        LIMIT 1
+    </select>
 </mapper>
