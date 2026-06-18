@@ -111,6 +111,24 @@ counter:
   rebuild:
     enabled: false
 
+recommendation:
+  gorse:
+    endpoint: ${GORSE_ENDPOINT:http://localhost:8087}
+    api-key: ${GORSE_API_KEY:}
+    timeout-ms: ${GORSE_TIMEOUT_MS:300}
+    enabled: ${GORSE_ENABLED:false}
+
+feed:
+  home:
+    mixed-enabled: false
+  fanout:
+    push-pull-threshold: 10000
+  inbox:
+    ttl-days: 30
+  cache:
+    timeline-ttl-seconds: 300
+    author-head-ttl-seconds: 120
+
 management:
   endpoints:
     web:

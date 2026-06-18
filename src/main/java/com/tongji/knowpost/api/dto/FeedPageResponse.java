@@ -9,5 +9,10 @@ public record FeedPageResponse(
         List<FeedItemResponse> items,
         int page,
         int size,
-        boolean hasMore
-) {}
+        boolean hasMore,
+        String nextCursor
+) {
+    public FeedPageResponse(List<FeedItemResponse> items, int page, int size, boolean hasMore) {
+        this(items, page, size, hasMore, null);
+    }
+}

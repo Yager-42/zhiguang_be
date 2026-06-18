@@ -167,6 +167,50 @@
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
+    <select id="listFeedPublicIds" resultType="long">
+        SELECT p.id
+        FROM know_posts p
+        WHERE p.status = 'published' AND p.visible = 'public'
+        ORDER BY p.publish_time DESC, p.id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="listFeedByIds" resultType="com.tongji.knowpost.model.KnowPostFeedRow">
+        SELECT
+            p.id,
+            p.title,
+            p.description,
+            p.tags,
+            p.img_urls AS imgUrls,
+            u.avatar AS authorAvatar,
+            u.nickname AS authorNickname,
+            u.tags_json AS authorTagJson,
+            p.publish_time AS publishTime,
+            p.is_top AS isTop
+        FROM know_posts p
+        JOIN users u ON p.creator_id = u.id
+        WHERE p.status = 'published'
+          AND p.id IN
+          <foreach collection="ids" item="id" open="(" separator="," close=")">
+              #{id}
+          </foreach>
+          AND (
+              p.visible = 'public'
+              OR (
+                  #{allowFollowers}
+                  AND #{currentUserId} IS NOT NULL
+                  AND p.visible = 'followers'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM following f
+                      WHERE f.from_user_id = #{currentUserId}
+                        AND f.to_user_id = p.creator_id
+                        AND f.rel_status = 1
+                  )
+              )
+          )
+    </select>
+
     <!-- 我的知文列表查询（当前用户的已发布内容），置顶优先，其次按发布时间倒序 -->
     <select id="listMyPublished" resultType="com.tongji.knowpost.model.KnowPostFeedRow">
         SELECT

@@ -1,5 +1,6 @@
 package com.tongji.relation.service.impl;
 
+import com.tongji.recommendation.feed.FollowedAuthorRow;
 import com.tongji.relation.mapper.RelationMapper;
 import com.tongji.relation.service.RelationService;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -151,6 +152,35 @@ public class RelationServiceImpl implements RelationService {
         List<Long> ids = cursor != null ? followersCursor(userId, limit, cursor)
                                         : followers(userId, limit, offset);
         return toProfiles(ids);
+    }
+
+    @Override
+    public List<Long> listFollowedLargeAuthorsForFeed(long userId,
+                                                      Timestamp cursorCreatedAt,
+                                                      Long cursorToUserId,
+                                                      int limit) {
+        List<FollowedAuthorRow> rows = listFollowedLargeAuthorRowsForFeed(userId, cursorCreatedAt, cursorToUserId, limit);
+        List<Long> out = new ArrayList<>(rows == null ? 0 : rows.size());
+        if (rows == null) {
+            return out;
+        }
+        for (FollowedAuthorRow row : rows) {
+            out.add(row.getToUserId());
+        }
+        return out;
+    }
+
+    @Override
+    public List<FollowedAuthorRow> listFollowedLargeAuthorRowsForFeed(long userId,
+                                                                      Timestamp cursorCreatedAt,
+                                                                      Long cursorToUserId,
+                                                                      int limit) {
+        return mapper.listFollowedAuthorsForFeed(userId, cursorCreatedAt, cursorToUserId, Math.max(1, limit));
+    }
+
+    @Override
+    public Timestamp findFollowedAuthorCursorCreatedAt(long userId, long followedAuthorId) {
+        return mapper.findFollowedAuthorCreatedAt(userId, followedAuthorId);
     }
 
     /**

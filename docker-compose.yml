@@ -153,6 +153,20 @@ services:
       mc anonymous set download local/$$MINIO_BUCKET
       "
 
+  gorse:
+    image: zhenghaoz/gorse-in-one:latest
+    container_name: zhiguang-gorse
+    restart: unless-stopped
+    profiles: ["recommendation"]
+    command: ["--playground"]
+    ports:
+      - "8087:8088"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8088/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
 volumes:
   mysql-data:
   redis-data:
