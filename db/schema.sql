@@ -141,6 +141,51 @@ CREATE TABLE IF NOT EXISTS pending_comments (
     UNIQUE KEY uk_pending_comment_client_request (creator_id, client_request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS reconciliation_task (
+    id BIGINT UNSIGNED NOT NULL,
+    task_type VARCHAR(64) NOT NULL,
+    target_type VARCHAR(32) NOT NULL,
+    target_id BIGINT UNSIGNED NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    retry_count INT NOT NULL DEFAULT 0,
+    next_execute_at DATETIME(3) NOT NULL,
+    execution_duration_ms BIGINT NULL,
+    dedupe_scope VARCHAR(180) NULL,
+    task_payload TEXT NULL,
+    last_error VARCHAR(512) NULL,
+    active_dedupe_scope VARCHAR(180)
+        GENERATED ALWAYS AS (
+            CASE
+                WHEN status IN ('pending', 'running') THEN dedupe_scope
+                ELSE NULL
+            END
+        ) STORED,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_reconciliation_task_scheduled (status, next_execute_at),
+    KEY idx_reconciliation_task_target (target_type, target_id, task_type),
+    UNIQUE KEY uk_reconciliation_task_active_dedupe_scope (active_dedupe_scope)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS reconciliation_checkpoint (
+    scan_type VARCHAR(64) NOT NULL,
+    last_scanned_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (scan_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS reconciliation_error_log (
+    id BIGINT UNSIGNED NOT NULL,
+    task_id BIGINT UNSIGNED NOT NULL,
+    execution_duration_ms BIGINT NULL,
+    error_message TEXT NULL,
+    stack_trace TEXT NULL,
+    created_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_reconciliation_error_log_task_id (task_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS following (
     id BIGINT UNSIGNED NOT NULL,
     from_user_id BIGINT UNSIGNED NOT NULL,

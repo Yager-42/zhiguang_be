@@ -64,4 +64,10 @@ public interface KnowPostMapper {
     long countMyPublished(@Param("creatorId") long creatorId);
 
     List<Long> listMyPublishedIds(@Param("creatorId") long creatorId);
+
+    List<Long> listPublishedPostIdsCursor(@Param("cursorPostId") Long cursorPostId,
+                                          @Param("limit") int limit);
+
+    List<Long> listPublicPublishedPostIdsCursor(@Param("cursorPostId") Long cursorPostId,
+                                                @Param("limit") int limit);
 }

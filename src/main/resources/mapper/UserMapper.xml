@@ -131,4 +131,16 @@
         </foreach>
     </select>
 
+    <select id="listUserIdsCursor" resultType="long">
+        SELECT id
+        FROM users
+        <where>
+            <if test="cursorUserId != null">
+                id &gt; #{cursorUserId}
+            </if>
+        </where>
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
 </mapper>

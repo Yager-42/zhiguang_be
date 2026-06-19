@@ -72,11 +72,35 @@
         SELECT comment_id
         FROM comments
         <where>
+            status = 0
             <if test="cursorCommentId != null">
-                comment_id &gt; #{cursorCommentId}
+                AND comment_id &gt; #{cursorCommentId}
             </if>
         </where>
         ORDER BY comment_id ASC
         LIMIT #{limit}
     </select>
+
+    <select id="countActiveTopLevelByPost" resultType="int">
+        SELECT COUNT(1)
+        FROM comments
+        WHERE post_id = #{postId}
+          AND parent_id = 0
+          AND status = 0
+    </select>
+
+    <select id="countActiveRepliesByRoot" resultType="int">
+        SELECT COUNT(1)
+        FROM comments
+        WHERE root_id = #{rootId}
+          AND parent_id != 0
+          AND status = 0
+    </select>
+
+    <update id="updateReplyCount">
+        UPDATE comments
+        SET reply_count = #{replyCount},
+            update_time = NOW(3)
+        WHERE comment_id = #{commentId}
+    </update>
 </mapper>

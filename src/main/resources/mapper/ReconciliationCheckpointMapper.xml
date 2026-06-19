@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.reconciliation.mapper.ReconciliationCheckpointMapper">
+
+    <resultMap id="ReconciliationCheckpointResultMap" type="com.tongji.reconciliation.model.ReconciliationCheckpoint">
+        <id property="scanType" column="scan_type" />
+        <result property="lastScannedId" column="last_scanned_id" />
+        <result property="updatedAt" column="updated_at" />
+    </resultMap>
+
+    <select id="findByScanType" resultMap="ReconciliationCheckpointResultMap">
+        SELECT *
+        FROM reconciliation_checkpoint
+        WHERE scan_type = #{scanType}
+        LIMIT 1
+    </select>
+
+    <insert id="upsert" parameterType="com.tongji.reconciliation.model.ReconciliationCheckpoint">
+        INSERT INTO reconciliation_checkpoint (scan_type, last_scanned_id, updated_at)
+        VALUES (#{scanType}, #{lastScannedId}, #{updatedAt})
+        ON DUPLICATE KEY UPDATE
+            last_scanned_id = VALUES(last_scanned_id),
+            updated_at = VALUES(updated_at)
+    </insert>
+
+    <update id="updateCheckpoint">
+        UPDATE reconciliation_checkpoint
+        SET last_scanned_id = #{lastScannedId},
+            updated_at = NOW(3)
+        WHERE scan_type = #{scanType}
+    </update>
+</mapper>

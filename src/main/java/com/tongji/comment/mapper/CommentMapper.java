@@ -27,4 +27,10 @@ public interface CommentMapper {
 
     List<Long> listCommentIdsCursor(@Param("cursorCommentId") Long cursorCommentId,
                                     @Param("limit") int limit);
+
+    int countActiveTopLevelByPost(@Param("postId") Long postId);
+
+    int countActiveRepliesByRoot(@Param("rootId") Long rootId);
+
+    int updateReplyCount(@Param("commentId") Long commentId, @Param("replyCount") int replyCount);
 }

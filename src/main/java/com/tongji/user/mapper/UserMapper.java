@@ -27,4 +27,7 @@ public interface UserMapper {
     boolean existsByZgIdExceptId(@Param("zgId") String zgId, @Param("excludeId") Long excludeId);
 
     List<User> listByIds(@Param("ids") List<Long> ids);
+
+    List<Long> listUserIdsCursor(@Param("cursorUserId") Long cursorUserId,
+                                 @Param("limit") int limit);
 }

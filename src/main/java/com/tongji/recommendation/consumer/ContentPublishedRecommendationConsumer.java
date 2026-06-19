@@ -3,6 +3,9 @@ package com.tongji.recommendation.consumer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.common.util.OutboxMessageUtil;
+import com.tongji.reconciliation.model.ReconciliationTargetType;
+import com.tongji.reconciliation.model.ReconciliationTaskType;
+import com.tongji.reconciliation.service.ReconciliationService;
 import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
 import com.tongji.relation.outbox.OutboxTopics;
@@ -23,15 +26,18 @@ public class ContentPublishedRecommendationConsumer {
     private final GorseClient gorseClient;
     private final GorseProperties properties;
     private final TaskExecutor taskExecutor;
+    private final ReconciliationService reconciliationService;
 
     public ContentPublishedRecommendationConsumer(ObjectMapper objectMapper,
                                                   GorseClient gorseClient,
                                                   GorseProperties properties,
-                                                  @Qualifier("taskExecutor") TaskExecutor taskExecutor) {
+                                                  @Qualifier("taskExecutor") TaskExecutor taskExecutor,
+                                                  ReconciliationService reconciliationService) {
         this.objectMapper = objectMapper;
         this.gorseClient = gorseClient;
         this.properties = properties;
         this.taskExecutor = taskExecutor;
+        this.reconciliationService = reconciliationService;
     }
 
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX, groupId = "recommendation-content-published-consumer")
@@ -46,13 +52,18 @@ public class ContentPublishedRecommendationConsumer {
             return;
         }
         taskExecutor.execute(() -> {
-            try {
-                for (PublishedItem item : items) {
+            for (PublishedItem item : items) {
+                try {
                     gorseClient.upsertItem(item.postId(), item.authorId(), item.publishedAt());
+                } catch (RuntimeException ignored) {
+                    reconciliationService.createTaskIfAbsent(
+                            ReconciliationTaskType.GORSE_ITEM_UPSERT,
+                            ReconciliationTargetType.POST,
+                            item.postId()
+                    );
                 }
-                acknowledgment.acknowledge();
-            } catch (RuntimeException ignored) {
             }
+            acknowledgment.acknowledge();
         });
     }
 

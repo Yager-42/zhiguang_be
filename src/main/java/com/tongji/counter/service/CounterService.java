@@ -31,6 +31,16 @@ public interface CounterService {
      */
     Map<String, Long> getCounts(String entityType, String entityId, List<String> metrics);
 
+    /**
+     * 基于事实源强制重建指定指标，并回写 SDS。
+     */
+    Map<String, Long> rebuildCountsFromFacts(String entityType, String entityId, List<String> metrics);
+
+    /**
+     * 直接覆盖指定指标计数。
+     */
+    void overwriteCount(String entityType, String entityId, String metric, long value);
+
     Map<String, Map<String, Long>> getCountsBatch(String entityType, List<String> entityIds, List<String> metrics);
 
     /**
