@@ -2,6 +2,10 @@ package com.tongji.recommendation.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.event.CommentFeedbackEvent;
+import com.tongji.reconciliation.model.ReconciliationTargetType;
+import com.tongji.reconciliation.model.ReconciliationTaskType;
+import com.tongji.reconciliation.service.ReconciliationService;
+import com.tongji.reconciliation.executor.GorseFeedbackReconciler.GorseFeedbackPayload;
 import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -14,13 +18,16 @@ public class CommentFeedbackRecommendationConsumer {
     private final ObjectMapper objectMapper;
     private final GorseClient gorseClient;
     private final GorseProperties properties;
+    private final ReconciliationService reconciliationService;
 
     public CommentFeedbackRecommendationConsumer(ObjectMapper objectMapper,
                                                  GorseClient gorseClient,
-                                                 GorseProperties properties) {
+                                                 GorseProperties properties,
+                                                 ReconciliationService reconciliationService) {
         this.objectMapper = objectMapper;
         this.gorseClient = gorseClient;
         this.properties = properties;
+        this.reconciliationService = reconciliationService;
     }
 
     @KafkaListener(
@@ -34,7 +41,20 @@ public class CommentFeedbackRecommendationConsumer {
         }
         CommentFeedbackEvent event = objectMapper.readValue(message, CommentFeedbackEvent.class);
         if (CommentFeedbackEvent.COMMENT.equals(event.action()) && event.postId() != null) {
-            gorseClient.insertFeedback("comment", event.creatorId(), String.valueOf(event.postId()));
+            try {
+                gorseClient.insertFeedback("comment", event.creatorId(), String.valueOf(event.postId()));
+            } catch (RuntimeException ignored) {
+                reconciliationService.createTaskIfAbsent(
+                        ReconciliationTaskType.GORSE_FEEDBACK,
+                        ReconciliationTargetType.POST,
+                        event.postId(),
+                        objectMapper.writeValueAsString(new GorseFeedbackPayload(
+                                "comment",
+                                event.creatorId(),
+                                String.valueOf(event.postId())
+                        ))
+                );
+            }
         }
         acknowledgment.acknowledge();
     }

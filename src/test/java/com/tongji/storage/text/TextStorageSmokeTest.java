@@ -4,6 +4,7 @@ import com.datastax.oss.driver.api.core.CqlSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.data.cassandra.DataCassandraTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -32,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataCassandraTest
 @Import({CassandraTextStorageService.class, TextStorageSmokeTest.TestConfig.class})
+@EnabledIf("cassandraEnvironmentAvailable")
 class TextStorageSmokeTest {
 
     private static final String KEYSPACE = "zhiguang";
@@ -92,6 +94,10 @@ class TextStorageSmokeTest {
                 .containsEntry(201L, "comment one")
                 .containsEntry(203L, "comment three")
                 .doesNotContainKey(202L);
+    }
+
+    static boolean cassandraEnvironmentAvailable() {
+        return CASSANDRA.environmentAvailable();
     }
 
     private static void ensureSchema() {
@@ -172,6 +178,10 @@ class TextStorageSmokeTest {
             this.port = waitForMappedPort();
             waitUntilReady();
             this.started = true;
+        }
+
+        boolean environmentAvailable() {
+            return useExternalIfReady() || dockerAvailable();
         }
 
         String getHost() {
@@ -275,6 +285,15 @@ class TextStorageSmokeTest {
             command[0] = "docker";
             System.arraycopy(arguments, 0, command, 1, arguments.length);
             return commandRunner.apply(command);
+        }
+
+        private boolean dockerAvailable() {
+            try {
+                runDocker("info");
+                return true;
+            } catch (RuntimeException e) {
+                return false;
+            }
         }
 
         private static String runCommand(String... command) {

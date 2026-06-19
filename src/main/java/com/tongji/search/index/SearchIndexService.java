@@ -1,6 +1,7 @@
 package com.tongji.search.index;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.IndexRequest;
 import co.elastic.clients.elasticsearch.core.IndexResponse;
 import co.elastic.clients.elasticsearch._types.Refresh;
@@ -69,60 +70,105 @@ public class SearchIndexService {
      */
     public void upsertKnowPost(long id) {
         try {
-            KnowPostDetailRow row = knowPostMapper.findDetailById(id);
-            if (row == null) {
-                log.warn("Index upsert skipped: post {} not found", id);
-                return;
-            }
-            Map<String, Object> doc = new HashMap<>();
-            doc.put("content_id", row.getId());
-            doc.put("content_type", row.getType());
-            doc.put("title", row.getTitle());
-            doc.put("description", row.getDescription());
-            doc.put("author_id", row.getCreatorId());
-            doc.put("author_avatar", row.getAuthorAvatar());
-            doc.put("author_nickname", row.getAuthorNickname());
-            doc.put("author_tag_json", row.getAuthorTagJson());
-            if (row.getPublishTime() != null) {
-                doc.put("publish_time", row.getPublishTime().toEpochMilli());
-            }
-            doc.put("status", row.getStatus());
-            doc.put("tags", parseStringArray(row.getTags()));
-            doc.put("img_urls", parseStringArray(row.getImgUrls()));
-            if (row.getIsTop() != null) {
-                doc.put("is_top", row.getIsTop());
-            }
-
-            // 正文优先读取正文存储，缺失时退回描述
-            String body = textStorageService.getPostText(id, row.getContentUrl()).orElse(null);
-            if (body == null || body.isBlank()) {
-                body = row.getDescription();
-            }
-            if (body != null) {
-                doc.put("body", truncate(body, 4000));
-            }
-
-            Map<String, Long> counts = counterService.getCounts("knowpost", String.valueOf(id), List.of("like","fav"));
-            doc.put("like_count", counts.getOrDefault("like", 0L));
-            doc.put("favorite_count", counts.getOrDefault("fav", 0L));
-            doc.put("view_count", 0L);
-
-            if (row.getTitle() != null && !row.getTitle().isBlank()) {
-                doc.put("title_suggest", row.getTitle());
-            }
-
-            // 刷新策略：wait_for，保证写入后即刻可检索
-            IndexRequest<Map<String, Object>> req = IndexRequest.of(b -> b
-                    .index(INDEX)
-                    .id(String.valueOf(id))
-                    .document(doc)
-                    .refresh(Refresh.WaitFor)
-            );
-            IndexResponse resp = es.index(req);
-            log.info("Indexed post {} result={} version={}", id, resp.result(), resp.version());
+            upsertKnowPostStrict(id);
         } catch (Exception e) {
             log.error("Index upsert failed for post {}: {}", id, e.getMessage());
         }
+    }
+
+    public void upsertKnowPostStrict(long id) {
+        try {
+            doUpsertKnowPost(id);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("Index upsert failed for post " + id, e);
+        }
+    }
+
+    public boolean hasKnowPostDocument(long id) {
+        try {
+            GetResponse<Map> response = es.get(g -> g
+                    .index(INDEX)
+                    .id(String.valueOf(id)), Map.class);
+            return response.found();
+        } catch (Exception e) {
+            log.warn("Search document existence check failed for post {}: {}", id, e.getMessage());
+            throw new IllegalStateException("Search document existence check failed for post " + id, e);
+        }
+    }
+
+    public Map<String, Long> readKnowPostEngagementCounts(long id) {
+        try {
+            GetResponse<Map> response = es.get(g -> g
+                    .index(INDEX)
+                    .id(String.valueOf(id)), Map.class);
+            if (!response.found() || response.source() == null) {
+                return Collections.emptyMap();
+            }
+            Object like = response.source().get("like_count");
+            Object favorite = response.source().get("favorite_count");
+            Map<String, Long> counts = new HashMap<>();
+            counts.put("like", asLong(like));
+            counts.put("fav", asLong(favorite));
+            return counts;
+        } catch (Exception e) {
+            log.warn("Search document count read failed for post {}: {}", id, e.getMessage());
+            throw new IllegalStateException("Search document count read failed for post " + id, e);
+        }
+    }
+
+    private void doUpsertKnowPost(long id) throws Exception {
+        KnowPostDetailRow row = knowPostMapper.findDetailById(id);
+        if (row == null) {
+            throw new IllegalStateException("Post " + id + " not found for search indexing");
+        }
+        Map<String, Object> doc = new HashMap<>();
+        doc.put("content_id", row.getId());
+        doc.put("content_type", row.getType());
+        doc.put("title", row.getTitle());
+        doc.put("description", row.getDescription());
+        doc.put("author_id", row.getCreatorId());
+        doc.put("author_avatar", row.getAuthorAvatar());
+        doc.put("author_nickname", row.getAuthorNickname());
+        doc.put("author_tag_json", row.getAuthorTagJson());
+        if (row.getPublishTime() != null) {
+            doc.put("publish_time", row.getPublishTime().toEpochMilli());
+        }
+        doc.put("status", row.getStatus());
+        doc.put("tags", parseStringArray(row.getTags()));
+        doc.put("img_urls", parseStringArray(row.getImgUrls()));
+        if (row.getIsTop() != null) {
+            doc.put("is_top", row.getIsTop());
+        }
+
+        // 正文优先读取正文存储，缺失时退回描述
+        String body = textStorageService.getPostText(id, row.getContentUrl()).orElse(null);
+        if (body == null || body.isBlank()) {
+            body = row.getDescription();
+        }
+        if (body != null) {
+            doc.put("body", truncate(body, 4000));
+        }
+
+        Map<String, Long> counts = counterService.getCounts("knowpost", String.valueOf(id), List.of("like","fav"));
+        doc.put("like_count", counts.getOrDefault("like", 0L));
+        doc.put("favorite_count", counts.getOrDefault("fav", 0L));
+        doc.put("view_count", 0L);
+
+        if (row.getTitle() != null && !row.getTitle().isBlank()) {
+            doc.put("title_suggest", row.getTitle());
+        }
+
+        // 刷新策略：wait_for，保证写入后即刻可检索
+        IndexRequest<Map<String, Object>> req = IndexRequest.of(b -> b
+                .index(INDEX)
+                .id(String.valueOf(id))
+                .document(doc)
+                .refresh(Refresh.WaitFor)
+        );
+        IndexResponse resp = es.index(req);
+        log.info("Indexed post {} result={} version={}", id, resp.result(), resp.version());
     }
 
     /**
@@ -169,5 +215,19 @@ public class SearchIndexService {
         } catch (Exception e) {
             return Collections.emptyList();
         }
+    }
+
+    private long asLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String string && !string.isBlank()) {
+            try {
+                return Long.parseLong(string);
+            } catch (NumberFormatException ignored) {
+                return 0L;
+            }
+        }
+        return 0L;
     }
 }

@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.reconciliation.mapper.ReconciliationTaskMapper">
+
+    <resultMap id="ReconciliationTaskResultMap" type="com.tongji.reconciliation.model.ReconciliationTask">
+        <id property="id" column="id" />
+        <result property="taskType" column="task_type" />
+        <result property="targetType" column="target_type" />
+        <result property="targetId" column="target_id" />
+        <result property="status" column="status" />
+        <result property="retryCount" column="retry_count" />
+        <result property="nextExecuteAt" column="next_execute_at" />
+        <result property="executionDurationMs" column="execution_duration_ms" />
+        <result property="dedupeScope" column="dedupe_scope" />
+        <result property="taskPayload" column="task_payload" />
+        <result property="lastError" column="last_error" />
+        <result property="createdAt" column="created_at" />
+        <result property="updatedAt" column="updated_at" />
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.reconciliation.model.ReconciliationTask">
+        INSERT INTO reconciliation_task (
+            id, task_type, target_type, target_id, status, retry_count,
+            next_execute_at, execution_duration_ms, dedupe_scope, task_payload, last_error, created_at, updated_at
+        ) VALUES (
+            #{id}, #{taskType}, #{targetType}, #{targetId}, #{status}, #{retryCount},
+            #{nextExecuteAt}, #{executionDurationMs}, #{dedupeScope}, #{taskPayload}, #{lastError}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="findById" resultMap="ReconciliationTaskResultMap">
+        SELECT *
+        FROM reconciliation_task
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
+    <select id="findActiveByDedupeScope" resultMap="ReconciliationTaskResultMap">
+        SELECT *
+        FROM reconciliation_task
+        WHERE active_dedupe_scope = #{dedupeScope}
+        LIMIT 1
+    </select>
+
+    <select id="pollPending" resultMap="ReconciliationTaskResultMap">
+        SELECT *
+        FROM reconciliation_task
+        WHERE status = 'pending'
+          AND next_execute_at &lt;= NOW(3)
+        ORDER BY next_execute_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="markRunning">
+        UPDATE reconciliation_task
+        SET status = 'running',
+            updated_at = NOW(3)
+        WHERE id = #{id}
+          AND status = 'pending'
+    </update>
+
+    <update id="markSucceeded">
+        UPDATE reconciliation_task
+        SET status = 'succeeded',
+            execution_duration_ms = #{executionDurationMs},
+            last_error = NULL,
+            updated_at = NOW(3)
+        WHERE id = #{id}
+          AND status = 'running'
+    </update>
+
+    <update id="markPendingRetry">
+        UPDATE reconciliation_task
+        SET status = 'pending',
+            retry_count = #{retryCount},
+            next_execute_at = #{nextExecuteAt},
+            execution_duration_ms = #{executionDurationMs},
+            last_error = #{lastError},
+            updated_at = NOW(3)
+        WHERE id = #{id}
+          AND status = 'running'
+    </update>
+
+    <update id="markDead">
+        UPDATE reconciliation_task
+        SET status = 'dead',
+            execution_duration_ms = #{executionDurationMs},
+            last_error = #{lastError},
+            updated_at = NOW(3)
+        WHERE id = #{id}
+          AND status = 'running'
+    </update>
+
+    <update id="resetDeadToPending">
+        UPDATE reconciliation_task
+        SET status = 'pending',
+            retry_count = 0,
+            next_execute_at = NOW(3),
+            execution_duration_ms = NULL,
+            last_error = NULL,
+            updated_at = NOW(3)
+        WHERE id = #{id}
+          AND status = 'dead'
+    </update>
+
+    <select id="findStuckRunning" resultMap="ReconciliationTaskResultMap">
+        SELECT *
+        FROM reconciliation_task
+        WHERE status = 'running'
+          AND updated_at &lt;= #{staleBefore}
+        ORDER BY updated_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="resetRunningToPending">
+        UPDATE reconciliation_task
+        SET status = 'pending',
+            updated_at = NOW(3)
+        WHERE id = #{id}
+          AND status = 'running'
+    </update>
+
+    <select id="existsActiveTask" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1
+            FROM reconciliation_task
+            WHERE task_type = #{taskType}
+              AND target_type = #{targetType}
+              AND target_id = #{targetId}
+              AND status IN ('pending', 'running')
+        )
+    </select>
+
+    <select id="existsByStatus" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1
+            FROM reconciliation_task
+            WHERE task_type = #{taskType}
+              AND target_type = #{targetType}
+              AND target_id = #{targetId}
+              AND status = #{status}
+        )
+    </select>
+
+    <select id="query" parameterType="com.tongji.reconciliation.model.ReconciliationTaskQuery" resultMap="ReconciliationTaskResultMap">
+        SELECT *
+        FROM reconciliation_task
+        <where>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+            <if test="taskType != null and taskType != ''">
+                AND task_type = #{taskType}
+            </if>
+            <if test="targetType != null and targetType != ''">
+                AND target_type = #{targetType}
+            </if>
+            <if test="targetId != null">
+                AND target_id = #{targetId}
+            </if>
+        </where>
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+</mapper>

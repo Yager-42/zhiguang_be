@@ -77,6 +77,15 @@ class CommentTask2ContractTest {
         assertThat(schema).doesNotContain("KEY idx_root_replies (root_id, status, create_time)");
     }
 
+    @Test
+    void commentCursorOnlyScansLiveComments() throws Exception {
+        String commentXml = Files.readString(Path.of("src/main/resources/mapper/CommentMapper.xml"));
+
+        assertThat(normalizeXml(extractStatement(commentXml, "select", "listCommentIdsCursor")))
+                .contains("status = 0")
+                .contains("AND comment_id &gt; #{cursorCommentId}");
+    }
+
     private static void assertFields(String className, String... fields) throws Exception {
         Class<?> type = Class.forName(className);
         for (String field : fields) {

@@ -24,6 +24,17 @@ class GorseFeedbackRecommendationConsumerContractTest {
         assertThat(restTemplate.lastUrl).endsWith("/api/feedback");
     }
 
+    @Test
+    void itemExistenceChecksUseGetOnItemResource() {
+        RecordingRestTemplate restTemplate = new RecordingRestTemplate();
+        GorseClient client = new GorseClient(restTemplate, properties());
+
+        client.hasItem(101L);
+
+        assertThat(restTemplate.lastMethod).isEqualTo(HttpMethod.GET);
+        assertThat(restTemplate.lastUrl).endsWith("/api/item/101");
+    }
+
     private GorseProperties properties() {
         GorseProperties properties = new GorseProperties();
         properties.setEnabled(true);

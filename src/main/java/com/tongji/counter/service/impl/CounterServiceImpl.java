@@ -226,6 +226,57 @@ public class CounterServiceImpl implements CounterService {
         return result;
     }
 
+    @Override
+    public Map<String, Long> rebuildCountsFromFacts(String entityType, String entityId, List<String> metrics) {
+        String sdsKey = CounterKeys.sdsKey(entityType, entityId);
+        int expectedLen = CounterSchema.SCHEMA_LEN * CounterSchema.FIELD_SIZE;
+        byte[] raw = getRaw(sdsKey);
+        byte[] buf = new byte[expectedLen];
+        if (raw != null && raw.length == expectedLen) {
+            System.arraycopy(raw, 0, buf, 0, expectedLen);
+        }
+
+        Map<String, Long> result = new LinkedHashMap<>();
+        List<String> rebuildFields = new ArrayList<>();
+        for (String metric : metrics) {
+            Integer idx = CounterSchema.NAME_TO_IDX.get(metric);
+            if (idx == null) {
+                continue;
+            }
+            long sum = bitCountShardsPipelined(metric, entityType, entityId);
+            writeInt32BE(buf, idx * CounterSchema.FIELD_SIZE, sum);
+            result.put(metric, sum);
+            rebuildFields.add(String.valueOf(idx));
+        }
+
+        setRaw(sdsKey, buf);
+        if (!rebuildFields.isEmpty()) {
+            String aggKey = CounterKeys.aggKey(entityType, entityId);
+            redis.opsForHash().delete(aggKey, rebuildFields.toArray());
+        }
+        resetBackoff(entityType, entityId);
+        return result;
+    }
+
+    @Override
+    public void overwriteCount(String entityType, String entityId, String metric, long value) {
+        Integer idx = CounterSchema.NAME_TO_IDX.get(metric);
+        if (idx == null) {
+            throw new IllegalArgumentException("Unsupported metric " + metric);
+        }
+        String sdsKey = CounterKeys.sdsKey(entityType, entityId);
+        int expectedLen = CounterSchema.SCHEMA_LEN * CounterSchema.FIELD_SIZE;
+        byte[] raw = getRaw(sdsKey);
+        byte[] buf = new byte[expectedLen];
+        if (raw != null && raw.length == expectedLen) {
+            System.arraycopy(raw, 0, buf, 0, expectedLen);
+        }
+        writeInt32BE(buf, idx * CounterSchema.FIELD_SIZE, value);
+        setRaw(sdsKey, buf);
+        String aggKey = CounterKeys.aggKey(entityType, entityId);
+        redis.opsForHash().delete(aggKey, String.valueOf(idx));
+    }
+
     /**
      * 批量获取实体计数（管道批量 GET 降低 RTT）。
      * 缺失或结构异常（长度不符）时按零返回，保证接口稳定。

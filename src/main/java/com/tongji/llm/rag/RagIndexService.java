@@ -43,6 +43,49 @@ public class RagIndexService {
         reindexSinglePost(postId);
     }
 
+    public boolean hasIndexForPost(long postId) {
+        try {
+            if (!StringUtils.hasText(esProps.getIndex())) {
+                return false;
+            }
+            SearchResponse<Map> resp = es.search(s -> s
+                            .index(esProps.getIndex())
+                            .size(1)
+                            .query(q -> q.term(t -> t
+                                    .field("metadata.postId")
+                                    .value(v -> v.stringValue(String.valueOf(postId))))),
+                    Map.class);
+            List<Hit<Map>> hits = resp.hits().hits();
+            return hits != null && !hits.isEmpty();
+        } catch (Exception e) {
+            log.warn("RAG document existence check failed for post {}: {}", postId, e.getMessage());
+            throw new IllegalStateException("RAG document existence check failed for post " + postId, e);
+        }
+    }
+
+    public void ensureIndexedStrict(long postId) {
+        int indexed = reindexSinglePost(postId);
+        if (indexed > 0) {
+            return;
+        }
+
+        KnowPostDetailRow row = knowPostMapper.findDetailById(postId);
+        if (row == null) {
+            throw new IllegalStateException("Post " + postId + " not found for RAG indexing");
+        }
+        if (!"published".equalsIgnoreCase(row.getStatus()) || !"public".equalsIgnoreCase(row.getVisible())) {
+            throw new IllegalStateException("Post " + postId + " is not public/published for RAG indexing");
+        }
+        String text = textStorageService.getPostText(postId, row.getContentUrl()).orElse(null);
+        if (!StringUtils.hasText(text)) {
+            throw new IllegalStateException("Post " + postId + " has no source body for RAG indexing");
+        }
+        if (isUpToDate(postId, row.getContentSha256(), row.getContentEtag())) {
+            return;
+        }
+        throw new IllegalStateException("RAG indexing failed for post " + postId);
+    }
+
     public int reindexSinglePost(long postId) {
         KnowPostDetailRow row = knowPostMapper.findDetailById(postId);
         if (row == null) {
