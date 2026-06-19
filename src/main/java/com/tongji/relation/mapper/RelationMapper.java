@@ -146,4 +146,16 @@ public interface RelationMapper {
 
     Timestamp findFollowedAuthorCreatedAt(@Param("fromUserId") Long fromUserId,
                                           @Param("toUserId") Long toUserId);
+
+    List<Long> listFollowingIdsCursor(@Param("cursorRelationId") Long cursorRelationId,
+                                      @Param("limit") int limit);
+
+    List<RelationRepairRow> listActiveFollowingRowsByUser(@Param("fromUserId") Long fromUserId);
+
+    List<RelationRepairRow> listActiveFollowerRowsBySourceUser(@Param("fromUserId") Long fromUserId);
+
+    List<RelationRepairRow> listActiveFollowerRowsByUser(@Param("toUserId") Long toUserId);
+
+    record RelationRepairRow(Long id, Long fromUserId, Long toUserId, Timestamp createdAt) {
+    }
 }

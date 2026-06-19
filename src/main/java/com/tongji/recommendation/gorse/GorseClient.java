@@ -7,6 +7,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
@@ -55,6 +56,19 @@ public class GorseClient {
         body.put("Timestamp", publishedAt.toString());
         body.put("Labels", List.of(String.valueOf(authorId)));
         restTemplate.exchange(properties.getEndpoint() + "/api/item", HttpMethod.POST, jsonEntity(body), Void.class);
+    }
+
+    public boolean hasItem(long postId) {
+        try {
+            return restTemplate.exchange(
+                    properties.getEndpoint() + "/api/item/" + postId,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers()),
+                    Map.class
+            ).getStatusCode().is2xxSuccessful();
+        } catch (HttpClientErrorException.NotFound notFound) {
+            return false;
+        }
     }
 
     public void insertFeedback(String feedbackType, long userId, String itemId) {
