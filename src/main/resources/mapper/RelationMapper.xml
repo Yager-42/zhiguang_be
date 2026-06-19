@@ -102,4 +102,50 @@
           AND rel_status=1
         LIMIT 1
     </select>
+
+    <select id="listFollowingIdsCursor" resultType="long">
+        SELECT id
+        FROM following
+        <where>
+            rel_status = 1
+            <if test="cursorRelationId != null">
+                AND id &gt; #{cursorRelationId}
+            </if>
+        </where>
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="listActiveFollowingRowsByUser" resultType="com.tongji.relation.mapper.RelationMapper$RelationRepairRow">
+        SELECT id AS id,
+               from_user_id AS fromUserId,
+               to_user_id AS toUserId,
+               created_at AS createdAt
+        FROM following
+        WHERE from_user_id = #{fromUserId}
+          AND rel_status = 1
+        ORDER BY created_at DESC, to_user_id DESC
+    </select>
+
+    <select id="listActiveFollowerRowsBySourceUser" resultType="com.tongji.relation.mapper.RelationMapper$RelationRepairRow">
+        SELECT id AS id,
+               from_user_id AS fromUserId,
+               to_user_id AS toUserId,
+               created_at AS createdAt
+        FROM follower
+        WHERE from_user_id = #{fromUserId}
+          AND rel_status = 1
+        ORDER BY created_at DESC, to_user_id DESC
+    </select>
+
+    <select id="listActiveFollowerRowsByUser" resultType="com.tongji.relation.mapper.RelationMapper$RelationRepairRow">
+        SELECT id AS id,
+               from_user_id AS fromUserId,
+               to_user_id AS toUserId,
+               created_at AS createdAt
+        FROM follower
+        WHERE to_user_id = #{toUserId}
+          AND rel_status = 1
+        ORDER BY created_at DESC, from_user_id DESC
+    </select>
 </mapper>

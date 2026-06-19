@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.relation.outbox.OutboxTopics;
 import com.tongji.common.util.OutboxMessageUtil;
+import com.tongji.reconciliation.model.ReconciliationTargetType;
+import com.tongji.reconciliation.model.ReconciliationTaskType;
+import com.tongji.reconciliation.service.ReconciliationService;
 import com.tongji.search.index.SearchIndexService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -21,6 +24,7 @@ import java.util.List;
 public class CanalOutboxConsumerSearch {
     private final ObjectMapper objectMapper;
     private final SearchIndexService indexService;
+    private final ReconciliationService reconciliationService;
 
     /**
      * 消费 outbox 消息，解析合法行并按实体类型更新索引。
@@ -42,6 +46,24 @@ public class CanalOutboxConsumerSearch {
                 }
 
                 JsonNode payload = objectMapper.readTree(payloadNode.asText());
+                String eventType = text(payload.get("eventType"));
+                if ("content_published".equals(eventType)) {
+                    Long postId = asLong(payload.get("postId"));
+                    if (postId == null) {
+                        continue;
+                    }
+                    try {
+                        indexService.upsertKnowPostStrict(postId);
+                    } catch (RuntimeException e) {
+                        reconciliationService.createTaskIfAbsent(
+                                ReconciliationTaskType.ES_INDEX,
+                                ReconciliationTargetType.POST,
+                                postId
+                        );
+                    }
+                    continue;
+                }
+
                 String entity = text(payload.get("entity"));
                 String op = text(payload.get("op"));
                 Long id = asLong(payload.get("id"));

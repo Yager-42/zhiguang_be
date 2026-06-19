@@ -3,6 +3,10 @@ package com.tongji.recommendation.feed;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.common.util.OutboxMessageUtil;
+import com.tongji.reconciliation.executor.FollowInboxReconciler.FollowInboxPayload;
+import com.tongji.reconciliation.model.ReconciliationTargetType;
+import com.tongji.reconciliation.model.ReconciliationTaskType;
+import com.tongji.reconciliation.service.ReconciliationService;
 import com.tongji.relation.mapper.RelationMapper;
 import com.tongji.relation.outbox.OutboxTopics;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,15 +30,18 @@ public class TimelineDispatcher {
     private final RelationMapper relationMapper;
     private final TimelineExecutor timelineExecutor;
     private final TaskExecutor taskExecutor;
+    private final ReconciliationService reconciliationService;
 
     public TimelineDispatcher(ObjectMapper objectMapper,
                               RelationMapper relationMapper,
                               TimelineExecutor timelineExecutor,
-                              @Qualifier("taskExecutor") TaskExecutor taskExecutor) {
+                              @Qualifier("taskExecutor") TaskExecutor taskExecutor,
+                              ReconciliationService reconciliationService) {
         this.objectMapper = objectMapper;
         this.relationMapper = relationMapper;
         this.timelineExecutor = timelineExecutor;
         this.taskExecutor = taskExecutor;
+        this.reconciliationService = reconciliationService;
     }
 
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX, groupId = "feed-timeline-consumer")
@@ -46,12 +53,19 @@ public class TimelineDispatcher {
         }
 
         taskExecutor.execute(() -> {
-            try {
-                for (TimelineDispatch dispatch : dispatches) {
+            for (TimelineDispatch dispatch : dispatches) {
+                try {
                     timelineExecutor.fanout(dispatch);
+                } catch (Throwable ignored) {
+                    reconciliationService.createTaskIfAbsent(
+                            ReconciliationTaskType.FOLLOW_INBOX,
+                            ReconciliationTargetType.USER,
+                            dispatch.authorId(),
+                            writePayload(dispatch)
+                    );
                 }
-                acknowledgment.acknowledge();
-            } catch (Throwable ignored) {}
+            }
+            acknowledgment.acknowledge();
         });
     }
 
@@ -109,6 +123,19 @@ public class TimelineDispatcher {
             return Instant.parse(node.asText());
         } catch (Exception ignored) {
             return null;
+        }
+    }
+
+    private String writePayload(TimelineDispatch dispatch) {
+        try {
+            return objectMapper.writeValueAsString(new FollowInboxPayload(
+                    dispatch.contentId(),
+                    dispatch.authorId(),
+                    dispatch.publishTs().toString(),
+                    dispatch.largeAuthor()
+            ));
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to serialize follow inbox payload", e);
         }
     }
 }

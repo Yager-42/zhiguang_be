@@ -1,6 +1,9 @@
 package com.tongji.recommendation.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.reconciliation.model.ReconciliationTargetType;
+import com.tongji.reconciliation.model.ReconciliationTaskType;
+import com.tongji.reconciliation.service.ReconciliationService;
 import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +31,8 @@ class ContentPublishedRecommendationConsumerTest {
     private TaskExecutor taskExecutor;
     @Mock
     private Acknowledgment acknowledgment;
+    @Mock
+    private ReconciliationService reconciliationService;
 
     private GorseProperties properties;
     private ContentPublishedRecommendationConsumer consumer;
@@ -36,7 +41,13 @@ class ContentPublishedRecommendationConsumerTest {
     void setUp() {
         properties = new GorseProperties();
         properties.setEnabled(true);
-        consumer = new ContentPublishedRecommendationConsumer(new ObjectMapper(), gorseClient, properties, taskExecutor);
+        consumer = new ContentPublishedRecommendationConsumer(
+                new ObjectMapper(),
+                gorseClient,
+                properties,
+                taskExecutor,
+                reconciliationService
+        );
     }
 
     @Test
@@ -54,7 +65,7 @@ class ContentPublishedRecommendationConsumerTest {
     }
 
     @Test
-    void consumerLeavesMessageUnackedWhenAsyncUpsertFails() {
+    void consumerCreatesReconciliationTaskAndAcknowledgesWhenAsyncUpsertFails() {
         doThrow(new RuntimeException("gorse down")).when(gorseClient)
                 .upsertItem(101L, 7L, Instant.parse("2026-06-18T10:15:30Z"));
 
@@ -65,7 +76,12 @@ class ContentPublishedRecommendationConsumerTest {
 
         taskCaptor.getValue().run();
 
-        verify(acknowledgment, never()).acknowledge();
+        verify(reconciliationService).createTaskIfAbsent(
+                ReconciliationTaskType.GORSE_ITEM_UPSERT,
+                ReconciliationTargetType.POST,
+                101L
+        );
+        verify(acknowledgment).acknowledge();
     }
 
     @Test
@@ -75,6 +91,33 @@ class ContentPublishedRecommendationConsumerTest {
         consumer.onMessage(canalMessage(contentPublishedRow(101L, 7L, Instant.parse("2026-06-18T10:15:30Z"))), acknowledgment);
 
         verify(taskExecutor, never()).execute(any());
+        verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void consumerCreatesTaskOnlyForFailedItemInBatch() {
+        doThrow(new RuntimeException("gorse down")).when(gorseClient)
+                .upsertItem(102L, 8L, Instant.parse("2026-06-18T10:16:30Z"));
+
+        consumer.onMessage(canalMessage("""
+                %s,
+                %s
+                """.formatted(
+                contentPublishedRow(101L, 7L, Instant.parse("2026-06-18T10:15:30Z")),
+                contentPublishedRow(102L, 8L, Instant.parse("2026-06-18T10:16:30Z"))
+        )), acknowledgment);
+
+        ArgumentCaptor<Runnable> taskCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskExecutor).execute(taskCaptor.capture());
+        taskCaptor.getValue().run();
+
+        verify(gorseClient).upsertItem(101L, 7L, Instant.parse("2026-06-18T10:15:30Z"));
+        verify(gorseClient).upsertItem(102L, 8L, Instant.parse("2026-06-18T10:16:30Z"));
+        verify(reconciliationService).createTaskIfAbsent(
+                ReconciliationTaskType.GORSE_ITEM_UPSERT,
+                ReconciliationTargetType.POST,
+                102L
+        );
         verify(acknowledgment).acknowledge();
     }
 
