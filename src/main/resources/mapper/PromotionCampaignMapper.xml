@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.promotion.mapper.PromotionCampaignMapper">
+
+    <resultMap id="PromotionCampaignResultMap" type="com.tongji.promotion.model.PromotionCampaign">
+        <id column="id" property="id"/>
+        <result column="creator_user_id" property="creatorUserId"/>
+        <result column="post_id" property="postId"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="status" property="status"/>
+        <result column="start_at" property="startAt"/>
+        <result column="end_at" property="endAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.promotion.model.PromotionCampaign">
+        INSERT INTO promotion_campaign (
+            id, creator_user_id, post_id, resource_type, status, start_at, end_at, created_at, updated_at
+        ) VALUES (
+            #{id}, #{creatorUserId}, #{postId}, #{resourceType}, #{status}, #{startAt}, #{endAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="findById" parameterType="long" resultMap="PromotionCampaignResultMap">
+        SELECT *
+        FROM promotion_campaign
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+</mapper>
