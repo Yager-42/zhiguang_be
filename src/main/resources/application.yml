@@ -87,6 +87,10 @@ auth:
     private-key: classpath:keys/private.pem
     public-key: classpath:keys/public.pem
 
+wallet:
+  platform-user-id: ${WALLET_PLATFORM_USER_ID:0}
+  registration-grant-amount: ${WALLET_REGISTRATION_GRANT_AMOUNT:100}
+
 storage:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
   public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
