@@ -1,0 +1,82 @@
+package com.tongji.promotion.schedule;
+
+import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
+import com.tongji.promotion.mapper.PromotionBidMapper;
+import com.tongji.promotion.model.PromotionAuctionWindow;
+import com.tongji.promotion.model.PromotionAuctionWindowStatus;
+import com.tongji.promotion.model.PromotionBid;
+import com.tongji.promotion.model.PromotionBidStatus;
+import com.tongji.promotion.model.PromotionResourceType;
+import com.tongji.promotion.service.PromotionAllocationCacheService;
+import com.tongji.promotion.service.PromotionAuctionService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.Instant;
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class PromotionAuctionWindowCloserTest {
+
+    @Mock
+    private PromotionAuctionWindowMapper windowMapper;
+
+    @Mock
+    private PromotionBidMapper bidMapper;
+
+    @Mock
+    private PromotionAuctionService auctionService;
+
+    @Mock
+    private PromotionAllocationCacheService cacheService;
+
+    private PromotionAuctionWindowCloser closer;
+
+    @BeforeEach
+    void setUp() {
+        closer = new PromotionAuctionWindowCloser(windowMapper, bidMapper, auctionService, cacheService);
+    }
+
+    @Test
+    void closesDueWindowsAndRefreshesCache() {
+        PromotionAuctionWindow window = window(301L, PromotionResourceType.FEED_TOP_SLOT,
+                "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
+        when(windowMapper.listClosableWindows(any(), eq(50))).thenReturn(List.of(window));
+        when(bidMapper.listActiveBidsByWindowId(301L)).thenReturn(List.of(bid(401L, 201L, 42L, 120L)));
+
+        closer.closeDueWindows(Instant.parse("2026-06-20T11:00:00Z"), 50);
+
+        verify(auctionService).settleWindow(eq(window), anyList(), eq(Instant.parse("2026-06-20T11:00:00Z")));
+        verify(cacheService).refreshActiveAllocations(PromotionResourceType.FEED_TOP_SLOT,
+                Instant.parse("2026-06-20T11:00:00Z"));
+    }
+
+    private PromotionAuctionWindow window(long id, PromotionResourceType type, String start, String end) {
+        return PromotionAuctionWindow.builder()
+                .id(id).resourceType(type)
+                .windowStartAt(Instant.parse(start)).windowEndAt(Instant.parse(end))
+                .slotCount(1).reservePrice(1L)
+                .status(PromotionAuctionWindowStatus.OPEN)
+                .createdAt(Instant.parse(start)).updatedAt(Instant.parse(start))
+                .build();
+    }
+
+    private PromotionBid bid(long id, long campaignId, long bidderUserId, long bidAmount) {
+        return PromotionBid.builder()
+                .id(id).campaignId(campaignId).auctionWindowId(301L).bidderUserId(bidderUserId)
+                .bidAmount(bidAmount).walletBusinessRef("promotion-bid:" + id)
+                .status(PromotionBidStatus.ACTIVE)
+                .createdAt(Instant.parse("2026-06-20T10:05:00Z"))
+                .updatedAt(Instant.parse("2026-06-20T10:05:00Z"))
+                .build();
+    }
+}

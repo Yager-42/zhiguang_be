@@ -4,10 +4,12 @@ import com.tongji.auth.token.JwtService;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.promotion.api.dto.CreatePromotionCampaignRequest;
+import com.tongji.promotion.api.dto.PromotionAllocationView;
 import com.tongji.promotion.api.dto.PromotionBidResponse;
 import com.tongji.promotion.api.dto.PromotionCampaignResponse;
 import com.tongji.promotion.api.dto.SubmitPromotionBidRequest;
 import com.tongji.promotion.model.PromotionResourceType;
+import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.promotion.service.PromotionCampaignService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -18,13 +20,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
- * 推广位竞价写 API：创建活动、查询活动、提交出价。
- * active allocation 读接口由 {@code PromotionAllocationService} 在 Task 4 接入。
+ * 推广位竞价 API：创建/查询活动、提交出价、查询当前有效位分配。
  */
 @RestController
 @RequestMapping("/api/v1/promotions")
@@ -32,6 +35,7 @@ import java.time.Instant;
 public class PromotionController {
 
     private final PromotionCampaignService campaignService;
+    private final PromotionAllocationService allocationService;
     private final JwtService jwtService;
 
     @PostMapping("/campaigns")
@@ -56,6 +60,12 @@ public class PromotionController {
         long userId = jwtService.extractUserId(jwt);
         return PromotionBidResponse.from(
                 campaignService.submitBid(userId, campaignId, request.bidAmount(), Instant.now()));
+    }
+
+    @GetMapping("/allocations/active")
+    public List<PromotionAllocationView> getActiveAllocations(@RequestParam String resourceType) {
+        PromotionResourceType type = parseResourceType(resourceType);
+        return allocationService.getActive(type);
     }
 
     private PromotionResourceType parseResourceType(String raw) {
