@@ -10,6 +10,7 @@ import com.tongji.promotion.model.PromotionBidStatus;
 import com.tongji.promotion.model.PromotionCampaign;
 import com.tongji.promotion.model.PromotionCampaignStatus;
 import com.tongji.promotion.model.PromotionResourceType;
+import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.promotion.service.PromotionCampaignService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,13 +33,16 @@ class PromotionControllerTest {
     private PromotionCampaignService campaignService;
 
     @Mock
+    private PromotionAllocationService allocationService;
+
+    @Mock
     private JwtService jwtService;
 
     private PromotionController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new PromotionController(campaignService, jwtService);
+        controller = new PromotionController(campaignService, allocationService, jwtService);
     }
 
     @Test
@@ -85,6 +89,20 @@ class PromotionControllerTest {
 
         assertThat(response.id()).isEqualTo("201");
         assertThat(response.resourceType()).isEqualTo("search_top_slot");
+    }
+
+    @Test
+    void getActiveAllocationsDelegatesToAllocationService() {
+        when(allocationService.getActive(PromotionResourceType.FEED_TOP_SLOT))
+                .thenReturn(java.util.List.of(new com.tongji.promotion.api.dto.PromotionAllocationView(
+                        "201", "feed_top_slot", "301", "401")));
+
+        java.util.List<com.tongji.promotion.api.dto.PromotionAllocationView> result =
+                controller.getActiveAllocations("feed_top_slot");
+
+        verify(allocationService).getActive(PromotionResourceType.FEED_TOP_SLOT);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).placementType()).isEqualTo("feed_top_slot");
     }
 
     private PromotionCampaign campaign(long id, long creator, long post, PromotionResourceType type,
