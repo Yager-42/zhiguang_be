@@ -34,6 +34,8 @@ class KnowPostControllerWiringTest {
             .withBean(FollowFeedService.class, () -> mock(FollowFeedService.class))
             .withBean(RecommendationEngine.class, () -> mock(RecommendationEngine.class))
             .withBean(KnowPostMapper.class, () -> mock(KnowPostMapper.class))
+            .withBean(com.tongji.promotion.service.PromotionAllocationService.class,
+                    () -> mock(com.tongji.promotion.service.PromotionAllocationService.class))
             .withBean(HomeFeedMixingService.class)
             .withPropertyValues("feed.home.mixed-enabled=true")
             .withBean(KnowPostController.class);
