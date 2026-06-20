@@ -1,0 +1,28 @@
+package com.tongji.promotion;
+
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * 钉死 promotion 位竞价所需的表、唯一键与索引，防止 schema 漂移。
+ * 读 db/schema.sql 文本做包含断言，不依赖数据库连接。
+ */
+class PromotionSchemaContractTest {
+
+    @Test
+    void schemaContainsPromotionTablesAndIndexes() throws Exception {
+        String schema = Files.readString(Path.of("db/schema.sql"));
+
+        assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_campaign");
+        assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_auction_window");
+        assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_bid");
+        assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_slot_allocation");
+        assertThat(schema).contains("uk_promotion_window_resource_time");
+        assertThat(schema).contains("idx_promotion_bid_window_status_amount");
+        assertThat(schema).contains("idx_promotion_slot_resource_time");
+    }
+}
