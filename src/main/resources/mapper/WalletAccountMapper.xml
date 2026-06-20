@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.wallet.mapper.WalletAccountMapper">
+
+    <resultMap id="WalletAccountResultMap" type="com.tongji.wallet.model.WalletAccount">
+        <id column="owner_user_id" property="ownerUserId"/>
+        <result column="available_balance" property="availableBalance"/>
+        <result column="held_balance" property="heldBalance"/>
+        <result column="escrowed_balance" property="escrowedBalance"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="findByOwnerUserId" parameterType="long" resultMap="WalletAccountResultMap">
+        SELECT *
+        FROM wallet_account
+        WHERE owner_user_id = #{ownerUserId}
+    </select>
+
+    <insert id="insert" parameterType="com.tongji.wallet.model.WalletAccount">
+        INSERT INTO wallet_account (
+            owner_user_id, available_balance, held_balance, escrowed_balance, status, created_at, updated_at
+        ) VALUES (
+            #{ownerUserId}, #{availableBalance}, #{heldBalance}, #{escrowedBalance}, #{status}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateBalancesAndStatus" parameterType="com.tongji.wallet.model.WalletAccount">
+        UPDATE wallet_account
+        SET available_balance = #{availableBalance},
+            held_balance      = #{heldBalance},
+            escrowed_balance   = #{escrowedBalance},
+            status            = #{status},
+            updated_at        = #{updatedAt}
+        WHERE owner_user_id = #{ownerUserId}
+    </update>
+</mapper>
