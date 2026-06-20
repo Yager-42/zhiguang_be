@@ -10,6 +10,8 @@ import com.tongji.knowpost.model.KnowPostFeedRow;
 import com.tongji.counter.service.CounterService;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.tongji.cache.hotkey.HotKeyDetector;
+import com.tongji.promotion.api.dto.PromotionAllocationView;
+import com.tongji.promotion.service.PromotionAllocationService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -22,10 +24,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class KnowPostFeedServiceImpl implements KnowPostFeedService {
@@ -37,8 +43,10 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
     private final Cache<String, FeedPageResponse> feedPublicCache;
     private final Cache<String, FeedPageResponse> feedMineCache;
     private final HotKeyDetector hotKey;
+    private final PromotionAllocationService promotionAllocationService;
     private static final Logger log = LoggerFactory.getLogger(KnowPostFeedServiceImpl.class);
     private static final int LAYOUT_VER = 1;
+    private static final int PUBLIC_PROMOTED_LIMIT = 1;
     private final ConcurrentHashMap<String, Object> singleFlight = new ConcurrentHashMap<>();
 
     /**
@@ -50,6 +58,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
      * @param feedPublicCache 首页公共 Feed 本地缓存
      * @param feedMineCache 我的发布 Feed 本地缓存
      * @param hotKey 热点 Key 检测器，用于动态延长 TTL
+     * @param promotionAllocationService 推广位分配读路径，仅在 page=1 注入商业位
      */
     @Autowired
     public KnowPostFeedServiceImpl(
@@ -59,7 +68,8 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
             CounterService counterService,
             @Qualifier("feedPublicCache") Cache<String, FeedPageResponse> feedPublicCache,
             @Qualifier("feedMineCache") Cache<String, FeedPageResponse> feedMineCache,
-            HotKeyDetector hotKey
+            HotKeyDetector hotKey,
+            PromotionAllocationService promotionAllocationService
     ) {
         this.mapper = mapper;
         this.redis = redis;
@@ -68,6 +78,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
         this.feedPublicCache = feedPublicCache;
         this.feedMineCache = feedMineCache;
         this.hotKey = hotKey;
+        this.promotionAllocationService = promotionAllocationService;
     }
 
     /**
@@ -81,6 +92,61 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
     }
 
     /**
+     * 获取公开的首页 Feed：仅 page=1 在 organic 结果前插入至多 1 条 feed_top_slot 商业位，
+     * 其余页与无 active allocation 时直接返回 organic。
+     */
+    public FeedPageResponse getPublicFeed(int page, int size, Long currentUserIdNullable) {
+        FeedPageResponse organic = getPublicFeedOrganic(page, size, currentUserIdNullable);
+        if (Math.max(page, 1) <= 1) {
+            return mergePromotedIntoPage(organic, currentUserIdNullable);
+        }
+        return organic;
+    }
+
+    /**
+     * 在 organic 页面前插入至多 {@code PUBLIC_PROMOTED_LIMIT} 条商业位，去重占坑并保持页大小。
+     */
+    private FeedPageResponse mergePromotedIntoPage(FeedPageResponse organic, Long currentUserIdNullable) {
+        List<FeedItemResponse> merged = new ArrayList<>(organic.size() + 1);
+        Set<String> seen = new LinkedHashSet<>();
+        appendPromotedPublic(merged, seen, currentUserIdNullable, PUBLIC_PROMOTED_LIMIT);
+        for (FeedItemResponse item : organic.items()) {
+            if (merged.size() >= organic.size()) {
+                break;
+            }
+            if (seen.add(item.id())) {
+                merged.add(item);
+            }
+        }
+        return new FeedPageResponse(merged, organic.page(), organic.size(), organic.hasMore());
+    }
+
+    private void appendPromotedPublic(List<FeedItemResponse> items, Set<String> seen, Long currentUserIdNullable, int limit) {
+        List<PromotionAllocationView> allocations = promotionAllocationService.getActiveFeedAllocation();
+        if (allocations == null || allocations.isEmpty()) {
+            return;
+        }
+        List<String> ids = allocations.stream()
+                .limit(limit)
+                .map(v -> String.valueOf(v.postIdAsLong()))
+                .filter(seen::add)
+                .toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        Map<String, PromotionAllocationView> byId = allocations.stream()
+                .collect(Collectors.toMap(v -> String.valueOf(v.postIdAsLong()), Function.identity(), (left, right) -> left));
+        List<Long> longIds = ids.stream().map(Long::parseLong).toList();
+        for (FeedItemResponse item : getFeedByIds(longIds, currentUserIdNullable, FeedVisibilityScope.PUBLIC)) {
+            PromotionAllocationView allocation = byId.get(item.id());
+            if (allocation != null) {
+                items.add(item.withPromotion(allocation.placementType(), allocation.promotionCampaignId(),
+                        allocation.auctionWindowId()));
+            }
+        }
+    }
+
+    /**
      * 获取公开的首页 Feed（按发布时间倒序，不受置顶影响）。
      * 采用三级缓存：本地 Caffeine、Redis 页面缓存、Redis 片段缓存（ids/item/count）。
      * @param page 页码（≥1）
@@ -88,7 +154,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
      * @param currentUserIdNullable 当前用户 ID（为空表示匿名）
      * @return 带分页信息的 Feed 列表（liked/faved 为用户维度）
      */
-    public FeedPageResponse getPublicFeed(int page, int size, Long currentUserIdNullable) {
+    private FeedPageResponse getPublicFeedOrganic(int page, int size, Long currentUserIdNullable) {
         int safeSize = Math.min(Math.max(size, 1), 50);
         int safePage = Math.max(page, 1);
         // 这个 localPageKey 是本地缓存的页面 Key（非 Redis）
@@ -215,21 +281,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
         for (FeedItemResponse it : base) {
             boolean liked = uid != null && counterService.isLiked("knowpost", it.id(), uid);
             boolean faved = uid != null && counterService.isFaved("knowpost", it.id(), uid);
-            out.add(new FeedItemResponse(
-                    it.id(),
-                    it.title(),
-                    it.description(),
-                    it.coverImage(),
-                    it.tags(),
-                    it.authorAvatar(),
-                    it.authorNickname(),
-                    it.tagJson(),
-                    it.likeCount(),
-                    it.favoriteCount(),
-                    liked,
-                    faved,
-                    it.isTop()
-            ));
+            out.add(it.withInteractions(it.likeCount(), it.favoriteCount(), liked, faved));
         }
         return out;
     }
@@ -294,21 +346,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
             boolean liked = uid != null && counterService.isLiked("knowpost", base.id(), uid);
             boolean faved = uid != null && counterService.isFaved("knowpost", base.id(), uid);
 
-            enriched.add(new FeedItemResponse(
-                    base.id(),
-                    base.title(),
-                    base.description(),
-                    base.coverImage(),
-                    base.tags(),
-                    base.authorAvatar(),
-                    base.authorNickname(),
-                    base.tagJson(),
-                    likeCount,
-                    favoriteCount,
-                    liked,
-                    faved,
-                    base.isTop())
-            );
+            enriched.add(base.withInteractions(likeCount, favoriteCount, liked, faved));
         }
         // hasMore 优先使用软缓存值；若缺失，则以“满页”作为兜底判断
         boolean hasMore = hasMoreStr != null ? "1".equals(hasMoreStr) : (idList.size() == size);
@@ -477,7 +515,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
             Boolean faved = userIdNullable != null && counterService.isFaved("knowpost", String.valueOf(r.getId()), userIdNullable);
             Boolean isTop = includeIsTop ? r.getIsTop() : null;
 
-            items.add(new FeedItemResponse(
+            items.add(FeedItemResponse.organic(
                     String.valueOf(r.getId()),
                     r.getTitle(),
                     r.getDescription(),

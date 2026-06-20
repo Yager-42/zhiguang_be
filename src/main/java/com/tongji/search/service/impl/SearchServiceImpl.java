@@ -127,7 +127,7 @@ public class SearchServiceImpl implements SearchService {
             Long favoriteCount = asLong(source.get("favorite_count"));
             Boolean liked = currentUserIdNullable != null && counterService.isLiked("knowpost", id, currentUserIdNullable);
             Boolean faved = currentUserIdNullable != null && counterService.isFaved("knowpost", id, currentUserIdNullable);
-            items.add(new FeedItemResponse(
+            items.add(FeedItemResponse.organic(
                     id,
                     title,
                     description,
