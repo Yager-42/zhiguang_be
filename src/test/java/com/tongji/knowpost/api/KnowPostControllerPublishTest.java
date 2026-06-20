@@ -74,7 +74,8 @@ class KnowPostControllerPublishTest {
                 followFeedService,
                 recommendationEngine,
                 knowPostMapper,
-                knowPostFeedService
+                knowPostFeedService,
+                Mockito.mock(com.tongji.promotion.service.PromotionAllocationService.class)
         );
         AuthProperties authProperties = new AuthProperties();
         authProperties.getJwt().setIssuer("test-issuer");
@@ -487,7 +488,7 @@ class KnowPostControllerPublishTest {
     }
 
     private com.tongji.knowpost.api.dto.FeedItemResponse feedItem(String id) {
-        return new com.tongji.knowpost.api.dto.FeedItemResponse(
+        return com.tongji.knowpost.api.dto.FeedItemResponse.organic(
                 id, null, null, null, List.of(), null, null, null, null, null, null, null, null
         );
     }

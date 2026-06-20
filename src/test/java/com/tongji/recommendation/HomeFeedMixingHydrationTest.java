@@ -10,6 +10,7 @@ import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPostFeedRow;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.knowpost.service.impl.KnowPostFeedServiceImpl;
+import com.tongji.promotion.service.PromotionAllocationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,6 +49,9 @@ class HomeFeedMixingHydrationTest {
     @Mock
     private HotKeyDetector hotKeyDetector;
 
+    @Mock
+    private PromotionAllocationService promotionAllocationService;
+
     private KnowPostFeedServiceImpl service;
 
     @BeforeEach
@@ -59,7 +63,8 @@ class HomeFeedMixingHydrationTest {
                 counterService,
                 feedPublicCache,
                 feedMineCache,
-                hotKeyDetector
+                hotKeyDetector,
+                promotionAllocationService
         );
     }
 
