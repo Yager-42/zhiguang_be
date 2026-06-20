@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.promotion.mapper.PromotionSlotAllocationMapper">
+
+    <resultMap id="PromotionSlotAllocationResultMap" type="com.tongji.promotion.model.PromotionSlotAllocation">
+        <id column="id" property="id"/>
+        <result column="auction_window_id" property="auctionWindowId"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="slot_index" property="slotIndex"/>
+        <result column="campaign_id" property="campaignId"/>
+        <result column="post_id" property="postId"/>
+        <result column="bidder_user_id" property="bidderUserId"/>
+        <result column="clearing_price" property="clearingPrice"/>
+        <result column="allocation_start_at" property="allocationStartAt"/>
+        <result column="allocation_end_at" property="allocationEndAt"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.promotion.model.PromotionSlotAllocation">
+        INSERT INTO promotion_slot_allocation (
+            id, auction_window_id, resource_type, slot_index, campaign_id, post_id, bidder_user_id,
+            clearing_price, allocation_start_at, allocation_end_at, created_at
+        ) VALUES (
+            #{id}, #{auctionWindowId}, #{resourceType}, #{slotIndex}, #{campaignId}, #{postId}, #{bidderUserId},
+            #{clearingPrice}, #{allocationStartAt}, #{allocationEndAt}, #{createdAt}
+        )
+    </insert>
+
+    <select id="listActive" resultMap="PromotionSlotAllocationResultMap">
+        SELECT *
+        FROM promotion_slot_allocation
+        WHERE resource_type = #{resourceType}
+          AND allocation_start_at &lt;= #{now}
+          AND allocation_end_at &gt; #{now}
+        ORDER BY slot_index ASC
+    </select>
+</mapper>

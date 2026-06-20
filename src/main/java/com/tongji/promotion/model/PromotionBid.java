@@ -26,4 +26,8 @@ public class PromotionBid {
     private Integer slotIndex;
     private Instant createdAt;
     private Instant updatedAt;
+    /**
+     * 来自 campaign 的帖子 ID（仅读路径 JOIN 填充，落库不入本表）；结算时 denormalize 进 allocation。
+     */
+    private long postId;
 }
