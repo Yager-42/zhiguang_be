@@ -21,6 +21,8 @@ import com.tongji.auth.token.RefreshTokenStore;
 import com.tongji.auth.token.TokenPair;
 import com.tongji.user.domain.User;
 import com.tongji.user.service.UserService;
+import com.tongji.wallet.config.WalletProperties;
+import com.tongji.wallet.service.WalletRegistrationGrantService;
 import com.tongji.auth.util.IdentifierValidator;
 import com.tongji.auth.verification.SendCodeResult;
 import com.tongji.auth.verification.VerificationCheckResult;
@@ -64,6 +66,8 @@ public class AuthService {
     private final RefreshTokenStore refreshTokenStore;
     private final LoginLogService loginLogService;
     private final AuthProperties authProperties;
+    private final WalletRegistrationGrantService walletRegistrationGrantService;
+    private final WalletProperties walletProperties;
 
     /**
      * 发送验证码并返回过期信息。
@@ -123,7 +127,8 @@ public class AuthService {
             user.setPasswordHash(passwordEncoder.encode(request.password().trim()));
         }
 
-        userService.createUser(user);
+        // 建用户 + 初始化钱包 + 注册赠币在同一事务内完成；赠币失败随事务回滚，token 签发放到事务成功之后。
+        walletRegistrationGrantService.createUserAndGrant(user, walletProperties.getRegistrationGrantAmount());
         TokenPair tokenPair = jwtService.issueTokenPair(user);
         storeRefreshToken(user.getId(), tokenPair);
         loginLogService.record(user.getId(), identifier, "REGISTER", clientInfo.ip(), clientInfo.userAgent(), "SUCCESS");
