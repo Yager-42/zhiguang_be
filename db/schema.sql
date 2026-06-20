@@ -228,3 +228,59 @@ INSERT INTO leaf_alloc (biz_tag, max_id, step, description) VALUES
 ON DUPLICATE KEY UPDATE
     step = VALUES(step),
     description = VALUES(description);
+
+-- 钱包账户：每用户一行，owner_user_id 即 user.id；平台账本主体使用哨兵值 0。
+CREATE TABLE IF NOT EXISTS wallet_account (
+    owner_user_id BIGINT UNSIGNED NOT NULL,
+    available_balance BIGINT NOT NULL DEFAULT 0,
+    held_balance BIGINT NOT NULL DEFAULT 0,
+    escrowed_balance BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (owner_user_id),
+    CHECK (available_balance >= 0),
+    CHECK (held_balance >= 0),
+    CHECK (escrowed_balance >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 钱包流水：只追加事实源，business_ref 全局唯一保证幂等。
+CREATE TABLE IF NOT EXISTS wallet_ledger (
+    id BIGINT UNSIGNED NOT NULL,
+    owner_user_id BIGINT UNSIGNED NOT NULL,
+    counterparty_user_id BIGINT NULL,
+    escrow_id BIGINT UNSIGNED NULL,
+    business_type VARCHAR(32) NOT NULL,
+    business_ref VARCHAR(128) NOT NULL,
+    direction VARCHAR(16) NOT NULL,
+    reason VARCHAR(32) NOT NULL,
+    amount BIGINT NOT NULL,
+    available_delta BIGINT NOT NULL,
+    held_delta BIGINT NOT NULL,
+    escrowed_delta BIGINT NOT NULL,
+    balance_available_after BIGINT NOT NULL,
+    balance_held_after BIGINT NOT NULL,
+    balance_escrowed_after BIGINT NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_wallet_ledger_business_ref (business_ref),
+    KEY idx_wallet_ledger_owner_created (owner_user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 通用托管单据：记录付款方/收款方/金额/状态/过期，业务驱动状态迁移。
+CREATE TABLE IF NOT EXISTS wallet_escrow (
+    id BIGINT UNSIGNED NOT NULL,
+    business_type VARCHAR(32) NOT NULL,
+    business_ref VARCHAR(128) NOT NULL,
+    payer_user_id BIGINT UNSIGNED NOT NULL,
+    payee_user_id BIGINT UNSIGNED NULL,
+    amount BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    expires_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_wallet_escrow_business_ref (business_ref),
+    KEY idx_wallet_escrow_payer_status (payer_user_id, status),
+    KEY idx_wallet_escrow_payee_status (payee_user_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
