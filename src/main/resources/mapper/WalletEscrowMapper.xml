@@ -32,6 +32,14 @@
         LIMIT 1
     </select>
 
+    <select id="findByIdForUpdate" parameterType="long" resultMap="WalletEscrowResultMap">
+        SELECT *
+        FROM wallet_escrow
+        WHERE id = #{id}
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
     <select id="findByBusinessRef" parameterType="string" resultMap="WalletEscrowResultMap">
         SELECT *
         FROM wallet_escrow
@@ -39,10 +47,11 @@
         LIMIT 1
     </select>
 
-    <update id="updateStatus" parameterType="com.tongji.wallet.model.WalletEscrow">
+    <update id="transitionStatus">
         UPDATE wallet_escrow
-        SET status     = #{status},
-            updated_at = #{updatedAt}
+        SET status     = #{toStatus},
+            updated_at = NOW(3)
         WHERE id = #{id}
+          AND status = #{fromStatus}
     </update>
 </mapper>
