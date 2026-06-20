@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.promotion.mapper.PromotionAuctionWindowMapper">
+
+    <resultMap id="PromotionAuctionWindowResultMap" type="com.tongji.promotion.model.PromotionAuctionWindow">
+        <id column="id" property="id"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="window_start_at" property="windowStartAt"/>
+        <result column="window_end_at" property="windowEndAt"/>
+        <result column="slot_count" property="slotCount"/>
+        <result column="reserve_price" property="reservePrice"/>
+        <result column="status" property="status"/>
+        <result column="settled_at" property="settledAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.promotion.model.PromotionAuctionWindow">
+        INSERT INTO promotion_auction_window (
+            id, resource_type, window_start_at, window_end_at, slot_count, reserve_price, status, settled_at, created_at, updated_at
+        ) VALUES (
+            #{id}, #{resourceType}, #{windowStartAt}, #{windowEndAt}, #{slotCount}, #{reservePrice}, #{status}, #{settledAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="findOpenWindow" resultMap="PromotionAuctionWindowResultMap">
+        SELECT *
+        FROM promotion_auction_window
+        WHERE resource_type = #{resourceType}
+          AND status = 'OPEN'
+          AND window_start_at &lt;= #{now}
+          AND window_end_at &gt; #{now}
+        LIMIT 1
+    </select>
+
+    <select id="findExactWindow" resultMap="PromotionAuctionWindowResultMap">
+        SELECT *
+        FROM promotion_auction_window
+        WHERE resource_type = #{resourceType}
+          AND window_start_at = #{startAt}
+          AND window_end_at = #{endAt}
+        LIMIT 1
+    </select>
+
+    <select id="listClosableWindows" resultMap="PromotionAuctionWindowResultMap">
+        SELECT *
+        FROM promotion_auction_window
+        WHERE status = 'OPEN'
+          AND window_end_at &lt;= #{now}
+        ORDER BY window_end_at ASC
+        LIMIT #{batchSize}
+    </select>
+
+    <update id="markSettled">
+        UPDATE promotion_auction_window
+        SET status     = 'SETTLED',
+            settled_at = #{settledAt},
+            updated_at = #{settledAt}
+        WHERE id = #{id}
+    </update>
+</mapper>
