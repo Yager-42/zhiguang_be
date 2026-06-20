@@ -4,6 +4,7 @@ import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.user.domain.User;
 import com.tongji.user.service.UserService;
+import com.tongji.wallet.model.WalletBusinessType;
 import com.tongji.wallet.model.WalletLedgerReason;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,18 +45,18 @@ class WalletRegistrationGrantServiceTest {
         verify(userService).createUser(input);
         verify(walletService).initializeIfAbsent(NEW_USER_ID);
         verify(walletService).grant(eq(NEW_USER_ID), eq(100L), eq(WalletLedgerReason.REGISTRATION_GRANT),
-                eq("registration-grant:user:" + NEW_USER_ID));
+                eq(WalletBusinessType.REGISTRATION), eq("registration-grant:user:" + NEW_USER_ID));
     }
 
     @Test
-    void createUserAndGrantSkipsGrantWhenAmountZero() {
+    void createUserAndGrantSkipsGrantWhenAmountNotPositive() {
         User input = User.builder().nickname("u").build();
         when(userService.createUser(input)).thenReturn(User.builder().id(NEW_USER_ID).build());
 
         grantService.createUserAndGrant(input, 0L);
 
         verify(walletService).initializeIfAbsent(NEW_USER_ID);
-        verify(walletService, never()).grant(anyLong(), anyLong(), any(), any());
+        verify(walletService, never()).grant(anyLong(), anyLong(), any(), any(), any());
     }
 
     @Test
@@ -68,7 +69,7 @@ class WalletRegistrationGrantServiceTest {
                 .satisfies(ex -> assertThat(((BusinessException) ex).getErrorCode()).isEqualTo(ErrorCode.IDENTIFIER_EXISTS));
 
         verify(walletService, never()).initializeIfAbsent(anyLong());
-        verify(walletService, never()).grant(anyLong(), anyLong(), any(), any());
+        verify(walletService, never()).grant(anyLong(), anyLong(), any(), any(), any());
     }
 
     @Test
@@ -76,7 +77,7 @@ class WalletRegistrationGrantServiceTest {
         User input = User.builder().nickname("u").build();
         when(userService.createUser(input)).thenReturn(User.builder().id(NEW_USER_ID).build());
         when(walletService.grant(eq(NEW_USER_ID), eq(100L), eq(WalletLedgerReason.REGISTRATION_GRANT),
-                eq("registration-grant:user:" + NEW_USER_ID)))
+                eq(WalletBusinessType.REGISTRATION), eq("registration-grant:user:" + NEW_USER_ID)))
                 .thenThrow(new IllegalStateException("grant write failed"));
 
         assertThatThrownBy(() -> grantService.createUserAndGrant(input, 100L))

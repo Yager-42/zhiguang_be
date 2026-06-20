@@ -20,7 +20,7 @@ The system SHALL maintain a platform ledger subject for accounting operations su
 
 ### Requirement: Wallet balances SHALL track available, hold, and escrow states
 
-The wallet domain SHALL support three balance states: available balance, held balance, and escrowed balance. State transitions SHALL preserve total balance consistency for each operation.
+The wallet domain SHALL support three balance states: available balance, held balance, and escrowed balance. Internal state transitions such as hold, hold release, hold-to-escrow, escrow release, and refund SHALL preserve balance consistency across the affected wallet entries. Platform-funded grants/subsidies and platform forfeitures are external source/sink movements recorded with the platform ledger subject.
 
 #### Scenario: Promotion bid creates hold
 - **WHEN** user places promotion bid that requires fund reservation
@@ -34,7 +34,7 @@ The wallet domain SHALL support three balance states: available balance, held ba
 
 ### Requirement: Wallet ledger SHALL be append-only
 
-The system SHALL persist an append-only wallet ledger for all balance-changing actions, including grants, subsidies, holds, releases, escrow transfers, settlements, refunds, and forfeitures.
+The system SHALL persist an append-only wallet ledger for all balance-changing actions, including grants, subsidies, holds, hold releases, escrow transfers, escrow releases, refunds, and forfeitures.
 
 #### Scenario: Balance-changing action is recorded
 - **WHEN** any wallet-affecting operation succeeds
@@ -49,6 +49,12 @@ Wallet-affecting operations SHALL support idempotent execution keyed by business
 - **WHEN** same business operation is retried with same idempotency reference
 - **THEN** system returns existing result
 - **AND** system does not append duplicate ledger movement
+
+#### Scenario: Idempotency reference is reused with different parameters
+- **WHEN** a wallet operation reuses an existing business reference with a different owner, amount, reason, business type, escrow id, or balance delta
+- **THEN** system rejects the operation
+- **AND** system does not return the previous result as if it matched
+- **AND** system does not append a new ledger movement
 
 ### Requirement: Wallet SHALL support platform-funded grants and subsidies
 

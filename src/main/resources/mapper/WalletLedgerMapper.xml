@@ -39,6 +39,14 @@
         SELECT *
         FROM wallet_ledger
         WHERE business_ref = #{businessRef}
+        ORDER BY id ASC
+    </select>
+
+    <select id="findByOwnerUserIdAndBusinessRef" resultMap="WalletLedgerEntryResultMap">
+        SELECT *
+        FROM wallet_ledger
+        WHERE owner_user_id = #{ownerUserId}
+          AND business_ref = #{businessRef}
         LIMIT 1
     </select>
 
@@ -49,4 +57,9 @@
         ORDER BY created_at DESC, id DESC
         LIMIT #{limit} OFFSET #{offset}
     </select>
+
+    <insert id="claimBusinessRef">
+        INSERT INTO wallet_business_ref (business_ref, claimed_by_owner_user_id, created_at)
+        VALUES (#{businessRef}, #{ownerUserId}, #{createdAt})
+    </insert>
 </mapper>
