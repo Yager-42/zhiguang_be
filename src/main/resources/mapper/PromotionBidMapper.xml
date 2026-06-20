@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.promotion.mapper.PromotionBidMapper">
+
+    <resultMap id="PromotionBidResultMap" type="com.tongji.promotion.model.PromotionBid">
+        <id column="id" property="id"/>
+        <result column="campaign_id" property="campaignId"/>
+        <result column="auction_window_id" property="auctionWindowId"/>
+        <result column="bidder_user_id" property="bidderUserId"/>
+        <result column="bid_amount" property="bidAmount"/>
+        <result column="wallet_business_ref" property="walletBusinessRef"/>
+        <result column="status" property="status"/>
+        <result column="clearing_price" property="clearingPrice"/>
+        <result column="slot_index" property="slotIndex"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.promotion.model.PromotionBid">
+        INSERT INTO promotion_bid (
+            id, campaign_id, auction_window_id, bidder_user_id, bid_amount, wallet_business_ref, status, clearing_price, slot_index, created_at, updated_at
+        ) VALUES (
+            #{id}, #{campaignId}, #{auctionWindowId}, #{bidderUserId}, #{bidAmount}, #{walletBusinessRef}, #{status}, #{clearingPrice}, #{slotIndex}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="findByCampaignIdAndAuctionWindowId" resultMap="PromotionBidResultMap">
+        SELECT *
+        FROM promotion_bid
+        WHERE campaign_id = #{campaignId}
+          AND auction_window_id = #{auctionWindowId}
+        LIMIT 1
+    </select>
+
+    <select id="listActiveBidsByWindowId" resultMap="PromotionBidResultMap">
+        SELECT *
+        FROM promotion_bid
+        WHERE auction_window_id = #{auctionWindowId}
+          AND status = 'ACTIVE'
+        ORDER BY bid_amount DESC, id ASC
+    </select>
+
+    <update id="markWon">
+        UPDATE promotion_bid
+        SET status         = 'WON',
+            slot_index     = #{slotIndex},
+            clearing_price = #{clearingPrice},
+            updated_at     = NOW(3)
+        WHERE id = #{id}
+    </update>
+
+    <update id="markLost">
+        UPDATE promotion_bid
+        SET status     = 'LOST',
+            updated_at = NOW(3)
+        WHERE id = #{id}
+    </update>
+</mapper>
