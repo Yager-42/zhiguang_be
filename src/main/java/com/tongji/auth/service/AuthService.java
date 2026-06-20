@@ -128,12 +128,13 @@ public class AuthService {
         }
 
         // 建用户 + 初始化钱包 + 注册赠币在同一事务内完成；赠币失败随事务回滚，token 签发放到事务成功之后。
-        walletRegistrationGrantService.createUserAndGrant(user, walletProperties.getRegistrationGrantAmount());
-        TokenPair tokenPair = jwtService.issueTokenPair(user);
-        storeRefreshToken(user.getId(), tokenPair);
-        loginLogService.record(user.getId(), identifier, "REGISTER", clientInfo.ip(), clientInfo.userAgent(), "SUCCESS");
+        // 后续签 token / 存 refresh / 响应都必须使用编排服务返回的 created user（含最终 id / 字段）。
+        User created = walletRegistrationGrantService.createUserAndGrant(user, walletProperties.getRegistrationGrantAmount());
+        TokenPair tokenPair = jwtService.issueTokenPair(created);
+        storeRefreshToken(created.getId(), tokenPair);
+        loginLogService.record(created.getId(), identifier, "REGISTER", clientInfo.ip(), clientInfo.userAgent(), "SUCCESS");
 
-        return new AuthResponse(mapUser(user), mapToken(tokenPair));
+        return new AuthResponse(mapUser(created), mapToken(tokenPair));
     }
 
     /**

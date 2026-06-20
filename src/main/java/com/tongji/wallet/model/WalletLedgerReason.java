@@ -11,5 +11,6 @@ public enum WalletLedgerReason {
     HOLD_TO_ESCROW,
     ESCROW_RELEASE,
     ESCROW_REFUND,
+    ESCROW_CANCEL,
     ESCROW_FORFEIT
 }
