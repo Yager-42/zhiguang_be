@@ -16,6 +16,7 @@
         <result column="slot_index" property="slotIndex"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
+        <result column="post_id" property="postId"/>
     </resultMap>
 
     <insert id="insert" parameterType="com.tongji.promotion.model.PromotionBid">
@@ -35,11 +36,12 @@
     </select>
 
     <select id="listActiveBidsByWindowId" resultMap="PromotionBidResultMap">
-        SELECT *
-        FROM promotion_bid
-        WHERE auction_window_id = #{auctionWindowId}
-          AND status = 'ACTIVE'
-        ORDER BY bid_amount DESC, id ASC
+        SELECT b.*, c.post_id AS post_id
+        FROM promotion_bid b
+                 LEFT JOIN promotion_campaign c ON c.id = b.campaign_id
+        WHERE b.auction_window_id = #{auctionWindowId}
+          AND b.status = 'ACTIVE'
+        ORDER BY b.bid_amount DESC, b.id ASC
     </select>
 
     <update id="markWon">

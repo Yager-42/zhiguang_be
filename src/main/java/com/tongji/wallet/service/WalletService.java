@@ -103,6 +103,17 @@ public class WalletService {
     }
 
     /**
+     * 冻结 → 平台账本主体（推广位中标成交价扣减）：冻结余额减成交价，counterparty 记平台哨兵。
+     * 与 {@link #forfeitEscrowToPlatform} 同一平台 sentinel 模式：不模拟"release + grant"假账，显式扣减冻结。
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public WalletLedgerEntry captureHoldToPlatform(long ownerUserId, long amount,
+                                                   WalletBusinessType businessType, String businessRef) {
+        return apply(ownerUserId, amount, WalletLedgerReason.PROMOTION_BID_CAPTURE, businessType,
+                WalletLedgerDirection.DEBIT, walletProperties.getPlatformUserId(), null, 0L, -amount, 0L, businessRef);
+    }
+
+    /**
      * 直接放款：payer 托管 → payee 可用。同一 {@code businessRef} 下写 payer/payee 两条流水，
      * counterparty 互指；不得用平台罚没 + 赠款模拟。双侧 ledger 按整组（两条）判等保证幂等。
      */
