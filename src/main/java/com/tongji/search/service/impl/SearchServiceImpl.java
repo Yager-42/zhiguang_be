@@ -7,11 +7,14 @@ import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.query_dsl.FieldValueFactorModifier;
 import co.elastic.clients.elasticsearch._types.query_dsl.FunctionBoostMode;
 import co.elastic.clients.elasticsearch.core.search.HighlightField;
+import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.Suggestion;
 import co.elastic.clients.util.NamedValue;
-import co.elastic.clients.elasticsearch.core.search.Hit;
 import com.tongji.knowpost.api.dto.FeedItemResponse;
+import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.counter.service.CounterService;
+import com.tongji.promotion.api.dto.PromotionAllocationView;
+import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.search.api.dto.SearchResponse;
 import com.tongji.search.api.dto.SuggestResponse;
 import com.tongji.search.service.SearchService;
@@ -21,8 +24,11 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -30,40 +36,46 @@ import java.util.stream.Collectors;
  * - 宽召回（multi_match 命中 title^3 与 body）+ 业务加权（function_score）
  * - 过滤（status=published、可选 tags）+ 排序（score/publish_time/like/view/content_id）
  * - 高亮片段合并为 snippet；游标分页使用 search_after
+ * - 首屏（after == null）在 organic 结果前插入至多 1 条 search_top_slot 商业位；
+ *   nextAfter/hasMore 只基于 organic 子序列计算，不被 promoted 污染。
  */
 @Service
 @RequiredArgsConstructor
 public class SearchServiceImpl implements SearchService {
 
+    private static final int PROMOTED_LIMIT = 1;
+
     private final ElasticsearchClient es;
     private final CounterService counterService;
+    private final KnowPostFeedService knowPostFeedService;
+    private final PromotionAllocationService promotionAllocationService;
     /**
      * ES 索引名：zhiguang 内容统一索引。
      */
     private static final String INDEX = "zhiguang_content_index";
 
     /**
-     * 关键词检索：相关性 + 互动数据加权，支持游标分页与高亮。
+     * 关键词检索：相关性 + 互动数据加权，支持游标分页与高亮；首屏插入至多 1 条商业位。
      */
     @SuppressWarnings("unchecked")
     public SearchResponse search(String q, int size, String tagsCsv, String after, Long currentUserIdNullable) {
-        List<String> tags = parseCsv(tagsCsv);
+        int safeSize = Math.max(size, 1);
+        int promotedLimit = (after == null) ? PROMOTED_LIMIT : 0;
+
+        List<FeedItemResponse> items = new ArrayList<>(safeSize + 1);
+        Set<String> seen = new LinkedHashSet<>();
+        appendPromotedSearch(items, seen, currentUserIdNullable, promotedLimit);
+
+        int organicNeed = safeSize - items.size();
+        int requested = Math.max(organicNeed + 1, 1);
         List<FieldValue> afterValues = parseAfter(after);
+        List<SortOptions> sorts = buildSorts();
 
-        // 复合排序：优先相关性，其次发布时间与互动数据，最后按 content_id 稳定排序
-        List<SortOptions> sorts = new ArrayList<>();
-        sorts.add(SortOptions.of(s -> s.score(o -> o.order(SortOrder.Desc))));
-        sorts.add(SortOptions.of(s -> s.field(f -> f.field("publish_time").order(SortOrder.Desc))));
-        sorts.add(SortOptions.of(s -> s.field(f -> f.field("like_count").order(SortOrder.Desc))));
-        sorts.add(SortOptions.of(s -> s.field(f -> f.field("view_count").order(SortOrder.Desc))));
-        sorts.add(SortOptions.of(s -> s.field(f -> f.field("content_id").order(SortOrder.Desc))));
-
-        // 完整包名，不然和自定义的 SearchResponse 冲突
         co.elastic.clients.elasticsearch.core.SearchResponse<Map<String, Object>> resp;
         try {
             resp = es.search(s -> {
                 var b = s.index(INDEX)
-                        .size(size)
+                        .size(requested)
                         // 召回与加权：先构造 bool 查询，再用 function_score 做互动数据加权
                         .query(qb -> qb.functionScore(fs -> fs
                                 .query(qb2 -> qb2.bool(bq -> {
@@ -72,9 +84,12 @@ public class SearchServiceImpl implements SearchService {
                                     bq.filter(f -> f.term(t -> t.field("status")
                                             .value(v -> v.stringValue("published"))));
 
-                                    if (tags != null && !tags.isEmpty()) {
-                                        bq.filter(f -> f.terms(t -> t.field("tags")
-                                                .terms(tv -> tv.value(tags.stream().map(FieldValue::of).toList()))));
+                                    if (tagsCsv != null && !tagsCsv.isBlank()) {
+                                        List<String> tags = parseCsv(tagsCsv);
+                                        if (!tags.isEmpty()) {
+                                            bq.filter(f -> f.terms(t -> t.field("tags")
+                                                    .terms(tv -> tv.value(tags.stream().map(FieldValue::of).toList()))));
+                                        }
                                     }
                                     return bq;
                                 }))
@@ -99,63 +114,98 @@ public class SearchServiceImpl implements SearchService {
                 }
 
                 return b;
-            }, (Class<Map<String, Object>>)(Class<?>) Map.class);
+            }, (Class<Map<String, Object>>) (Class<?>) Map.class);
         } catch (Exception e) {
-            return new SearchResponse(Collections.emptyList(), null, false);
+            // ES 失败：仅返回已组装的商业位（若有），不提供 organic 分页
+            return new SearchResponse(items, null, false);
         }
 
-        List<FeedItemResponse> items = new ArrayList<>();
         List<Hit<Map<String, Object>>> hits = resp.hits() == null ? Collections.emptyList() : resp.hits().hits();
-
+        List<FieldValue> lastAddedSort = null;
         for (Hit<Map<String, Object>> hit : hits) {
-            Map<String, Object> source = hit.source();
-            if (source == null) {
+            if (items.size() >= safeSize) {
+                break;
+            }
+            FeedItemResponse item = mapHit(hit, currentUserIdNullable);
+            if (item == null || !seen.add(item.id())) {
+                // 跳过 promoted 已占位的重复或无效命中
                 continue;
             }
-            String id = asString(source.get("content_id"));
-            String title = asString(source.get("title"));
-            String descriptionFromDoc = asString(source.get("description"));
-            String snippet = buildSnippet(hit);
-            String description = (snippet != null && !snippet.isBlank()) ? snippet : descriptionFromDoc;
-            List<String> tagList = asStringList(source.get("tags"));
-            List<String> imgs = asStringList(source.get("img_urls"));
-            String cover = imgs.isEmpty() ? null : imgs.getFirst();
-            String authorAvatar = asString(source.get("author_avatar"));
-            String authorNickname = asString(source.get("author_nickname"));
-            String tagJson = asString(source.get("author_tag_json"));
-            Long likeCount = asLong(source.get("like_count"));
-            Long favoriteCount = asLong(source.get("favorite_count"));
-            Boolean liked = currentUserIdNullable != null && counterService.isLiked("knowpost", id, currentUserIdNullable);
-            Boolean faved = currentUserIdNullable != null && counterService.isFaved("knowpost", id, currentUserIdNullable);
-            items.add(FeedItemResponse.organic(
-                    id,
-                    title,
-                    description,
-                    cover,
-                    tagList,
-                    authorAvatar,
-                    authorNickname,
-                    tagJson,
-                    likeCount,
-                    favoriteCount,
-                    liked,
-                    faved,
-                    null
-            ));
+            items.add(item);
+            lastAddedSort = hit.sort();
         }
 
-        String nextAfter = null;
-        boolean hasMore = items.size() >= size;
+        // nextAfter/hasMore 只基于 organic：多取 1 条命中用于判断是否还有下一页
+        boolean hasMore = lastAddedSort != null && hits.size() > organicNeed;
+        return new SearchResponse(items, encodeSort(lastAddedSort), hasMore);
+    }
 
-        if (!hits.isEmpty()) {
-            List<FieldValue> sv = hits.getLast().sort();
-            if (sv != null && !sv.isEmpty()) {
-                List<String> parts = sv.stream().map(this::fieldValueToString).collect(Collectors.toList());
-                nextAfter = Base64.getUrlEncoder().withoutPadding().encodeToString(String.join(",", parts).getBytes());
+    /**
+     * 首屏插入 search 商业位：取 active allocation 前 {@code limit} 条、hydrate 帖子并标记 promoted。
+     */
+    private void appendPromotedSearch(List<FeedItemResponse> items, Set<String> seen, Long currentUserIdNullable, int limit) {
+        if (limit <= 0) {
+            return;
+        }
+        List<PromotionAllocationView> allocations = promotionAllocationService.getActiveSearchAllocation();
+        if (allocations == null || allocations.isEmpty()) {
+            return;
+        }
+        List<Long> ids = allocations.stream().limit(limit).map(PromotionAllocationView::postIdAsLong).toList();
+        Map<Long, PromotionAllocationView> byId = allocations.stream()
+                .collect(Collectors.toMap(PromotionAllocationView::postIdAsLong, Function.identity(), (left, right) -> left));
+        for (FeedItemResponse item : knowPostFeedService.getFeedByIds(ids, currentUserIdNullable, KnowPostFeedService.FeedVisibilityScope.PUBLIC)) {
+            if (items.size() >= limit) {
+                break;
+            }
+            PromotionAllocationView allocation = byId.get(Long.parseLong(item.id()));
+            if (allocation != null && seen.add(item.id())) {
+                items.add(item.withPromotion(allocation.placementType(), allocation.promotionCampaignId(),
+                        allocation.auctionWindowId()));
             }
         }
+    }
 
-        return new SearchResponse(items, nextAfter, hasMore);
+    private List<SortOptions> buildSorts() {
+        List<SortOptions> sorts = new ArrayList<>();
+        sorts.add(SortOptions.of(s -> s.score(o -> o.order(SortOrder.Desc))));
+        sorts.add(SortOptions.of(s -> s.field(f -> f.field("publish_time").order(SortOrder.Desc))));
+        sorts.add(SortOptions.of(s -> s.field(f -> f.field("like_count").order(SortOrder.Desc))));
+        sorts.add(SortOptions.of(s -> s.field(f -> f.field("view_count").order(SortOrder.Desc))));
+        sorts.add(SortOptions.of(s -> s.field(f -> f.field("content_id").order(SortOrder.Desc))));
+        return sorts;
+    }
+
+    private FeedItemResponse mapHit(Hit<Map<String, Object>> hit, Long currentUserIdNullable) {
+        Map<String, Object> source = hit.source();
+        if (source == null) {
+            return null;
+        }
+        String id = asString(source.get("content_id"));
+        String title = asString(source.get("title"));
+        String descriptionFromDoc = asString(source.get("description"));
+        String snippet = buildSnippet(hit);
+        String description = (snippet != null && !snippet.isBlank()) ? snippet : descriptionFromDoc;
+        List<String> tagList = asStringList(source.get("tags"));
+        List<String> imgs = asStringList(source.get("img_urls"));
+        String cover = imgs.isEmpty() ? null : imgs.getFirst();
+        String authorAvatar = asString(source.get("author_avatar"));
+        String authorNickname = asString(source.get("author_nickname"));
+        String tagJson = asString(source.get("author_tag_json"));
+        Long likeCount = asLong(source.get("like_count"));
+        Long favoriteCount = asLong(source.get("favorite_count"));
+        Boolean liked = currentUserIdNullable != null && counterService.isLiked("knowpost", id, currentUserIdNullable);
+        Boolean faved = currentUserIdNullable != null && counterService.isFaved("knowpost", id, currentUserIdNullable);
+        return FeedItemResponse.organic(id, title, description, cover, tagList, authorAvatar, authorNickname,
+                tagJson, likeCount, favoriteCount, liked, faved, null);
+    }
+
+    private String encodeSort(List<FieldValue> sort) {
+        if (sort == null || sort.isEmpty()) {
+            return null;
+        }
+        List<String> parts = sort.stream().map(this::fieldValueToString).collect(Collectors.toList());
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(String.join(",", parts).getBytes());
     }
 
     /**
@@ -168,7 +218,7 @@ public class SearchServiceImpl implements SearchService {
             resp = es.search(s -> s.index(INDEX)
                     .suggest(sug -> sug.suggesters("title_suggest",
                             sc -> sc.prefix(prefix).completion(c -> c.field("title_suggest").size(size))))
-                    , (Class<Map<String, Object>>)(Class<?>) Map.class);
+                    , (Class<Map<String, Object>>) (Class<?>) Map.class);
         } catch (Exception e) {
             return new SuggestResponse(Collections.emptyList());
         }
