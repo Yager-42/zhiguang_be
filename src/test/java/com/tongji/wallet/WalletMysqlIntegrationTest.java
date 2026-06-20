@@ -29,12 +29,13 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 钱包持久化层 MySQL 集成测试：account / ledger / escrow 三张表的最小 insert/select 往返。
+ * 钱包持久化层 MySQL 集成测试：account / ledger / escrow 的 delta 更新、FOR UPDATE、条件状态迁移与约束。
  * <p>
- * 风格对齐 {@link com.tongji.common.id.IdServiceMysqlIntegrationTest}：
- * 真实 MySQL 切片 + MyBatis 自动装配，无 Docker 时通过 {@code @EnabledIf} 跳过。
+ * 风格对齐 {@link com.tongji.common.id.IdServiceMysqlIntegrationTest}；
+ * 无 Docker 时通过 {@code @EnabledIf} 跳过。
  */
 @SpringBootTest(classes = WalletMysqlIntegrationTest.TestConfig.class)
 @TestPropertySource(properties = {
@@ -58,98 +59,107 @@ class WalletMysqlIntegrationTest {
     private WalletEscrowMapper walletEscrowMapper;
 
     @Test
-    void accountInsertAndFindByOwnerRoundTrips() {
-        long ownerUserId = uniqueOwnerUserId();
-        Instant now = Instant.now();
-        WalletAccount account = WalletAccount.builder()
-                .ownerUserId(ownerUserId)
-                .availableBalance(100L)
-                .heldBalance(20L)
-                .escrowedBalance(30L)
-                .status(WalletAccountStatus.ACTIVE)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-        assertThat(walletAccountMapper.insert(account)).isEqualTo(1);
+    void applyBalanceDeltasUsesDeltaUpdateAndNonNegativeGuard() {
+        long owner = uniqueOwnerUserId();
+        insertAccount(owner, 100L, 0L, 0L);
 
-        WalletAccount loaded = walletAccountMapper.findByOwnerUserId(ownerUserId);
-        assertThat(loaded).isNotNull();
-        assertThat(loaded.getAvailableBalance()).isEqualTo(100L);
-        assertThat(loaded.getHeldBalance()).isEqualTo(20L);
-        assertThat(loaded.getEscrowedBalance()).isEqualTo(30L);
-        assertThat(loaded.getStatus()).isEqualTo(WalletAccountStatus.ACTIVE);
+        assertThat(walletAccountMapper.applyBalanceDeltas(owner, 50L, 0L, 0L)).isEqualTo(1);
+        assertThat(walletAccountMapper.findByOwnerUserId(owner).getAvailableBalance()).isEqualTo(150L);
+
+        // 会让余额变负的 delta 被非负 WHERE 拦截，返回 0，余额不变
+        assertThat(walletAccountMapper.applyBalanceDeltas(owner, -9999L, 0L, 0L)).isEqualTo(0);
+        assertThat(walletAccountMapper.findByOwnerUserId(owner).getAvailableBalance()).isEqualTo(150L);
+
+        assertThat(walletAccountMapper.findByOwnerUserIdForUpdate(owner)).isNotNull();
     }
 
     @Test
-    void ledgerInsertAndFindByBusinessRefRoundTrips() {
-        long ownerUserId = uniqueOwnerUserId();
+    void ledgerFindByOwnerAndRefAndListRoundTrips() {
+        long owner = uniqueOwnerUserId();
         long ledgerId = uniqueLedgerId();
-        String businessRef = "it-ledger:" + ledgerId;
+        String ref = "it-ledger:" + ledgerId;
         Instant now = Instant.now();
         WalletLedgerEntry entry = WalletLedgerEntry.builder()
-                .id(ledgerId)
-                .ownerUserId(ownerUserId)
-                .counterpartyUserId(0L)
-                .escrowId(null)
-                .businessType(WalletBusinessType.REGISTRATION)
-                .businessRef(businessRef)
-                .direction(WalletLedgerDirection.CREDIT)
-                .reason(WalletLedgerReason.REGISTRATION_GRANT)
-                .amount(100L)
-                .availableDelta(100L)
-                .heldDelta(0L)
-                .escrowedDelta(0L)
-                .balanceAvailableAfter(100L)
-                .balanceHeldAfter(0L)
-                .balanceEscrowedAfter(0L)
-                .createdAt(now)
-                .build();
+                .id(ledgerId).ownerUserId(owner).counterpartyUserId(0L).escrowId(null)
+                .businessType(WalletBusinessType.REGISTRATION).businessRef(ref)
+                .direction(WalletLedgerDirection.CREDIT).reason(WalletLedgerReason.REGISTRATION_GRANT)
+                .amount(100L).availableDelta(100L).heldDelta(0L).escrowedDelta(0L)
+                .balanceAvailableAfter(100L).balanceHeldAfter(0L).balanceEscrowedAfter(0L)
+                .createdAt(now).build();
         assertThat(walletLedgerMapper.insert(entry)).isEqualTo(1);
 
-        WalletLedgerEntry loaded = walletLedgerMapper.findByBusinessRef(businessRef);
-        assertThat(loaded).isNotNull();
-        assertThat(loaded.getOwnerUserId()).isEqualTo(ownerUserId);
-        assertThat(loaded.getDirection()).isEqualTo(WalletLedgerDirection.CREDIT);
-        assertThat(loaded.getReason()).isEqualTo(WalletLedgerReason.REGISTRATION_GRANT);
-        assertThat(loaded.getBusinessType()).isEqualTo(WalletBusinessType.REGISTRATION);
-        assertThat(loaded.getBalanceAvailableAfter()).isEqualTo(100L);
-
-        List<WalletLedgerEntry> listed = walletLedgerMapper.listByOwnerUserId(ownerUserId, 10, 0);
-        assertThat(listed).extracting(WalletLedgerEntry::getBusinessRef).contains(businessRef);
+        assertThat(walletLedgerMapper.findByOwnerUserIdAndBusinessRef(owner, ref)).isNotNull();
+        List<WalletLedgerEntry> byRef = walletLedgerMapper.findByBusinessRef(ref);
+        assertThat(byRef).extracting(WalletLedgerEntry::getOwnerUserId).contains(owner);
+        assertThat(walletLedgerMapper.listByOwnerUserId(owner, 10, 0))
+                .extracting(WalletLedgerEntry::getBusinessRef).contains(ref);
     }
 
     @Test
-    void escrowInsertAndFindRoundTrips() {
+    void ledgerRejectsNonPositiveAmount() {
+        long owner = uniqueOwnerUserId();
+        long ledgerId = uniqueLedgerId();
+        WalletLedgerEntry entry = WalletLedgerEntry.builder()
+                .id(ledgerId).ownerUserId(owner).counterpartyUserId(0L).escrowId(null)
+                .businessType(WalletBusinessType.SYSTEM).businessRef("it-zero:" + ledgerId)
+                .direction(WalletLedgerDirection.CREDIT).reason(WalletLedgerReason.PLATFORM_SUBSIDY)
+                .amount(0L).availableDelta(0L).heldDelta(0L).escrowedDelta(0L)
+                .balanceAvailableAfter(0L).balanceHeldAfter(0L).balanceEscrowedAfter(0L)
+                .createdAt(Instant.now()).build();
+        assertThatThrownBy(() -> walletLedgerMapper.insert(entry)).isInstanceOf(Exception.class);
+    }
+
+    @Test
+    void ledgerUniqueKeyOwnerBusinessRefRejectsDuplicate() {
+        long owner = uniqueOwnerUserId();
+        long ledgerId = uniqueLedgerId();
+        String ref = "it-uniq:" + ledgerId;
+        Instant now = Instant.now();
+        WalletLedgerEntry first = WalletLedgerEntry.builder()
+                .id(ledgerId).ownerUserId(owner).counterpartyUserId(0L).escrowId(null)
+                .businessType(WalletBusinessType.REGISTRATION).businessRef(ref)
+                .direction(WalletLedgerDirection.CREDIT).reason(WalletLedgerReason.REGISTRATION_GRANT)
+                .amount(100L).availableDelta(100L).heldDelta(0L).escrowedDelta(0L)
+                .balanceAvailableAfter(100L).balanceHeldAfter(0L).balanceEscrowedAfter(0L)
+                .createdAt(now).build();
+        assertThat(walletLedgerMapper.insert(first)).isEqualTo(1);
+
+        // 同 owner_user_id + 同 business_ref 第二条被唯一键拒绝（幂等判等回读的持久化前提）
+        WalletLedgerEntry second = WalletLedgerEntry.builder()
+                .id(uniqueLedgerId()).ownerUserId(owner).counterpartyUserId(0L).escrowId(null)
+                .businessType(WalletBusinessType.REGISTRATION).businessRef(ref)
+                .direction(WalletLedgerDirection.CREDIT).reason(WalletLedgerReason.REGISTRATION_GRANT)
+                .amount(100L).availableDelta(100L).heldDelta(0L).escrowedDelta(0L)
+                .balanceAvailableAfter(200L).balanceHeldAfter(0L).balanceEscrowedAfter(0L)
+                .createdAt(now).build();
+        assertThatThrownBy(() -> walletLedgerMapper.insert(second)).isInstanceOf(Exception.class);
+    }
+
+    @Test
+    void escrowTransitionStatusIsConditional() {
         long escrowId = uniqueLedgerId();
-        String businessRef = "it-escrow:" + escrowId;
+        String ref = "it-escrow:" + escrowId;
         Instant now = Instant.now();
         WalletEscrow escrow = WalletEscrow.builder()
-                .id(escrowId)
-                .businessType(WalletBusinessType.BOUNTY)
-                .businessRef(businessRef)
-                .payerUserId(uniqueOwnerUserId())
-                .payeeUserId(uniqueOwnerUserId())
-                .amount(500L)
-                .status(WalletEscrowStatus.CREATED)
-                .expiresAt(now.plusSeconds(3600))
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
+                .id(escrowId).businessType(WalletBusinessType.BOUNTY).businessRef(ref)
+                .payerUserId(uniqueOwnerUserId()).payeeUserId(uniqueOwnerUserId()).amount(500L)
+                .status(WalletEscrowStatus.CREATED).expiresAt(null).createdAt(now).updatedAt(now).build();
         assertThat(walletEscrowMapper.insert(escrow)).isEqualTo(1);
 
-        WalletEscrow byId = walletEscrowMapper.findById(escrowId);
-        assertThat(byId).isNotNull();
-        assertThat(byId.getAmount()).isEqualTo(500L);
-        assertThat(byId.getStatus()).isEqualTo(WalletEscrowStatus.CREATED);
-
-        WalletEscrow byRef = walletEscrowMapper.findByBusinessRef(businessRef);
-        assertThat(byRef).isNotNull();
-        assertThat(byRef.getId()).isEqualTo(escrowId);
-
-        byRef.setStatus(WalletEscrowStatus.LOCKED);
-        byRef.setUpdatedAt(Instant.now());
-        assertThat(walletEscrowMapper.updateStatus(byRef)).isEqualTo(1);
+        assertThat(walletEscrowMapper.transitionStatus(escrowId, WalletEscrowStatus.CREATED, WalletEscrowStatus.LOCKED)).isEqualTo(1);
         assertThat(walletEscrowMapper.findById(escrowId).getStatus()).isEqualTo(WalletEscrowStatus.LOCKED);
+        assertThat(walletEscrowMapper.findByIdForUpdate(escrowId).getStatus()).isEqualTo(WalletEscrowStatus.LOCKED);
+
+        // 状态已非 CREATED，重复条件迁移返回 0，不双改
+        assertThat(walletEscrowMapper.transitionStatus(escrowId, WalletEscrowStatus.CREATED, WalletEscrowStatus.LOCKED)).isEqualTo(0);
+        assertThat(walletEscrowMapper.findById(escrowId).getStatus()).isEqualTo(WalletEscrowStatus.LOCKED);
+    }
+
+    private void insertAccount(long owner, long available, long held, long escrowed) {
+        Instant now = Instant.now();
+        walletAccountMapper.insert(WalletAccount.builder()
+                .ownerUserId(owner).availableBalance(available).heldBalance(held).escrowedBalance(escrowed)
+                .status(WalletAccountStatus.ACTIVE).createdAt(now).updatedAt(now).build());
     }
 
     private long uniqueOwnerUserId() {

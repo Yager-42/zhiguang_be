@@ -20,6 +20,13 @@
         WHERE owner_user_id = #{ownerUserId}
     </select>
 
+    <select id="findByOwnerUserIdForUpdate" parameterType="long" resultMap="WalletAccountResultMap">
+        SELECT *
+        FROM wallet_account
+        WHERE owner_user_id = #{ownerUserId}
+        FOR UPDATE
+    </select>
+
     <insert id="insert" parameterType="com.tongji.wallet.model.WalletAccount">
         INSERT INTO wallet_account (
             owner_user_id, available_balance, held_balance, escrowed_balance, status, created_at, updated_at
@@ -28,13 +35,15 @@
         )
     </insert>
 
-    <update id="updateBalancesAndStatus" parameterType="com.tongji.wallet.model.WalletAccount">
+    <update id="applyBalanceDeltas">
         UPDATE wallet_account
-        SET available_balance = #{availableBalance},
-            held_balance      = #{heldBalance},
-            escrowed_balance   = #{escrowedBalance},
-            status            = #{status},
-            updated_at        = #{updatedAt}
+        SET available_balance = available_balance + #{availableDelta},
+            held_balance      = held_balance + #{heldDelta},
+            escrowed_balance  = escrowed_balance + #{escrowedDelta},
+            updated_at        = NOW(3)
         WHERE owner_user_id = #{ownerUserId}
+          AND available_balance + #{availableDelta} >= 0
+          AND held_balance + #{heldDelta} >= 0
+          AND escrowed_balance + #{escrowedDelta} >= 0
     </update>
 </mapper>

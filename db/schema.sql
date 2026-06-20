@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS wallet_account (
     CHECK (escrowed_balance >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 钱包流水：只追加事实源，business_ref 全局唯一保证幂等。
+-- 钱包流水：只追加事实源；(owner_user_id, business_ref) 唯一保证幂等；direct transfer 的 payer/payee 两条可共用同一 business_ref（owner 不同）。
 CREATE TABLE IF NOT EXISTS wallet_ledger (
     id BIGINT UNSIGNED NOT NULL,
     owner_user_id BIGINT UNSIGNED NOT NULL,
@@ -263,8 +263,10 @@ CREATE TABLE IF NOT EXISTS wallet_ledger (
     balance_escrowed_after BIGINT NOT NULL,
     created_at DATETIME(3) NOT NULL,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_wallet_ledger_business_ref (business_ref),
-    KEY idx_wallet_ledger_owner_created (owner_user_id, created_at)
+    UNIQUE KEY uk_wallet_ledger_owner_business_ref (owner_user_id, business_ref),
+    KEY idx_wallet_ledger_business_ref (business_ref),
+    KEY idx_wallet_ledger_owner_created (owner_user_id, created_at),
+    CHECK (amount > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 通用托管单据：记录付款方/收款方/金额/状态/过期，业务驱动状态迁移。
@@ -282,5 +284,16 @@ CREATE TABLE IF NOT EXISTS wallet_escrow (
     PRIMARY KEY (id),
     UNIQUE KEY uk_wallet_escrow_business_ref (business_ref),
     KEY idx_wallet_escrow_payer_status (payer_user_id, status),
-    KEY idx_wallet_escrow_payee_status (payee_user_id, status)
+    KEY idx_wallet_escrow_payee_status (payee_user_id, status),
+    CHECK (amount > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- business_ref 全局 claim：PRIMARY KEY 在 business_ref 上，使"按 business_ref 串行化"不依赖 owner。
+-- 任一 wallet 操作在写 ledger 前先 INSERT 此表抢占 ref；不同 owner 并发复用同一 ref 时，唯一键兜底只让一方成功，
+-- 输方回读 ledger 整组判等后 reject（WALLET_DUPLICATE_BUSINESS_REF）。claim 行随 ledger 事实源常驻，不清理。
+CREATE TABLE IF NOT EXISTS wallet_business_ref (
+    business_ref VARCHAR(128) NOT NULL,
+    claimed_by_owner_user_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (business_ref)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
