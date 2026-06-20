@@ -297,3 +297,75 @@ CREATE TABLE IF NOT EXISTS wallet_business_ref (
     created_at DATETIME(3) NOT NULL,
     PRIMARY KEY (business_ref)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== 推广位竞价（slot auction promotions）=====
+-- 推广活动：创作者为某帖子在某资源位发起的投放语义，承载资源类型与投放时间窗。
+CREATE TABLE IF NOT EXISTS promotion_campaign (
+    id BIGINT UNSIGNED NOT NULL,
+    creator_user_id BIGINT UNSIGNED NOT NULL,
+    post_id BIGINT UNSIGNED NOT NULL,
+    resource_type VARCHAR(32) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    start_at DATETIME(3) NOT NULL,
+    end_at DATETIME(3) NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_promotion_campaign_creator_status (creator_user_id, status),
+    KEY idx_promotion_campaign_post (post_id),
+    KEY idx_promotion_campaign_resource_window (resource_type, start_at, end_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 竞价窗口：某资源类型在一个时间窗内收单、排序、定价与出位的批次单位；窗口关闭时统一结算。
+CREATE TABLE IF NOT EXISTS promotion_auction_window (
+    id BIGINT UNSIGNED NOT NULL,
+    resource_type VARCHAR(32) NOT NULL,
+    window_start_at DATETIME(3) NOT NULL,
+    window_end_at DATETIME(3) NOT NULL,
+    slot_count INT NOT NULL,
+    reserve_price BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    settled_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_promotion_window_resource_time (resource_type, window_start_at, window_end_at),
+    KEY idx_promotion_window_status_time (status, window_end_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 推广出价：某活动在某窗口的单条出价，接单即冻结申报价；(campaign_id, auction_window_id) 唯一防重复出价。
+CREATE TABLE IF NOT EXISTS promotion_bid (
+    id BIGINT UNSIGNED NOT NULL,
+    campaign_id BIGINT UNSIGNED NOT NULL,
+    auction_window_id BIGINT UNSIGNED NOT NULL,
+    bidder_user_id BIGINT UNSIGNED NOT NULL,
+    bid_amount BIGINT NOT NULL,
+    wallet_business_ref VARCHAR(128) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    clearing_price BIGINT NULL,
+    slot_index INT NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_promotion_bid_campaign_window (campaign_id, auction_window_id),
+    UNIQUE KEY uk_promotion_bid_wallet_ref (wallet_business_ref),
+    KEY idx_promotion_bid_window_status_amount (auction_window_id, status, bid_amount DESC, id ASC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 位分配：窗口结算后的占位结果，驱动 feed/search 商业位读路径；同一窗口同一位号唯一。
+CREATE TABLE IF NOT EXISTS promotion_slot_allocation (
+    id BIGINT UNSIGNED NOT NULL,
+    auction_window_id BIGINT UNSIGNED NOT NULL,
+    resource_type VARCHAR(32) NOT NULL,
+    slot_index INT NOT NULL,
+    campaign_id BIGINT UNSIGNED NOT NULL,
+    post_id BIGINT UNSIGNED NOT NULL,
+    bidder_user_id BIGINT UNSIGNED NOT NULL,
+    clearing_price BIGINT NOT NULL,
+    allocation_start_at DATETIME(3) NOT NULL,
+    allocation_end_at DATETIME(3) NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_promotion_slot_window_index (auction_window_id, slot_index),
+    KEY idx_promotion_slot_resource_time (resource_type, allocation_start_at, allocation_end_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -91,6 +91,17 @@ wallet:
   platform-user-id: ${WALLET_PLATFORM_USER_ID:0}
   registration-grant-amount: ${WALLET_REGISTRATION_GRANT_AMOUNT:100}
 
+promotion:
+  slot-auction:
+    feed-top-slot-count: ${PROMOTION_FEED_TOP_SLOT_COUNT:1}
+    search-top-slot-count: ${PROMOTION_SEARCH_TOP_SLOT_COUNT:1}
+    feed-reserve-price: ${PROMOTION_FEED_RESERVE_PRICE:1}
+    search-reserve-price: ${PROMOTION_SEARCH_RESERVE_PRICE:1}
+    window-minutes: ${PROMOTION_WINDOW_MINUTES:60}
+    cache-ttl-seconds: ${PROMOTION_CACHE_TTL_SECONDS:300}
+    settle-batch-size: ${PROMOTION_SETTLE_BATCH_SIZE:50}
+    close-window-delay-ms: ${PROMOTION_CLOSE_WINDOW_DELAY_MS:30000}
+
 storage:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
   public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
