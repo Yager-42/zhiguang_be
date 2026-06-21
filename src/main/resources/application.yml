@@ -101,6 +101,12 @@ promotion:
     cache-ttl-seconds: ${PROMOTION_CACHE_TTL_SECONDS:300}
     settle-batch-size: ${PROMOTION_SETTLE_BATCH_SIZE:50}
     close-window-delay-ms: ${PROMOTION_CLOSE_WINDOW_DELAY_MS:30000}
+  paid-boost:
+    active-cache-ttl-seconds: ${PROMOTION_PAID_BOOST_CACHE_TTL_SECONDS:60}
+    delivery-bucket-seconds: ${PROMOTION_PAID_BOOST_DELIVERY_BUCKET_SECONDS:60}
+    settle-delay-ms: ${PROMOTION_PAID_BOOST_SETTLE_DELAY_MS:30000}
+    recommendation-max-boost-effect: ${PROMOTION_PAID_BOOST_RECOMMENDATION_MAX_EFFECT:50}
+    follow-delivery-selection-cap: ${PROMOTION_PAID_BOOST_FOLLOW_SELECTION_CAP:40}
 
 storage:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
