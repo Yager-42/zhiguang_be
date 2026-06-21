@@ -45,4 +45,11 @@ class PromotionAuctionSchedulerTest {
         verify(windowService).ensureOpenWindow(PromotionResourceType.FEED_TOP_SLOT);
         verify(windowService).ensureOpenWindow(PromotionResourceType.SEARCH_TOP_SLOT);
     }
+
+    @Test
+    void refreshAllocationsDelegatesToCloser() {
+        scheduler.refreshAllocations();
+
+        verify(closer).refreshCurrentAllocations(any(Instant.class));
+    }
 }

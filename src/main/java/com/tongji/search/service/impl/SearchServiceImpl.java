@@ -44,6 +44,13 @@ import java.util.stream.Collectors;
 public class SearchServiceImpl implements SearchService {
 
     private static final int PROMOTED_LIMIT = 1;
+    /**
+     * ponytail: organic 多取的 lookahead 预算，吸收被丢弃的命中（无效 _source / 重复 id），
+     * 使 hasMore 仍按“实际接受的 organic 子序列”判断而非原始命中数。
+     * 生产中丢弃≈0（promoted 帖已由 must_not 排除、ES 单次响应无重复 doc）；若无效命中率上升超过此预算，
+     * upgrade：改为按 search_after 续取的循环。
+     */
+    private static final int SKIP_LOOKAHEAD = 4;
 
     private final ElasticsearchClient es;
     private final CounterService counterService;
@@ -62,12 +69,24 @@ public class SearchServiceImpl implements SearchService {
         int safeSize = Math.max(size, 1);
         int promotedLimit = (after == null) ? PROMOTED_LIMIT : 0;
 
+        // 始终读取当前 search allocation：首屏用于插入 promoted，所有页用于把 promoted 帖从 organic 排除，
+        // 避免 promoted 帖在后续页以 organic 形式重复出现（跨页去重）。
+        List<PromotionAllocationView> allocations = promotionAllocationService.getActiveSearchAllocation();
+        if (allocations == null) {
+            allocations = List.of();
+        }
+        List<Long> excludedPostIds = allocations.stream().map(PromotionAllocationView::postIdAsLong).toList();
+
         List<FeedItemResponse> items = new ArrayList<>(safeSize + 1);
         Set<String> seen = new LinkedHashSet<>();
-        appendPromotedSearch(items, seen, currentUserIdNullable, promotedLimit);
+        appendPromotedSearch(items, seen, currentUserIdNullable, promotedLimit, allocations);
 
         int organicNeed = safeSize - items.size();
-        int requested = Math.max(organicNeed + 1, 1);
+        // 页已被 promoted 占满：无 organic 游标可给，直接返回（不查 ES）
+        if (organicNeed <= 0) {
+            return new SearchResponse(items, null, false);
+        }
+        int requested = organicNeed + 1 + SKIP_LOOKAHEAD;
         List<FieldValue> afterValues = parseAfter(after);
         List<SortOptions> sorts = buildSorts();
 
@@ -90,6 +109,12 @@ public class SearchServiceImpl implements SearchService {
                                             bq.filter(f -> f.terms(t -> t.field("tags")
                                                     .terms(tv -> tv.value(tags.stream().map(FieldValue::of).toList()))));
                                         }
+                                    }
+                                    // promoted 帖从 organic 排除（content_id 为 long），保证跨页不以 organic 重复
+                                    if (!excludedPostIds.isEmpty()) {
+                                        bq.mustNot(mn -> mn.terms(t -> t.field("content_id")
+                                                .terms(tv -> tv.value(excludedPostIds.stream()
+                                                        .map(id -> FieldValue.of(id.longValue())).toList()))));
                                     }
                                     return bq;
                                 }))
@@ -121,34 +146,36 @@ public class SearchServiceImpl implements SearchService {
         }
 
         List<Hit<Map<String, Object>>> hits = resp.hits() == null ? Collections.emptyList() : resp.hits().hits();
-        List<FieldValue> lastAddedSort = null;
+        List<FieldValue> lastAcceptedSort = null;
+        boolean moreAvailable = false;
         for (Hit<Map<String, Object>> hit : hits) {
-            if (items.size() >= safeSize) {
-                break;
-            }
             FeedItemResponse item = mapHit(hit, currentUserIdNullable);
             if (item == null || !seen.add(item.id())) {
-                // 跳过 promoted 已占位的重复或无效命中
+                // 无效命中或与 promoted/已接受 organic 重复：不计入 organic，也不算“还有更多”
                 continue;
             }
-            items.add(item);
-            lastAddedSort = hit.sort();
+            if (items.size() < safeSize) {
+                items.add(item);
+                lastAcceptedSort = hit.sort();
+            } else {
+                // 命中可接受但页已满 → 确有更多 organic
+                moreAvailable = true;
+                break;
+            }
         }
 
-        // nextAfter/hasMore 只基于 organic：多取 1 条命中用于判断是否还有下一页
-        boolean hasMore = lastAddedSort != null && hits.size() > organicNeed;
-        return new SearchResponse(items, encodeSort(lastAddedSort), hasMore);
+        // nextAfter/hasMore 只按实际接受的 organic 子序列计算：promoted-overlap/重复/无效命中不污染 hasMore
+        boolean hasMore = lastAcceptedSort != null && moreAvailable;
+        return new SearchResponse(items, encodeSort(lastAcceptedSort), hasMore);
     }
 
     /**
-     * 首屏插入 search 商业位：取 active allocation 前 {@code limit} 条、hydrate 帖子并标记 promoted。
+     * 首屏插入 search 商业位：取传入 allocation 前 {@code limit} 条、hydrate 帖子并标记 promoted。
+     * allocation 由调用方预先读取（同时用于 organic 排除），避免重复读缓存。
      */
-    private void appendPromotedSearch(List<FeedItemResponse> items, Set<String> seen, Long currentUserIdNullable, int limit) {
-        if (limit <= 0) {
-            return;
-        }
-        List<PromotionAllocationView> allocations = promotionAllocationService.getActiveSearchAllocation();
-        if (allocations == null || allocations.isEmpty()) {
+    private void appendPromotedSearch(List<FeedItemResponse> items, Set<String> seen, Long currentUserIdNullable,
+                                      int limit, List<PromotionAllocationView> allocations) {
+        if (limit <= 0 || allocations.isEmpty()) {
             return;
         }
         List<Long> ids = allocations.stream().limit(limit).map(PromotionAllocationView::postIdAsLong).toList();

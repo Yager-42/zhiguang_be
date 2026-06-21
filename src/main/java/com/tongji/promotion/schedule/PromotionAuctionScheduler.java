@@ -31,4 +31,13 @@ public class PromotionAuctionScheduler {
     public void closeDueWindows() {
         closer.closeDueWindows(Instant.now(), properties.getSettleBatchSize());
     }
+
+    /**
+     * 周期性重刷当前 allocation 缓存：与是否有窗口被结算解耦，
+     * 保证新窗口的 allocation 最坏在一个调度周期内上线（读路径的时间过滤仍负责丢弃过期 allocation）。
+     */
+    @Scheduled(fixedDelayString = "${promotion.slot-auction.close-window-delay-ms:30000}")
+    public void refreshAllocations() {
+        closer.refreshCurrentAllocations(Instant.now());
+    }
 }
