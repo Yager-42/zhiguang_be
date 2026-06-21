@@ -7,6 +7,7 @@ import com.tongji.common.id.IdService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPost;
 import com.tongji.promotion.mapper.PaidBoostCampaignMapper;
+import com.tongji.promotion.mapper.PaidBoostDeliveryMapper;
 import com.tongji.promotion.model.PaidBoostCampaign;
 import com.tongji.promotion.model.PaidBoostCampaignStatus;
 import com.tongji.promotion.model.PaidBoostChannel;
@@ -36,6 +37,9 @@ class PaidBoostCampaignServiceTest {
     private PaidBoostCampaignMapper campaignMapper;
 
     @Mock
+    private PaidBoostDeliveryMapper deliveryMapper;
+
+    @Mock
     private PaidBoostQuoteService quoteService;
 
     @Mock
@@ -51,7 +55,7 @@ class PaidBoostCampaignServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PaidBoostCampaignService(campaignMapper, quoteService, walletService, knowPostMapper, idService);
+        service = new PaidBoostCampaignService(campaignMapper, deliveryMapper, quoteService, walletService, knowPostMapper, idService);
     }
 
     @Test

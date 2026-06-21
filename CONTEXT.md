@@ -28,6 +28,9 @@ A glossary of domain terms. No implementation details — for those, see `opensp
 - **竞价窗口（auction window）** — 某一类推广资源在给定时间窗内完成收单、排序、定价与出位分配的批次单位。_Avoid_: product auction、live session
 - **位分配（slot allocation）** — 竞价窗口结算后得到的具体占位结果，描述某推广在某资源位与某时间窗中的最终展示归属。_Avoid_: winner（在多槽位场景下未必准确）、成交商品
 - **付费加权（paid boost）** — 出价线性/分段影响排序或投递权重（推荐位权重、粉丝触达优先级）；**非拍卖**，无赢家无第二价，区别于位竞价。
+- **出价值（quoted boost value / effective boost value）** — 付费加权中由竞价系统适配层按创作者出价换算出的最终加权值；它服务于排序或触达优先级，不等同于用户原始出价。 _Avoid_: 手填 boost 值、最终出价
+- **boost 活动（paid boost campaign）** — 创作者针对推荐排序（`home_recommendation`）或关注触达（`follow_delivery`）开启的非拍卖推广投放，含出价、有效 boost 值、单价、总预算、消耗与投放窗口；创建即冻结预算，不产拍卖赢家。 _Avoid_: 拍卖活动、auction campaign
+- **boost 投放事实（paid boost delivery）** — 内容一次被 boost 规则实际送达（返回给登录客户端）后的可结算记录；同一 viewer 在同一 delivery bucket 内重复送达只累计 `delivery_count` 到同一条事实，由定时聚合器扣费，不在读路径直接扣 wallet，也不等于拍卖赢家。
 - **悬赏问答（bounty Q&A）** — 提问者付费求解、回答者竞标的知识付费；**方向逆向（1 买方 N 卖方），机制为招投标（非拍卖）**：提问者人工评标选人，系统只给参考分。
 - **悬赏单（bounty）** — 围绕某个求解问题建立的付费求解业务单据，承载赏金、投标、锁定、交付、结算与评分状态；通常绑定提问型 `knowpost`，但不等同于帖子本身。_Avoid_: 悬赏评论、逆向拍卖单
 - **投标书（bounty bid）** — 回答者对悬赏单提交的结构化密封投标，包含战绩、方法路径、里程碑、报价与质量分参考，不是公开评论，也不包含完整答案。_Avoid_: comment、reply、公开回答
@@ -45,4 +48,5 @@ A glossary of domain terms. No implementation details — for those, see `opensp
 - **钱包（wallet）** — 统一账户服务：每用户余额 + 冻结(hold) + 托管(escrow) 三态 + 只追加交易日志（事实源，喂 `add-data-reconciliation`）。三条商业化线都调它，不自持资金。本期货币仅平台发放，无充值/提现。
 - **账本账户行** — 钱包持久化中的余额归属记录，语义上从属于 `用户`，不是独立认证或独立业务主体。_Avoid_: 商业账户、account（未加限定时）
 - **冻结（hold）** — 出价 / 投标质押时锁定的余额，成交或解约前不可用；GSP 第二价成交后退多余冻结。
+- **delivery bucket** — 付费加权分发结算的聚合时间桶；同一用户在同一时间桶内反复看到同一活动内容，只记一条分发事实，不按刷新次数重复计费。 _Avoid_: 单次请求计费、逐刷新计费
 - **抽成（commission）** — 平台对 P2P 交易（悬赏等后续 P2P 场景）抽取的佣金。**本期 0%**：悬赏全额到收款方。推广位出价是**位竞价中标价（买曝光位的售价），非抽成**。v1 平台是经济运营方（发币+托管），非抽利方；真佣金留待真金白银阶段。
