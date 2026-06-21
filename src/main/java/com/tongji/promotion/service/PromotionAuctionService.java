@@ -21,6 +21,9 @@ import java.util.List;
 /**
  * 窗口关闭时的 GSP 结算：按出价降序（同价按 id 升序）取前 M 名占 M 个位，
  * 每位成交价 = 下一个有效出价与保留价的较高者；winner 扣成交价、释放超额冻结，loser 全额释放。
+ * <p>只有不低于保留价的「有效出价」才能中标：低于保留价的出价不占位、全额释放。
+ * 由于 winner 必为有效出价（bidAmount &ge; reserve），且排序保证 nextBid &le; winner.bidAmount，
+ * 故 clearingPrice = max(nextBid, reserve) &le; winner.bidAmount，绝不会扣超过已冻结额。</p>
  * <p>结算结果落 {@link PromotionSlotAllocation}，有效期 = 结算窗口结束后的下一个窗口周期。</p>
  */
 @Service
@@ -53,7 +56,12 @@ public class PromotionAuctionService {
                 .sorted(Comparator.comparingLong(PromotionBid::getBidAmount).reversed()
                         .thenComparingLong(PromotionBid::getId))
                 .toList();
-        int winners = Math.min(window.getSlotCount(), ranked.size());
+        long reserve = window.getReservePrice();
+        // 有效出价（>= reserve）在降序排名中是前缀；取前 slotCount 个有效出价为 winner，其余全为 loser
+        int winners = (int) ranked.stream()
+                .takeWhile(bid -> bid.getBidAmount() >= reserve)
+                .limit(window.getSlotCount())
+                .count();
         for (int i = 0; i < ranked.size(); i++) {
             PromotionBid bid = ranked.get(i);
             if (i < winners) {
@@ -71,6 +79,8 @@ public class PromotionAuctionService {
         long clearingPrice = Math.max(nextBid, window.getReservePrice());
         long releaseAmount = bid.getBidAmount() - clearingPrice;
 
+        // clearingPrice <= bidAmount 由「仅有效出价（>= reserve）可中标 + 排序保证 nextBid <= winner.bidAmount」
+        // 结构性保证（见类注释），并由边界测试守护；此处直接扣成交价，不做掩盖性 clamp。
         walletService.captureHoldToPlatform(bid.getBidderUserId(), clearingPrice,
                 WalletBusinessType.PROMOTION, CAPTURE_REF + bid.getId() + ":capture");
         if (releaseAmount > 0) {
