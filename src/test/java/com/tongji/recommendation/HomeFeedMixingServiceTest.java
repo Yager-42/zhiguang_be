@@ -5,6 +5,12 @@ import com.tongji.knowpost.api.dto.FeedPageResponse;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.promotion.api.dto.PromotionAllocationView;
+import com.tongji.promotion.config.PaidBoostProperties;
+import com.tongji.promotion.model.PaidBoostCampaign;
+import com.tongji.promotion.model.PaidBoostCampaignStatus;
+import com.tongji.promotion.model.PaidBoostChannel;
+import com.tongji.promotion.service.PaidBoostCacheService;
+import com.tongji.promotion.service.PaidBoostRankingService;
 import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.recommendation.feed.FollowFeedService;
 import com.tongji.recommendation.feed.TimelineItem;
@@ -20,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -43,12 +50,16 @@ class HomeFeedMixingServiceTest {
     @Mock
     private PromotionAllocationService promotionAllocationService;
 
+    @Mock
+    private PaidBoostCacheService paidBoostCacheService;
+
     private HomeFeedMixingService service;
 
     @BeforeEach
     void setUp() {
         service = new HomeFeedMixingService(followFeedService, recommendationEngine, knowPostMapper,
-                knowPostFeedService, promotionAllocationService);
+                knowPostFeedService, promotionAllocationService, paidBoostCacheService,
+                new PaidBoostRankingService(new PaidBoostProperties()));
     }
 
     @Test
@@ -330,6 +341,44 @@ class HomeFeedMixingServiceTest {
     void recommendationCandidatesCarryOrganicScore() {
         RecommendationCandidate candidate = new RecommendationCandidate(201L, "gorse", 98.0);
         assertThat(candidate.organicScore()).isEqualTo(98.0);
+    }
+
+    @Test
+    void boostsRecommendationCandidatesAndMarksCommercialItems() {
+        when(paidBoostCacheService.getActive(eq(PaidBoostChannel.HOME_RECOMMENDATION), any()))
+                .thenReturn(List.of(boostCampaignForPost(201L, 20L)));
+        when(followFeedService.getTimeline(42L, null, 20)).thenReturn(new TimelinePage(List.of(), null));
+        when(knowPostFeedService.getFeedByIds(anyList(), eq(42L), eq(KnowPostFeedService.FeedVisibilityScope.FOLLOW)))
+                .thenReturn(List.of());
+        when(recommendationEngine.recommend(42L, 40)).thenReturn(List.of(
+                new RecommendationCandidate(201L, "gorse", 90.0),
+                new RecommendationCandidate(202L, "gorse", 95.0)
+        ));
+        when(knowPostFeedService.getFeedByIds(anyList(), eq(42L), eq(KnowPostFeedService.FeedVisibilityScope.PUBLIC)))
+                .thenAnswer(invocation -> ((List<Long>) invocation.getArgument(0)).stream()
+                        .map(this::feedItem).toList());
+
+        FeedPageResponse response = service.getHomeFeed(42L);
+
+        // 201: 90 + min(20, 50) = 110 排到 202(95) 之前，并打商业标记
+        assertThat(response.items().get(0).id()).isEqualTo("201");
+        assertThat(response.items().get(0).commercial()).isTrue();
+        assertThat(response.items().get(0).placementType()).isEqualTo("home_recommendation_boost");
+        assertThat(response.items().get(1).id()).isEqualTo("202");
+        assertThat(response.items().get(1).commercial()).isFalse();
+    }
+
+    private PaidBoostCampaign boostCampaignForPost(long postId, long boostValue) {
+        return PaidBoostCampaign.builder()
+                .id(postId).creatorUserId(42L).postId(postId).channel(PaidBoostChannel.HOME_RECOMMENDATION)
+                .bidAmount(boostValue).boostValue(boostValue).unitPrice(2L).budgetTotal(100L).budgetConsumed(0L)
+                .reserveBusinessRef("paid-boost:" + postId + ":reserve")
+                .status(PaidBoostCampaignStatus.ACTIVE)
+                .startAt(Instant.parse("2026-06-21T10:00:00Z"))
+                .endAt(Instant.parse("2026-06-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-06-21T10:00:00Z"))
+                .updatedAt(Instant.parse("2026-06-21T10:00:00Z"))
+                .build();
     }
 
     private TimelineItem timelineItem(long contentId, long authorId, String publishTs) {
