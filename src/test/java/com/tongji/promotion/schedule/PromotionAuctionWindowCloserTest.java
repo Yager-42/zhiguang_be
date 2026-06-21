@@ -60,6 +60,16 @@ class PromotionAuctionWindowCloserTest {
                 Instant.parse("2026-06-20T11:00:00Z"));
     }
 
+    @Test
+    void refreshCurrentAllocationsRefreshesBothResources() {
+        closer.refreshCurrentAllocations(Instant.parse("2026-06-20T11:00:00Z"));
+
+        verify(cacheService).refreshActiveAllocations(PromotionResourceType.FEED_TOP_SLOT,
+                Instant.parse("2026-06-20T11:00:00Z"));
+        verify(cacheService).refreshActiveAllocations(PromotionResourceType.SEARCH_TOP_SLOT,
+                Instant.parse("2026-06-20T11:00:00Z"));
+    }
+
     private PromotionAuctionWindow window(long id, PromotionResourceType type, String start, String end) {
         return PromotionAuctionWindow.builder()
                 .id(id).resourceType(type)
