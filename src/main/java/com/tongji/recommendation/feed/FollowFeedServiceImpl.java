@@ -27,7 +27,12 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class FollowFeedServiceImpl implements FollowFeedService {
 
-    private static final int SOURCE_SLICE_LIMIT = 20;
+    /** 默认关注流页面大小，也是 timeline 缓存命中的唯一尺寸：只缓存默认页，更大 limit 请求自然旁路缓存。 */
+    private static final int DEFAULT_TIMELINE_PAGE_SIZE = 20;
+
+    /** 单次从 inbox/author_feed 拉取的原始 timeline 行数上限（boost 受限选择可请求更大窗口）。 */
+    @Value("${feed.follow.max-source-slice-limit:100}")
+    private int maxSourceSliceLimit = 100;
 
     @Value("${feed.cache.timeline-ttl-seconds:300}")
     private long timelineCacheTtlSeconds = 300L;
@@ -65,9 +70,9 @@ public class FollowFeedServiceImpl implements FollowFeedService {
 
     @Override
     public TimelinePage getTimeline(long userId, String cursor, int limit) {
-        int safeLimit = Math.max(1, Math.min(limit, SOURCE_SLICE_LIMIT));
+        int safeLimit = Math.max(1, Math.min(limit, maxSourceSliceLimit));
         Cursor decodedCursor = Cursor.parse(cursor);
-        if (decodedCursor == null && safeLimit == SOURCE_SLICE_LIMIT) {
+        if (decodedCursor == null && safeLimit == DEFAULT_TIMELINE_PAGE_SIZE) {
             TimelinePage cached = readTimelineCache(userId);
             if (cached != null) {
                 return cached;
@@ -75,11 +80,11 @@ public class FollowFeedServiceImpl implements FollowFeedService {
         }
 
         List<List<TimelineItem>> sources = new ArrayList<>();
-        sources.add(readInbox(userId, decodedCursor));
-        sources.addAll(readFollowedAuthorHeads(userId, decodedCursor));
+        sources.add(readInbox(userId, decodedCursor, safeLimit));
+        sources.addAll(readFollowedAuthorHeads(userId, decodedCursor, safeLimit));
 
         TimelinePage page = page(mergeVisiblePage(sources, decodedCursor, safeLimit), safeLimit);
-        if (decodedCursor == null && safeLimit == SOURCE_SLICE_LIMIT) {
+        if (decodedCursor == null && safeLimit == DEFAULT_TIMELINE_PAGE_SIZE) {
             writeTimelineCache(userId, page);
         }
         return page;
@@ -107,12 +112,12 @@ public class FollowFeedServiceImpl implements FollowFeedService {
         } catch (Exception ignored) {}
     }
 
-    private List<TimelineItem> readInbox(long userId, Cursor cursor) {
+    private List<TimelineItem> readInbox(long userId, Cursor cursor, int safeLimit) {
         List<TimelineItem> out = new ArrayList<>();
         PreparedStatement statement = cursor == null ? inboxRead : inboxCursorRead;
         Object bound = cursor == null
-                ? statement.bind(userId, SOURCE_SLICE_LIMIT)
-                : statement.bind(userId, cursor.publishTs(), cursor.contentId(), SOURCE_SLICE_LIMIT);
+                ? statement.bind(userId, safeLimit)
+                : statement.bind(userId, cursor.publishTs(), cursor.contentId(), safeLimit);
         for (Row row : cqlSession.execute((com.datastax.oss.driver.api.core.cql.BoundStatement) bound).all()) {
             out.add(new TimelineItem(
                     row.getLong("content_id"),
@@ -123,7 +128,7 @@ public class FollowFeedServiceImpl implements FollowFeedService {
         return out;
     }
 
-    private List<List<TimelineItem>> readFollowedAuthorHeads(long userId, Cursor cursor) {
+    private List<List<TimelineItem>> readFollowedAuthorHeads(long userId, Cursor cursor, int safeLimit) {
         List<List<TimelineItem>> out = new ArrayList<>();
         java.sql.Timestamp scanCreatedAt = null;
         Long scanToUserId = null;
@@ -133,7 +138,7 @@ public class FollowFeedServiceImpl implements FollowFeedService {
                 return out;
             }
             for (FollowedAuthorRow authorRow : authorRows) {
-                out.add(readAuthorHead(authorRow.getToUserId(), cursor));
+                out.add(readAuthorHead(authorRow.getToUserId(), cursor, safeLimit));
             }
             if (authorRows.size() < 100) {
                 return out;
@@ -144,7 +149,7 @@ public class FollowFeedServiceImpl implements FollowFeedService {
         }
     }
 
-    private List<TimelineItem> readAuthorHead(long authorId, Cursor cursor) {
+    private List<TimelineItem> readAuthorHead(long authorId, Cursor cursor, int safeLimit) {
         String key = "feed:author:" + authorId + ":head";
         String cached = cursor == null ? redisTemplate.opsForValue().get(key) : null;
         if (cached != null && !cached.isBlank()) {
@@ -167,27 +172,27 @@ public class FollowFeedServiceImpl implements FollowFeedService {
                     }
                 }
 
-                List<TimelineItem> headItems = loadAuthorFeed(authorId, null);
+                List<TimelineItem> headItems = loadAuthorFeed(authorId, null, safeLimit);
                 redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(headItems), Duration.ofSeconds(authorHeadCacheTtlSeconds));
                 if (cursor == null) {
                     return headItems;
                 }
-                return loadAuthorFeed(authorId, cursor);
+                return loadAuthorFeed(authorId, cursor, safeLimit);
             }
         } catch (Exception ignored) {} finally {
             if (locked) {
                 lock.unlock();
             }
         }
-        return loadAuthorFeed(authorId, cursor);
+        return loadAuthorFeed(authorId, cursor, safeLimit);
     }
 
-    private List<TimelineItem> loadAuthorFeed(long authorId, Cursor cursor) {
+    private List<TimelineItem> loadAuthorFeed(long authorId, Cursor cursor, int safeLimit) {
         List<TimelineItem> items = new ArrayList<>();
         PreparedStatement statement = cursor == null ? authorRead : authorCursorRead;
         Object bound = cursor == null
-                ? statement.bind(authorId, SOURCE_SLICE_LIMIT)
-                : statement.bind(authorId, cursor.publishTs(), cursor.contentId(), SOURCE_SLICE_LIMIT);
+                ? statement.bind(authorId, safeLimit)
+                : statement.bind(authorId, cursor.publishTs(), cursor.contentId(), safeLimit);
         for (Row row : cqlSession.execute((com.datastax.oss.driver.api.core.cql.BoundStatement) bound).all()) {
             items.add(new TimelineItem(
                     row.getLong("content_id"),
