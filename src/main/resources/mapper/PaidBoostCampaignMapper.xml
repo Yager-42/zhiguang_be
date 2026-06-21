@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.promotion.mapper.PaidBoostCampaignMapper">
+
+    <resultMap id="PaidBoostCampaignResultMap" type="com.tongji.promotion.model.PaidBoostCampaign">
+        <id column="id" property="id"/>
+        <result column="creator_user_id" property="creatorUserId"/>
+        <result column="post_id" property="postId"/>
+        <result column="channel" property="channel"/>
+        <result column="bid_amount" property="bidAmount"/>
+        <result column="boost_value" property="boostValue"/>
+        <result column="unit_price" property="unitPrice"/>
+        <result column="budget_total" property="budgetTotal"/>
+        <result column="budget_consumed" property="budgetConsumed"/>
+        <result column="reserve_business_ref" property="reserveBusinessRef"/>
+        <result column="status" property="status"/>
+        <result column="start_at" property="startAt"/>
+        <result column="end_at" property="endAt"/>
+        <result column="closed_at" property="closedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.promotion.model.PaidBoostCampaign">
+        INSERT INTO promotion_boost_campaign (
+            id, creator_user_id, post_id, channel, bid_amount, boost_value, unit_price, budget_total, budget_consumed,
+            reserve_business_ref, status, start_at, end_at, closed_at, created_at, updated_at
+        ) VALUES (
+            #{id}, #{creatorUserId}, #{postId}, #{channel}, #{bidAmount}, #{boostValue}, #{unitPrice}, #{budgetTotal}, #{budgetConsumed},
+            #{reserveBusinessRef}, #{status}, #{startAt}, #{endAt}, #{closedAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="findById" parameterType="long" resultMap="PaidBoostCampaignResultMap">
+        SELECT *
+        FROM promotion_boost_campaign
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
+    <select id="listActiveByChannel" resultMap="PaidBoostCampaignResultMap">
+        SELECT *
+        FROM promotion_boost_campaign
+        WHERE channel = #{channel}
+          AND status = 'ACTIVE'
+          AND start_at &lt;= #{now}
+          AND end_at &gt; #{now}
+          AND budget_consumed &lt; budget_total
+        ORDER BY boost_value DESC, id ASC
+    </select>
+
+    <select id="listClosable" resultMap="PaidBoostCampaignResultMap">
+        SELECT *
+        FROM promotion_boost_campaign
+        WHERE status = 'ACTIVE'
+          AND end_at &lt;= #{now}
+        ORDER BY end_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="increaseBudgetConsumed">
+        UPDATE promotion_boost_campaign
+        SET budget_consumed = budget_consumed + #{amount},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+    <update id="markClosed">
+        UPDATE promotion_boost_campaign
+        SET status = 'CLOSED',
+            closed_at = #{closedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+</mapper>
