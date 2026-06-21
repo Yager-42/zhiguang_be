@@ -19,7 +19,11 @@ import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import com.tongji.recommendation.HomeFeedMixingService;
 import com.tongji.recommendation.feed.FollowFeedService;
+import com.tongji.recommendation.feed.TimelineItem;
 import com.tongji.recommendation.feed.TimelinePage;
+import com.tongji.promotion.model.PaidBoostCampaign;
+import com.tongji.promotion.model.PaidBoostChannel;
+import com.tongji.promotion.service.PaidBoostCacheService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -29,7 +33,13 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/knowposts")
@@ -37,6 +47,7 @@ import java.util.List;
 public class KnowPostController {
 
     private static final int FOLLOW_FEED_SIZE = 20;
+    private static final String FOLLOW_DELIVERY_BOOST_PLACEMENT = "follow_delivery_boost";
 
     private final KnowPostService service;
     private final KnowPostFeedService feedService;
@@ -44,7 +55,11 @@ public class KnowPostController {
     private final PublishManager publishManager;
     private final HomeFeedMixingService homeFeedMixingService;
     private final FollowFeedService followFeedService;
+    private final PaidBoostCacheService paidBoostCacheService;
     private final boolean mixedHomeFeedEnabled;
+
+    @Value("${promotion.paid-boost.follow-delivery-selection-cap:40}")
+    private int followFeedSelectionCap = 40;
 
     public KnowPostController(KnowPostService service,
                               KnowPostFeedService feedService,
@@ -52,6 +67,7 @@ public class KnowPostController {
                               PublishManager publishManager,
                               HomeFeedMixingService homeFeedMixingService,
                               FollowFeedService followFeedService,
+                              PaidBoostCacheService paidBoostCacheService,
                               @Value("${feed.home.mixed-enabled:false}") boolean mixedHomeFeedEnabled) {
         this.service = service;
         this.feedService = feedService;
@@ -59,6 +75,7 @@ public class KnowPostController {
         this.publishManager = publishManager;
         this.homeFeedMixingService = homeFeedMixingService;
         this.followFeedService = followFeedService;
+        this.paidBoostCacheService = paidBoostCacheService;
         this.mixedHomeFeedEnabled = mixedHomeFeedEnabled;
     }
 
@@ -179,29 +196,29 @@ public class KnowPostController {
                                        @AuthenticationPrincipal Jwt jwt) {
         long userId = jwtService.extractUserId(jwt);
         validateCursor(cursor);
-        List<FeedItemResponse> items = new java.util.ArrayList<>(FOLLOW_FEED_SIZE);
+        Map<Long, PaidBoostCampaign> boosts = followDeliveryBoostsByPostId();
+        int fetchLimit = boosts.isEmpty() ? FOLLOW_FEED_SIZE : Math.max(FOLLOW_FEED_SIZE, followFeedSelectionCap);
+        List<FeedItemResponse> items = new ArrayList<>(FOLLOW_FEED_SIZE);
         String currentCursor = cursor;
         while (items.size() < FOLLOW_FEED_SIZE) {
-            TimelinePage timelinePage = followFeedService.getTimeline(userId, currentCursor, FOLLOW_FEED_SIZE);
+            TimelinePage timelinePage = followFeedService.getTimeline(userId, currentCursor, fetchLimit);
             if (timelinePage == null || timelinePage.items() == null) {
                 return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, false, null);
             }
-            List<Long> ids = timelinePage.items().stream()
-                    .map(item -> item.contentId())
-                    .toList();
-            List<FeedItemResponse> hydrated = feedService.getFeedByIds(ids, userId, KnowPostFeedService.FeedVisibilityScope.FOLLOW);
+            List<TimelineItem> rawItems = timelinePage.items();
+            int need = FOLLOW_FEED_SIZE - items.size();
+            List<TimelineItem> chosen = selectFollowDeliveries(rawItems, boosts, need);
+            List<Long> ids = chosen.stream().map(TimelineItem::contentId).toList();
+            List<FeedItemResponse> hydrated = markFollowBoosted(
+                    feedService.getFeedByIds(ids, userId, KnowPostFeedService.FeedVisibilityScope.FOLLOW), boosts);
             if (hydrated == null) {
                 hydrated = List.of();
             }
-            int need = FOLLOW_FEED_SIZE - items.size();
             if (hydrated.size() >= need) {
                 items.addAll(hydrated.subList(0, need));
-                String lastIncludedCursor = cursorForLastIncludedRawItem(
-                        timelinePage.items(),
-                        hydrated.get(need - 1).id(),
-                        null
-                );
-                boolean hasMoreInCurrentBatch = hasMoreAfterIncludedItem(timelinePage.items(), hydrated.get(need - 1).id());
+                String lastIncludedId = hydrated.get(need - 1).id();
+                String lastIncludedCursor = cursorForLastIncludedRawItem(rawItems, lastIncludedId, null);
+                boolean hasMoreInCurrentBatch = hasMoreAfterIncludedItem(rawItems, lastIncludedId);
                 String nextCursor = (hasMoreInCurrentBatch || timelinePage.nextCursor() != null)
                         ? lastIncludedCursor
                         : null;
@@ -214,6 +231,56 @@ public class KnowPostController {
             currentCursor = timelinePage.nextCursor();
         }
         return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, false, null);
+    }
+
+    /** 当前 active follow_delivery boost，按 postId 索引（同 post 多活动取首条）。 */
+    private Map<Long, PaidBoostCampaign> followDeliveryBoostsByPostId() {
+        List<PaidBoostCampaign> active = paidBoostCacheService.getActive(PaidBoostChannel.FOLLOW_DELIVERY, Instant.now());
+        if (active == null || active.isEmpty()) {
+            return Map.of();
+        }
+        return active.stream()
+                .collect(Collectors.toMap(PaidBoostCampaign::getPostId, Function.identity(), (left, right) -> left));
+    }
+
+    /**
+     * 关注流受限选择：候选数超过页大小且有 boost 时，按 boost 优先选页大小条，再按 recency 排回展示顺序；
+     * 无 boost 时原样返回（行为与 organic 完全一致）。被排除的候选不算拍卖落败者。
+     */
+    private List<TimelineItem> selectFollowDeliveries(List<TimelineItem> rawItems,
+                                                     Map<Long, PaidBoostCampaign> boosts, int pageSize) {
+        if (boosts.isEmpty() || rawItems.size() <= pageSize) {
+            return rawItems;
+        }
+        List<TimelineItem> ranked = new ArrayList<>(rawItems);
+        ranked.sort(Comparator
+                .comparingLong((TimelineItem item) -> boostValue(boosts.get(item.contentId()))).reversed()
+                .thenComparing(TimelineItem::publishTs, Comparator.reverseOrder())
+                .thenComparing(Comparator.comparingLong(TimelineItem::contentId).reversed()));
+        List<TimelineItem> selected = new ArrayList<>(ranked.subList(0, pageSize));
+        selected.sort(Comparator
+                .comparing(TimelineItem::publishTs, Comparator.reverseOrder())
+                .thenComparing(Comparator.comparingLong(TimelineItem::contentId).reversed()));
+        return selected;
+    }
+
+    private long boostValue(PaidBoostCampaign campaign) {
+        return campaign == null ? 0L : campaign.getBoostValue();
+    }
+
+    /** 给 follow 流已 hydrate 项打 follow_delivery_boost 商业标记。 */
+    private List<FeedItemResponse> markFollowBoosted(List<FeedItemResponse> items, Map<Long, PaidBoostCampaign> boosts) {
+        if (boosts.isEmpty()) {
+            return items;
+        }
+        List<FeedItemResponse> out = new ArrayList<>(items.size());
+        for (FeedItemResponse item : items) {
+            PaidBoostCampaign campaign = boosts.get(Long.parseLong(item.id()));
+            out.add(campaign == null
+                    ? item
+                    : item.withPromotion(FOLLOW_DELIVERY_BOOST_PLACEMENT, String.valueOf(campaign.getId()), null));
+        }
+        return out;
     }
 
     private String cursorForLastIncludedRawItem(List<com.tongji.recommendation.feed.TimelineItem> rawItems,
