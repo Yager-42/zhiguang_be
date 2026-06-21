@@ -24,6 +24,7 @@ import com.tongji.recommendation.feed.TimelinePage;
 import com.tongji.promotion.model.PaidBoostCampaign;
 import com.tongji.promotion.model.PaidBoostChannel;
 import com.tongji.promotion.service.PaidBoostCacheService;
+import com.tongji.promotion.service.PaidBoostDeliveryService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -38,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -56,6 +58,7 @@ public class KnowPostController {
     private final HomeFeedMixingService homeFeedMixingService;
     private final FollowFeedService followFeedService;
     private final PaidBoostCacheService paidBoostCacheService;
+    private final PaidBoostDeliveryService paidBoostDeliveryService;
     private final boolean mixedHomeFeedEnabled;
 
     @Value("${promotion.paid-boost.follow-delivery-selection-cap:40}")
@@ -68,6 +71,7 @@ public class KnowPostController {
                               HomeFeedMixingService homeFeedMixingService,
                               FollowFeedService followFeedService,
                               PaidBoostCacheService paidBoostCacheService,
+                              PaidBoostDeliveryService paidBoostDeliveryService,
                               @Value("${feed.home.mixed-enabled:false}") boolean mixedHomeFeedEnabled) {
         this.service = service;
         this.feedService = feedService;
@@ -76,6 +80,7 @@ public class KnowPostController {
         this.homeFeedMixingService = homeFeedMixingService;
         this.followFeedService = followFeedService;
         this.paidBoostCacheService = paidBoostCacheService;
+        this.paidBoostDeliveryService = paidBoostDeliveryService;
         this.mixedHomeFeedEnabled = mixedHomeFeedEnabled;
     }
 
@@ -199,11 +204,12 @@ public class KnowPostController {
         Map<Long, PaidBoostCampaign> boosts = followDeliveryBoostsByPostId();
         int fetchLimit = boosts.isEmpty() ? FOLLOW_FEED_SIZE : Math.max(FOLLOW_FEED_SIZE, followFeedSelectionCap);
         List<FeedItemResponse> items = new ArrayList<>(FOLLOW_FEED_SIZE);
+        String nextCursor = null;
         String currentCursor = cursor;
         while (items.size() < FOLLOW_FEED_SIZE) {
             TimelinePage timelinePage = followFeedService.getTimeline(userId, currentCursor, fetchLimit);
             if (timelinePage == null || timelinePage.items() == null) {
-                return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, false, null);
+                break;
             }
             List<TimelineItem> rawItems = timelinePage.items();
             int need = FOLLOW_FEED_SIZE - items.size();
@@ -219,18 +225,32 @@ public class KnowPostController {
                 String lastIncludedId = hydrated.get(need - 1).id();
                 String lastIncludedCursor = cursorForLastIncludedRawItem(rawItems, lastIncludedId, null);
                 boolean hasMoreInCurrentBatch = hasMoreAfterIncludedItem(rawItems, lastIncludedId);
-                String nextCursor = (hasMoreInCurrentBatch || timelinePage.nextCursor() != null)
-                        ? lastIncludedCursor
-                        : null;
-                return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, nextCursor != null, nextCursor);
+                nextCursor = (hasMoreInCurrentBatch || timelinePage.nextCursor() != null) ? lastIncludedCursor : null;
+                break;
             }
             items.addAll(hydrated);
             if (timelinePage.nextCursor() == null) {
-                return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, false, null);
+                break;
             }
             currentCursor = timelinePage.nextCursor();
         }
-        return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, false, null);
+        recordFollowDeliveries(userId, items, boosts);
+        return new FeedPageResponse(items, 1, FOLLOW_FEED_SIZE, nextCursor != null, nextCursor);
+    }
+
+    /** 记录最终返回页内被 follow_delivery boost 送达的活动（同 bucket 内由 delivery service 聚合去重）。 */
+    private void recordFollowDeliveries(long userId, List<FeedItemResponse> items, Map<Long, PaidBoostCampaign> boosts) {
+        if (boosts.isEmpty()) {
+            return;
+        }
+        List<PaidBoostCampaign> delivered = items.stream()
+                .map(item -> boosts.get(Long.parseLong(item.id())))
+                .filter(Objects::nonNull)
+                .toList();
+        if (delivered.isEmpty()) {
+            return;
+        }
+        paidBoostDeliveryService.recordDeliveries(PaidBoostChannel.FOLLOW_DELIVERY, userId, delivered);
     }
 
     /** 当前 active follow_delivery boost，按 postId 索引（同 post 多活动取首条）。 */

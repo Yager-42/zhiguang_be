@@ -8,6 +8,7 @@ import com.tongji.promotion.api.dto.PromotionAllocationView;
 import com.tongji.promotion.model.PaidBoostCampaign;
 import com.tongji.promotion.model.PaidBoostChannel;
 import com.tongji.promotion.service.PaidBoostCacheService;
+import com.tongji.promotion.service.PaidBoostDeliveryService;
 import com.tongji.promotion.service.PaidBoostRankingService;
 import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.recommendation.feed.FollowFeedService;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -37,6 +39,7 @@ public class HomeFeedMixingService {
     private final PromotionAllocationService promotionAllocationService;
     private final PaidBoostCacheService paidBoostCacheService;
     private final PaidBoostRankingService paidBoostRankingService;
+    private final PaidBoostDeliveryService paidBoostDeliveryService;
 
     public HomeFeedMixingService(FollowFeedService followFeedService,
                                  RecommendationEngine recommendationEngine,
@@ -44,7 +47,8 @@ public class HomeFeedMixingService {
                                  KnowPostFeedService knowPostFeedService,
                                  PromotionAllocationService promotionAllocationService,
                                  PaidBoostCacheService paidBoostCacheService,
-                                 PaidBoostRankingService paidBoostRankingService) {
+                                 PaidBoostRankingService paidBoostRankingService,
+                                 PaidBoostDeliveryService paidBoostDeliveryService) {
         this.followFeedService = followFeedService;
         this.recommendationEngine = recommendationEngine;
         this.knowPostMapper = knowPostMapper;
@@ -52,6 +56,7 @@ public class HomeFeedMixingService {
         this.promotionAllocationService = promotionAllocationService;
         this.paidBoostCacheService = paidBoostCacheService;
         this.paidBoostRankingService = paidBoostRankingService;
+        this.paidBoostDeliveryService = paidBoostDeliveryService;
     }
 
     public FeedPageResponse getHomeFeed(long userId) {
@@ -114,7 +119,24 @@ public class HomeFeedMixingService {
                     need
             ));
         }
-        return new FeedPageResponse(limit(items, TARGET_SIZE), 1, TARGET_SIZE, false);
+        List<FeedItemResponse> page = limit(items, TARGET_SIZE);
+        recordHomeDeliveries(userId, page, homeBoosts);
+        return new FeedPageResponse(page, 1, TARGET_SIZE, false);
+    }
+
+    /** 记录最终返回页内被 boost 送达的活动（同 bucket 内由 delivery service 聚合去重）。 */
+    private void recordHomeDeliveries(long userId, List<FeedItemResponse> page, Map<Long, PaidBoostCampaign> boosts) {
+        if (boosts.isEmpty()) {
+            return;
+        }
+        List<PaidBoostCampaign> delivered = page.stream()
+                .map(item -> boosts.get(Long.parseLong(item.id())))
+                .filter(Objects::nonNull)
+                .toList();
+        if (delivered.isEmpty()) {
+            return;
+        }
+        paidBoostDeliveryService.recordDeliveries(PaidBoostChannel.HOME_RECOMMENDATION, userId, delivered);
     }
 
     /**
