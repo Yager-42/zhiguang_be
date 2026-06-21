@@ -369,3 +369,53 @@ CREATE TABLE IF NOT EXISTS promotion_slot_allocation (
     UNIQUE KEY uk_promotion_slot_window_index (auction_window_id, slot_index),
     KEY idx_promotion_slot_resource_time (resource_type, allocation_start_at, allocation_end_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== 付费加权（paid boost promotions，非拍卖）=====
+-- 与 slot auction 平行但独立：boost 活动按预算+boost 值表达，不产 winner/GSP/槽位分配。
+-- boost 活动：创作者针对推荐排序或关注触达开启的非拍卖推广投放，含出价、有效 boost 值、单价、总预算、消耗与投放窗口。
+CREATE TABLE IF NOT EXISTS promotion_boost_campaign (
+    id BIGINT UNSIGNED NOT NULL,
+    creator_user_id BIGINT UNSIGNED NOT NULL,
+    post_id BIGINT UNSIGNED NOT NULL,
+    channel VARCHAR(32) NOT NULL,
+    bid_amount BIGINT NOT NULL,
+    boost_value BIGINT NOT NULL,
+    unit_price BIGINT NOT NULL,
+    budget_total BIGINT NOT NULL,
+    budget_consumed BIGINT NOT NULL,
+    reserve_business_ref VARCHAR(128) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    start_at DATETIME(3) NOT NULL,
+    end_at DATETIME(3) NOT NULL,
+    closed_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_paid_boost_campaign_reserve_ref (reserve_business_ref),
+    KEY idx_paid_boost_campaign_creator_status (creator_user_id, status),
+    KEY idx_paid_boost_campaign_channel_window (channel, status, start_at, end_at),
+    KEY idx_paid_boost_campaign_post_channel (post_id, channel)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- boost 投放事实：内容被本地排序接纳并返回给客户端一次的可结算记录；同 (campaign,bucket,viewer) 在同 bucket 内聚合，不因刷新重复新增计费事实。
+CREATE TABLE IF NOT EXISTS promotion_boost_delivery (
+    id BIGINT UNSIGNED NOT NULL,
+    campaign_id BIGINT UNSIGNED NOT NULL,
+    channel VARCHAR(32) NOT NULL,
+    post_id BIGINT UNSIGNED NOT NULL,
+    viewer_user_id BIGINT UNSIGNED NOT NULL,
+    delivery_bucket_start_at DATETIME(3) NOT NULL,
+    delivery_count INT NOT NULL,
+    unit_price_snapshot BIGINT NOT NULL,
+    captured_amount BIGINT NOT NULL,
+    settle_business_ref VARCHAR(128) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    settled_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_paid_boost_delivery_campaign_bucket_viewer (campaign_id, delivery_bucket_start_at, viewer_user_id),
+    UNIQUE KEY uk_paid_boost_delivery_settle_ref (settle_business_ref),
+    KEY idx_paid_boost_delivery_status_bucket (status, delivery_bucket_start_at),
+    KEY idx_paid_boost_delivery_campaign_status (campaign_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
