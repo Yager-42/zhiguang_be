@@ -10,6 +10,7 @@ import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPostFeedRow;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.knowpost.service.impl.KnowPostFeedServiceImpl;
+import com.tongji.promotion.api.dto.PromotionAllocationView;
 import com.tongji.promotion.service.PromotionAllocationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -143,5 +146,61 @@ class HomeFeedMixingHydrationTest {
         row.setPublishTime(Instant.parse(publishTime));
         row.setIsTop(false);
         return row;
+    }
+
+    private FeedItemResponse feedItem(String id) {
+        return FeedItemResponse.organic(id, "title-" + id, "desc-" + id, null, List.of(),
+                null, "author", null, 0L, 0L, false, false, false);
+    }
+
+    @Test
+    void publicFeedPageOneInsertsSinglePromotedSlot() {
+        // cache 命中路径：organic 页 [202, 203]，page=1 时在前插入 1 条 promoted
+        when(feedPublicCache.getIfPresent(anyString())).thenReturn(
+                new FeedPageResponse(List.of(feedItem("202"), feedItem("203")), 1, 2, false));
+        when(redisTemplate.getExpire(anyString())).thenReturn(100L);
+        when(promotionAllocationService.getActiveFeedAllocation()).thenReturn(List.of(
+                new PromotionAllocationView("201", "feed_top_slot", "301", "401")));
+        when(knowPostMapper.listFeedByIds(List.of(201L), null, false))
+                .thenReturn(List.of(feedRow(201L, "2026-06-18T10:15:30Z")));
+
+        FeedPageResponse response = service.getPublicFeed(1, 2, null);
+
+        assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("201", "202");
+        assertThat(response.items().get(0).commercial()).isTrue();
+        assertThat(response.items().get(0).placementType()).isEqualTo("feed_top_slot");
+        assertThat(response.items().get(1).commercial()).isFalse();
+    }
+
+    @Test
+    void publicFeedPageBeyondOneDoesNotInsertPromotedSlot() {
+        when(feedPublicCache.getIfPresent(anyString())).thenReturn(
+                new FeedPageResponse(List.of(feedItem("301"), feedItem("302")), 2, 2, false));
+        when(redisTemplate.getExpire(anyString())).thenReturn(100L);
+
+        FeedPageResponse response = service.getPublicFeed(2, 2, null);
+
+        assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("301", "302");
+        assertThat(response.items()).allSatisfy(item -> assertThat(item.commercial()).isFalse());
+        verify(promotionAllocationService, never()).getActiveFeedAllocation();
+    }
+
+    @Test
+    void publicFeedDedupKeepsPageSizeWhenPromotedOverlapsOrganic() {
+        // promoted 201 与 organic 201 重叠：去重后页大小仍为 2（promoted 201 + organic 202）
+        when(feedPublicCache.getIfPresent(anyString())).thenReturn(
+                new FeedPageResponse(List.of(feedItem("201"), feedItem("202")), 1, 2, false));
+        when(redisTemplate.getExpire(anyString())).thenReturn(100L);
+        when(promotionAllocationService.getActiveFeedAllocation()).thenReturn(List.of(
+                new PromotionAllocationView("201", "feed_top_slot", "301", "401")));
+        when(knowPostMapper.listFeedByIds(List.of(201L), null, false))
+                .thenReturn(List.of(feedRow(201L, "2026-06-18T10:15:30Z")));
+
+        FeedPageResponse response = service.getPublicFeed(1, 2, null);
+
+        assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("201", "202");
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.items().get(0).commercial()).isTrue();
+        assertThat(response.items().get(1).commercial()).isFalse();
     }
 }
