@@ -29,9 +29,11 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -87,16 +89,16 @@ class FollowFeedServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(cqlSession.prepare("SELECT publish_ts, content_id, author_id FROM zhiguang.feed_inbox WHERE user_id = ? LIMIT ?"))
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        lenient().when(cqlSession.prepare("SELECT publish_ts, content_id, author_id FROM zhiguang.feed_inbox WHERE user_id = ? LIMIT ?"))
                 .thenReturn(inboxRead);
-        when(cqlSession.prepare("SELECT publish_ts, content_id, author_id FROM zhiguang.feed_inbox WHERE user_id = ? AND (publish_ts, content_id) < (?, ?) LIMIT ?"))
+        lenient().when(cqlSession.prepare("SELECT publish_ts, content_id, author_id FROM zhiguang.feed_inbox WHERE user_id = ? AND (publish_ts, content_id) < (?, ?) LIMIT ?"))
                 .thenReturn(inboxCursorRead);
-        when(cqlSession.prepare("SELECT publish_ts, content_id FROM zhiguang.feed_author_feed WHERE author_id = ? LIMIT ?"))
+        lenient().when(cqlSession.prepare("SELECT publish_ts, content_id FROM zhiguang.feed_author_feed WHERE author_id = ? LIMIT ?"))
                 .thenReturn(authorRead);
-        when(cqlSession.prepare("SELECT publish_ts, content_id FROM zhiguang.feed_author_feed WHERE author_id = ? AND (publish_ts, content_id) < (?, ?) LIMIT ?"))
+        lenient().when(cqlSession.prepare("SELECT publish_ts, content_id FROM zhiguang.feed_author_feed WHERE author_id = ? AND (publish_ts, content_id) < (?, ?) LIMIT ?"))
                 .thenReturn(authorCursorRead);
-        when(inboxRead.bind(anyLong(), eq(20))).thenReturn(inboxReadBound);
+        lenient().when(inboxRead.bind(anyLong(), anyInt())).thenReturn(inboxReadBound);
         service = new FollowFeedServiceImpl(cqlSession, knowPostMapper, relationService, redisTemplate, redissonClient);
     }
 
@@ -161,9 +163,9 @@ class FollowFeedServiceTest {
         when(valueOperations.get("feed:author:7:head")).thenReturn(null);
         when(relationService.listFollowedLargeAuthorRowsForFeed(42L, null, null, 100))
                 .thenReturn(List.of(row(7L, "2026-06-18T10:00:00Z")));
-        when(authorRead.bind(anyLong(), eq(20))).thenReturn(authorReadBound);
-        when(inboxCursorRead.bind(anyLong(), any(Instant.class), anyLong(), eq(20))).thenReturn(inboxCursorReadBound);
-        when(authorCursorRead.bind(anyLong(), any(Instant.class), anyLong(), eq(20))).thenReturn(authorCursorReadBound);
+        when(authorRead.bind(anyLong(), eq(2))).thenReturn(authorReadBound);
+        when(inboxCursorRead.bind(anyLong(), any(Instant.class), anyLong(), eq(2))).thenReturn(inboxCursorReadBound);
+        when(authorCursorRead.bind(anyLong(), any(Instant.class), anyLong(), eq(2))).thenReturn(authorCursorReadBound);
         when(cqlSession.execute(any(BoundStatement.class))).thenReturn(inboxResultSet, authorResultSet, inboxResultSet, authorResultSet, authorResultSet);
         when(inboxResultSet.all()).thenReturn(List.of(inboxRow));
         when(authorResultSet.all()).thenReturn(List.of(author101, author100));
@@ -187,8 +189,8 @@ class FollowFeedServiceTest {
         assertThat(firstPage.items()).extracting(TimelineItem::contentId).containsExactly(102L, 101L);
         assertThat(firstPage.nextCursor()).isEqualTo("1781777730000:101");
         assertThat(secondPage.items()).extracting(TimelineItem::contentId).containsExactly(100L);
-        verify(inboxCursorRead).bind(42L, sameTs, 101L, 20);
-        verify(authorCursorRead).bind(7L, sameTs, 101L, 20);
+        verify(inboxCursorRead).bind(42L, sameTs, 101L, 2);
+        verify(authorCursorRead).bind(7L, sameTs, 101L, 2);
     }
 
     @Test
@@ -266,6 +268,18 @@ class FollowFeedServiceTest {
 
         verify(valueOperations).set(eq("feed:timeline:42"), any(String.class), eq(Duration.ofSeconds(11)));
         verify(valueOperations).set(eq("feed:author:7:head"), any(String.class), eq(Duration.ofSeconds(22)));
+    }
+
+    @Test
+    void serviceSupportsLimitGreaterThanTwenty() {
+        // boost 受限选择会请求大于 20 的 raw timeline 窗口；Cassandra 绑定值应跟随请求 limit，而非写死 20
+        when(relationService.listFollowedLargeAuthorRowsForFeed(42L, null, null, 100)).thenReturn(List.of());
+        when(cqlSession.execute(any(BoundStatement.class))).thenReturn(inboxResultSet);
+        when(inboxResultSet.all()).thenReturn(List.of());
+
+        service.getTimeline(42L, null, 40);
+
+        verify(inboxRead).bind(42L, 40);
     }
 
     private List<Long> authorIds(int fromInclusive, int toInclusive) {
