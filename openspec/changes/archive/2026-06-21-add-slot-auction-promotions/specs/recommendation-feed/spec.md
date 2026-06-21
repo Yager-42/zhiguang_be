@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: Home feed SHALL mix promoted slots and organic sources
+### Requirement: Home feed SHALL mix multiple sources
 
 The home feed SHALL insert active promoted feed slots before organic mixed feed results, then combine follow feed, recommendation candidates, and hot fallback content for the remaining organic positions.
 
