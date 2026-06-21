@@ -3,6 +3,15 @@ package com.tongji.wallet;
 import com.tongji.wallet.mapper.WalletAccountMapper;
 import com.tongji.wallet.mapper.WalletEscrowMapper;
 import com.tongji.wallet.mapper.WalletLedgerMapper;
+import com.tongji.common.id.DefaultIdService;
+import com.tongji.common.id.IdNamespace;
+import com.tongji.common.id.IdService;
+import com.tongji.common.id.segment.LeafAllocMapper;
+import com.tongji.common.id.segment.SegmentAllocator;
+import com.tongji.common.id.segment.SegmentIdGenerator;
+import com.tongji.common.id.segment.SegmentIdProperties;
+import com.tongji.common.id.SnowflakeIdGenerator;
+import com.tongji.common.id.SnowflakeProperties;
 import com.tongji.wallet.model.WalletAccount;
 import com.tongji.wallet.model.WalletAccountStatus;
 import com.tongji.wallet.model.WalletBusinessType;
@@ -19,7 +28,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.test.context.TestPropertySource;
 
@@ -44,7 +55,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.datasource.password=zhiguang123456",
         "spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver",
         "mybatis.mapper-locations=classpath*:mapper/**/*.xml",
-        "mybatis.configuration.map-underscore-to-camel-case=true"
+        "mybatis.configuration.map-underscore-to-camel-case=true",
+        "id.snowflake.worker-id=1",
+        "id.snowflake.datacenter-id=1",
+        "id.segment.wait-timeout-ms=500",
+        "id.segment.preload-threads=1"
 })
 @EnabledIf("mysqlReachable")
 class WalletMysqlIntegrationTest {
@@ -57,6 +72,9 @@ class WalletMysqlIntegrationTest {
 
     @Autowired
     private WalletEscrowMapper walletEscrowMapper;
+
+    @Autowired
+    private IdService idService;
 
     @Test
     void applyBalanceDeltasUsesDeltaUpdateAndNonNegativeGuard() {
@@ -162,12 +180,16 @@ class WalletMysqlIntegrationTest {
                 .status(WalletAccountStatus.ACTIVE).createdAt(now).updatedAt(now).build());
     }
 
+    /**
+     * 走真实 Leaf（ADMIN_OPERATION segment）发号，与生产同源：全局唯一、单调，
+     * 杜绝旧实现 {@code base + nanoTime % 1_000_000} 在持久化 DB 上跨 run 撞键。
+     */
     private long uniqueOwnerUserId() {
-        return 9_900_000_000L + (System.nanoTime() % 1_000_000L);
+        return idService.nextId(IdNamespace.ADMIN_OPERATION);
     }
 
     private long uniqueLedgerId() {
-        return 8_800_000_000L + (System.nanoTime() % 1_000_000L);
+        return idService.nextId(IdNamespace.ADMIN_OPERATION);
     }
 
     static boolean mysqlReachable() {
@@ -185,7 +207,29 @@ class WalletMysqlIntegrationTest {
             DataSourceTransactionManagerAutoConfiguration.class,
             MybatisAutoConfiguration.class
     })
-    @MapperScan(basePackageClasses = WalletAccountMapper.class)
+    @EnableConfigurationProperties({SnowflakeProperties.class, SegmentIdProperties.class})
+    @MapperScan(basePackageClasses = {WalletAccountMapper.class, LeafAllocMapper.class})
     static class TestConfig {
+
+        @Bean
+        SnowflakeIdGenerator snowflakeIdGenerator(SnowflakeProperties properties) {
+            return new SnowflakeIdGenerator(properties);
+        }
+
+        @Bean
+        SegmentAllocator segmentAllocator(LeafAllocMapper leafAllocMapper) {
+            return new SegmentAllocator(leafAllocMapper);
+        }
+
+        @Bean
+        SegmentIdGenerator segmentIdGenerator(SegmentAllocator allocator, SegmentIdProperties properties) {
+            return new SegmentIdGenerator(allocator, properties);
+        }
+
+        @Bean
+        DefaultIdService defaultIdService(SnowflakeIdGenerator snowflakeIdGenerator,
+                                          SegmentIdGenerator segmentIdGenerator) {
+            return new DefaultIdService(snowflakeIdGenerator, segmentIdGenerator);
+        }
     }
 }
