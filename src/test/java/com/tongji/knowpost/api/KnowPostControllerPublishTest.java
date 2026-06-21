@@ -75,7 +75,10 @@ class KnowPostControllerPublishTest {
                 recommendationEngine,
                 knowPostMapper,
                 knowPostFeedService,
-                Mockito.mock(com.tongji.promotion.service.PromotionAllocationService.class)
+                Mockito.mock(com.tongji.promotion.service.PromotionAllocationService.class),
+                Mockito.mock(com.tongji.promotion.service.PaidBoostCacheService.class),
+                new com.tongji.promotion.service.PaidBoostRankingService(
+                        new com.tongji.promotion.config.PaidBoostProperties())
         );
         AuthProperties authProperties = new AuthProperties();
         authProperties.getJwt().setIssuer("test-issuer");
