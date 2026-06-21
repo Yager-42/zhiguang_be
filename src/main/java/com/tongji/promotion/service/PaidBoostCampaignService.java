@@ -7,9 +7,11 @@ import com.tongji.common.id.IdService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPost;
 import com.tongji.promotion.mapper.PaidBoostCampaignMapper;
+import com.tongji.promotion.mapper.PaidBoostDeliveryMapper;
 import com.tongji.promotion.model.PaidBoostCampaign;
 import com.tongji.promotion.model.PaidBoostCampaignStatus;
 import com.tongji.promotion.model.PaidBoostChannel;
+import com.tongji.promotion.model.PaidBoostDelivery;
 import com.tongji.wallet.model.WalletBusinessType;
 import com.tongji.wallet.model.WalletLedgerReason;
 import com.tongji.wallet.service.WalletService;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * boost 活动写路径：单接口创建活动，接收 {@code bidAmount}（非最终 boost 值）。
@@ -30,17 +33,20 @@ public class PaidBoostCampaignService {
     private static final String RESERVE_REF_SUFFIX = ":reserve";
 
     private final PaidBoostCampaignMapper campaignMapper;
+    private final PaidBoostDeliveryMapper deliveryMapper;
     private final PaidBoostQuoteService quoteService;
     private final WalletService walletService;
     private final KnowPostMapper knowPostMapper;
     private final IdService idService;
 
     public PaidBoostCampaignService(PaidBoostCampaignMapper campaignMapper,
+                                    PaidBoostDeliveryMapper deliveryMapper,
                                     PaidBoostQuoteService quoteService,
                                     WalletService walletService,
                                     KnowPostMapper knowPostMapper,
                                     IdService idService) {
         this.campaignMapper = campaignMapper;
+        this.deliveryMapper = deliveryMapper;
         this.quoteService = quoteService;
         this.walletService = walletService;
         this.knowPostMapper = knowPostMapper;
@@ -89,6 +95,12 @@ public class PaidBoostCampaignService {
             throw new BusinessException(ErrorCode.PAID_BOOST_CAMPAIGN_NOT_FOUND);
         }
         return campaign;
+    }
+
+    /** 查询某活动的投放明细（按 bucket 倒序），活动不存在抛 NOT_FOUND。 */
+    public List<PaidBoostDelivery> listDeliveries(long campaignId, int limit, int offset) {
+        getCampaign(campaignId);
+        return deliveryMapper.listByCampaignId(campaignId, limit, offset);
     }
 
     private void validate(long bidAmount, long unitPrice, long budgetTotal, Instant startAt, Instant endAt) {
