@@ -42,8 +42,8 @@ class GorseRecommendationAdapterTest {
         List<RecommendationCandidate> result = adapter.recommend(42L, 2);
 
         assertThat(result).containsExactly(
-                new RecommendationCandidate(101L, "gorse"),
-                new RecommendationCandidate(202L, "gorse")
+                new RecommendationCandidate(101L, "gorse", 2.0),
+                new RecommendationCandidate(202L, "gorse", 1.0)
         );
         assertThat(restTemplate.getInvocationCount()).isEqualTo(1);
         verifyNoInteractions(knowPostMapper);
@@ -62,8 +62,8 @@ class GorseRecommendationAdapterTest {
         List<RecommendationCandidate> result = adapter.recommend(42L, 3);
 
         assertThat(result).containsExactly(
-                new RecommendationCandidate(301L, "hot"),
-                new RecommendationCandidate(302L, "hot")
+                new RecommendationCandidate(301L, "hot", 3.0),
+                new RecommendationCandidate(302L, "hot", 2.0)
         );
         assertThat(restTemplate.getInvocationCount()).isZero();
         verify(knowPostMapper).listFeedPublicIds(3, 0);
@@ -84,8 +84,8 @@ class GorseRecommendationAdapterTest {
         List<RecommendationCandidate> result = adapter.recommend(42L, 2);
 
         assertThat(result).containsExactly(
-                new RecommendationCandidate(401L, "hot"),
-                new RecommendationCandidate(402L, "hot")
+                new RecommendationCandidate(401L, "hot", 2.0),
+                new RecommendationCandidate(402L, "hot", 1.0)
         );
         assertThat(restTemplate.getInvocationCount()).isEqualTo(1);
         verify(knowPostMapper).listFeedPublicIds(2, 0);
