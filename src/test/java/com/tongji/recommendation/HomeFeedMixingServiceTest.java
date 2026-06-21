@@ -58,8 +58,8 @@ class HomeFeedMixingServiceTest {
                 timelineItem(102L, 10L, "2026-06-18T10:15:29Z")
         ), null));
         when(recommendationEngine.recommend(42L, 40)).thenReturn(List.of(
-                new RecommendationCandidate(201L, "gorse"),
-                new RecommendationCandidate(202L, "gorse")
+                new RecommendationCandidate(201L, "gorse", 100.0),
+                new RecommendationCandidate(202L, "gorse", 100.0)
         ));
         when(knowPostMapper.listFeedPublicIds(20, 0)).thenReturn(List.of(301L, 302L));
         when(knowPostFeedService.getFeedByIds(List.of(101L, 102L), 42L, KnowPostFeedService.FeedVisibilityScope.FOLLOW))
@@ -89,8 +89,8 @@ class HomeFeedMixingServiceTest {
                 timelineItem(501L, 10L, "2026-06-18T10:15:30Z")
         ), null));
         when(recommendationEngine.recommend(42L, 40)).thenReturn(List.of(
-                new RecommendationCandidate(501L, "gorse"),
-                new RecommendationCandidate(601L, "gorse")
+                new RecommendationCandidate(501L, "gorse", 100.0),
+                new RecommendationCandidate(601L, "gorse", 100.0)
         ));
         when(knowPostMapper.listFeedPublicIds(20, 0)).thenReturn(List.of(501L, 701L));
         when(knowPostFeedService.getFeedByIds(List.of(501L), 42L, KnowPostFeedService.FeedVisibilityScope.FOLLOW))
@@ -121,7 +121,7 @@ class HomeFeedMixingServiceTest {
                 timelineItem(802L, 10L, "2026-06-18T10:15:29Z")
         ), null));
         when(recommendationEngine.recommend(42L, 40)).thenReturn(List.of(
-                new RecommendationCandidate(901L, "gorse")
+                new RecommendationCandidate(901L, "gorse", 100.0)
         ));
         when(knowPostMapper.listFeedPublicIds(20, 0)).thenReturn(List.of(1001L, 1002L));
         when(knowPostFeedService.getFeedByIds(List.of(801L, 802L), 42L, KnowPostFeedService.FeedVisibilityScope.FOLLOW))
@@ -155,7 +155,7 @@ class HomeFeedMixingServiceTest {
                 timelineItem(1103L, 10L, "2026-06-18T10:15:28Z")
         ), null));
         when(recommendationEngine.recommend(42L, 40)).thenReturn(List.of(
-                new RecommendationCandidate(1201L, "gorse")
+                new RecommendationCandidate(1201L, "gorse", 100.0)
         ));
         when(knowPostMapper.listFeedPublicIds(20, 0)).thenReturn(List.of(1301L));
         when(knowPostFeedService.getFeedByIds(List.of(1101L, 1102L), 42L, KnowPostFeedService.FeedVisibilityScope.FOLLOW))
@@ -187,7 +187,7 @@ class HomeFeedMixingServiceTest {
                 null
         ));
         when(recommendationEngine.recommend(42L, 40)).thenReturn(java.util.stream.LongStream.rangeClosed(21, 40)
-                .mapToObj(id -> new RecommendationCandidate(id, "gorse"))
+                .mapToObj(id -> new RecommendationCandidate(id, "gorse", 100.0))
                 .toList());
         when(knowPostMapper.listFeedPublicIds(20, 0)).thenReturn(java.util.stream.LongStream.rangeClosed(41, 60).boxed().toList());
         when(knowPostMapper.listFeedPublicIds(20, 20)).thenReturn(java.util.stream.LongStream.rangeClosed(61, 80).boxed().toList());
@@ -226,7 +226,7 @@ class HomeFeedMixingServiceTest {
     void exhaustsRecommendationsBeforeUsingHotFallback() {
         when(followFeedService.getTimeline(42L, null, 20)).thenReturn(new TimelinePage(List.of(), null));
         when(recommendationEngine.recommend(42L, 40)).thenReturn(java.util.stream.LongStream.rangeClosed(21, 60)
-                .mapToObj(id -> new RecommendationCandidate(id, "gorse"))
+                .mapToObj(id -> new RecommendationCandidate(id, "gorse", 100.0))
                 .toList());
         when(knowPostFeedService.getFeedByIds(List.of(), 42L, KnowPostFeedService.FeedVisibilityScope.FOLLOW))
                 .thenReturn(List.of());
@@ -259,7 +259,7 @@ class HomeFeedMixingServiceTest {
                 timelineItem(1L, 10L, "2026-06-18T10:15:30Z")
         ), null));
         when(recommendationEngine.recommend(42L, 40)).thenReturn(List.of(
-                new RecommendationCandidate(2L, "gorse")
+                new RecommendationCandidate(2L, "gorse", 100.0)
         ));
         when(knowPostMapper.listFeedPublicIds(20, 0)).thenReturn(List.of(1L, 2L));
         when(knowPostMapper.listFeedPublicIds(20, 20)).thenReturn(List.of(3L, 4L));
@@ -292,7 +292,7 @@ class HomeFeedMixingServiceTest {
                         .toList(),
                 null
         ));
-        when(recommendationEngine.recommend(42L, 40)).thenReturn(List.of(new RecommendationCandidate(21L, "gorse")));
+        when(recommendationEngine.recommend(42L, 40)).thenReturn(List.of(new RecommendationCandidate(21L, "gorse", 100.0)));
         when(knowPostFeedService.getFeedByIds(
                 java.util.stream.LongStream.rangeClosed(1, 20).boxed().toList(),
                 42L,
@@ -324,6 +324,12 @@ class HomeFeedMixingServiceTest {
         assertThat(response.items().getFirst().commercial()).isTrue();
         assertThat(response.items().getFirst().promoted()).isTrue();
         assertThat(response.items().getFirst().placementType()).isEqualTo("feed_top_slot");
+    }
+
+    @Test
+    void recommendationCandidatesCarryOrganicScore() {
+        RecommendationCandidate candidate = new RecommendationCandidate(201L, "gorse", 98.0);
+        assertThat(candidate.organicScore()).isEqualTo(98.0);
     }
 
     private TimelineItem timelineItem(long contentId, long authorId, String publishTs) {
