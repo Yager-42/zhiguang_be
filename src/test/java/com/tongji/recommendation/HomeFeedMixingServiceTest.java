@@ -10,6 +10,7 @@ import com.tongji.promotion.model.PaidBoostCampaign;
 import com.tongji.promotion.model.PaidBoostCampaignStatus;
 import com.tongji.promotion.model.PaidBoostChannel;
 import com.tongji.promotion.service.PaidBoostCacheService;
+import com.tongji.promotion.service.PaidBoostDeliveryService;
 import com.tongji.promotion.service.PaidBoostRankingService;
 import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.recommendation.feed.FollowFeedService;
@@ -53,13 +54,16 @@ class HomeFeedMixingServiceTest {
     @Mock
     private PaidBoostCacheService paidBoostCacheService;
 
+    @Mock
+    private PaidBoostDeliveryService paidBoostDeliveryService;
+
     private HomeFeedMixingService service;
 
     @BeforeEach
     void setUp() {
         service = new HomeFeedMixingService(followFeedService, recommendationEngine, knowPostMapper,
                 knowPostFeedService, promotionAllocationService, paidBoostCacheService,
-                new PaidBoostRankingService(new PaidBoostProperties()));
+                new PaidBoostRankingService(new PaidBoostProperties()), paidBoostDeliveryService);
     }
 
     @Test
@@ -366,6 +370,8 @@ class HomeFeedMixingServiceTest {
         assertThat(response.items().get(0).placementType()).isEqualTo("home_recommendation_boost");
         assertThat(response.items().get(1).id()).isEqualTo("202");
         assertThat(response.items().get(1).commercial()).isFalse();
+        // boost 送达只记 delivery 事实，不在读路径直接扣 wallet
+        verify(paidBoostDeliveryService).recordDeliveries(eq(PaidBoostChannel.HOME_RECOMMENDATION), eq(42L), anyList());
     }
 
     private PaidBoostCampaign boostCampaignForPost(long postId, long boostValue) {

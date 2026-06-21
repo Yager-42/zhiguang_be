@@ -60,6 +60,7 @@ class KnowPostControllerPublishTest {
     private HomeFeedMixingService homeFeedMixingService;
     private FollowFeedService followFeedService;
     private com.tongji.promotion.service.PaidBoostCacheService paidBoostCacheService;
+    private com.tongji.promotion.service.PaidBoostDeliveryService paidBoostDeliveryService;
     private RecommendationEngine recommendationEngine;
     private KnowPostMapper knowPostMapper;
     private JwtService jwtService;
@@ -72,6 +73,7 @@ class KnowPostControllerPublishTest {
         publishManager = Mockito.mock(PublishManager.class);
         followFeedService = Mockito.mock(FollowFeedService.class);
         paidBoostCacheService = Mockito.mock(com.tongji.promotion.service.PaidBoostCacheService.class);
+        paidBoostDeliveryService = Mockito.mock(com.tongji.promotion.service.PaidBoostDeliveryService.class);
         recommendationEngine = Mockito.mock(RecommendationEngine.class);
         knowPostMapper = Mockito.mock(KnowPostMapper.class);
         homeFeedMixingService = new HomeFeedMixingService(
@@ -82,7 +84,8 @@ class KnowPostControllerPublishTest {
                 Mockito.mock(com.tongji.promotion.service.PromotionAllocationService.class),
                 Mockito.mock(com.tongji.promotion.service.PaidBoostCacheService.class),
                 new com.tongji.promotion.service.PaidBoostRankingService(
-                        new com.tongji.promotion.config.PaidBoostProperties())
+                        new com.tongji.promotion.config.PaidBoostProperties()),
+                Mockito.mock(com.tongji.promotion.service.PaidBoostDeliveryService.class)
         );
         AuthProperties authProperties = new AuthProperties();
         authProperties.getJwt().setIssuer("test-issuer");
@@ -467,6 +470,7 @@ class KnowPostControllerPublishTest {
                 homeFeedMixingService,
                 followFeedService,
                 paidBoostCacheService,
+                paidBoostDeliveryService,
                 mixedFeedEnabled
         );
 
