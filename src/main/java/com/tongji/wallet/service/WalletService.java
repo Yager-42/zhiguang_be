@@ -114,6 +114,17 @@ public class WalletService {
     }
 
     /**
+     * 冻结 → 平台账本主体，携带自定义 reason（付费加权结算用 {@link WalletLedgerReason#PAID_BOOST_CAPTURE}，
+     * 避免与拍卖 {@code PROMOTION_BID_CAPTURE} 混账）。
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public WalletLedgerEntry captureHoldToPlatform(long ownerUserId, long amount, WalletLedgerReason reason,
+                                                   WalletBusinessType businessType, String businessRef) {
+        return apply(ownerUserId, amount, reason, businessType,
+                WalletLedgerDirection.DEBIT, walletProperties.getPlatformUserId(), null, 0L, -amount, 0L, businessRef);
+    }
+
+    /**
      * 直接放款：payer 托管 → payee 可用。同一 {@code businessRef} 下写 payer/payee 两条流水，
      * counterparty 互指；不得用平台罚没 + 赠款模拟。双侧 ledger 按整组（两条）判等保证幂等。
      */
