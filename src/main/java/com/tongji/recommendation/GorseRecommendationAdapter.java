@@ -10,6 +10,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class GorseRecommendationAdapter implements RecommendationEngine {
@@ -43,16 +44,26 @@ public class GorseRecommendationAdapter implements RecommendationEngine {
         } catch (RestClientException ex) {
             return hotFallback(count);
         }
-        return candidateIds.stream()
+        return scoreByPosition(candidateIds.stream()
                 .map(Long::parseLong)
-                .map(id -> new RecommendationCandidate(id, "gorse"))
-                .toList();
+                .toList(), count, "gorse");
     }
 
     private List<RecommendationCandidate> hotFallback(int count) {
-        return knowPostMapper.listFeedPublicIds(count, 0).stream()
+        return scoreByPosition(knowPostMapper.listFeedPublicIds(count, 0).stream()
                 .filter(Objects::nonNull)
-                .map(id -> new RecommendationCandidate(id, "hot"))
+                .toList(), count, "hot");
+    }
+
+    /**
+     * 给候选按原始顺序赋予单调递减的 organic 基线分（首个 = count，依次 -1）。
+     * <p>递减而非平坦：保证本地 boost 排序叠加 boostEffect 后，未被 boost 的候选仍按来源相关度顺序排列，
+     * 不会因同分被 contentId 重排破坏 gorse/hot 的原始召回顺序。</p>
+     */
+    private List<RecommendationCandidate> scoreByPosition(List<Long> ids, int count, String source) {
+        AtomicInteger rank = new AtomicInteger(count);
+        return ids.stream()
+                .map(id -> new RecommendationCandidate(id, source, rank.getAndDecrement()))
                 .toList();
     }
 }

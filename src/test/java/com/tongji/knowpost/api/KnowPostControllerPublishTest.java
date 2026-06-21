@@ -494,7 +494,7 @@ class KnowPostControllerPublishTest {
     }
 
     private com.tongji.recommendation.RecommendationCandidate candidate(long contentId) {
-        return new com.tongji.recommendation.RecommendationCandidate(contentId, "test");
+        return new com.tongji.recommendation.RecommendationCandidate(contentId, "test", 100.0);
     }
 
     private List<com.tongji.knowpost.api.dto.FeedItemResponse> feedItems(List<Long> ids) {
