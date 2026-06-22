@@ -25,6 +25,13 @@
         )
     </insert>
 
+    <select id="findById" parameterType="long" resultMap="PromotionAuctionWindowResultMap">
+        SELECT *
+        FROM promotion_auction_window
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
     <select id="findOpenWindow" resultMap="PromotionAuctionWindowResultMap">
         SELECT *
         FROM promotion_auction_window

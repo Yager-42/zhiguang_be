@@ -5,21 +5,14 @@ import com.tongji.knowpost.api.dto.FeedPageResponse;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.promotion.api.dto.PromotionAllocationView;
-import com.tongji.promotion.model.PaidBoostCampaign;
-import com.tongji.promotion.model.PaidBoostChannel;
-import com.tongji.promotion.service.PaidBoostCacheService;
-import com.tongji.promotion.service.PaidBoostDeliveryService;
-import com.tongji.promotion.service.PaidBoostRankingService;
 import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.recommendation.feed.FollowFeedService;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -30,33 +23,23 @@ public class HomeFeedMixingService {
     private static final int TARGET_SIZE = 20;
     private static final int RECOMMENDATION_CANDIDATE_LIMIT = TARGET_SIZE * 2;
     private static final int PROMOTED_LIMIT = 1;
-    private static final String HOME_RECOMMENDATION_BOOST_PLACEMENT = "home_recommendation_boost";
 
     private final FollowFeedService followFeedService;
     private final RecommendationEngine recommendationEngine;
     private final KnowPostMapper knowPostMapper;
     private final KnowPostFeedService knowPostFeedService;
     private final PromotionAllocationService promotionAllocationService;
-    private final PaidBoostCacheService paidBoostCacheService;
-    private final PaidBoostRankingService paidBoostRankingService;
-    private final PaidBoostDeliveryService paidBoostDeliveryService;
 
     public HomeFeedMixingService(FollowFeedService followFeedService,
                                  RecommendationEngine recommendationEngine,
                                  KnowPostMapper knowPostMapper,
                                  KnowPostFeedService knowPostFeedService,
-                                 PromotionAllocationService promotionAllocationService,
-                                 PaidBoostCacheService paidBoostCacheService,
-                                 PaidBoostRankingService paidBoostRankingService,
-                                 PaidBoostDeliveryService paidBoostDeliveryService) {
+                                 PromotionAllocationService promotionAllocationService) {
         this.followFeedService = followFeedService;
         this.recommendationEngine = recommendationEngine;
         this.knowPostMapper = knowPostMapper;
         this.knowPostFeedService = knowPostFeedService;
         this.promotionAllocationService = promotionAllocationService;
-        this.paidBoostCacheService = paidBoostCacheService;
-        this.paidBoostRankingService = paidBoostRankingService;
-        this.paidBoostDeliveryService = paidBoostDeliveryService;
     }
 
     public FeedPageResponse getHomeFeed(long userId) {
@@ -81,10 +64,7 @@ public class HomeFeedMixingService {
             followCursor = followPage.nextCursor();
         } while (items.size() < TARGET_SIZE && followCursor != null);
 
-        Map<Long, PaidBoostCampaign> homeBoosts = homeBoostsByPostId();
-        List<Long> recommendationIds = paidBoostRankingService
-                .rankRecommendationCandidates(
-                        recommendationEngine.recommend(userId, RECOMMENDATION_CANDIDATE_LIMIT), homeBoosts)
+        List<Long> recommendationIds = recommendationEngine.recommend(userId, RECOMMENDATION_CANDIDATE_LIMIT)
                 .stream()
                 .map(RecommendationCandidate::contentId)
                 .toList();
@@ -97,8 +77,8 @@ public class HomeFeedMixingService {
             List<Long> recommendationBatch = recommendationPool.subList(recommendationIndex, recommendationEnd);
             recommendationIndex = recommendationEnd;
             items.addAll(limit(
-                    markBoosted(knowPostFeedService.getFeedByIds(recommendationBatch, userId,
-                            KnowPostFeedService.FeedVisibilityScope.PUBLIC), homeBoosts),
+                    knowPostFeedService.getFeedByIds(recommendationBatch, userId,
+                            KnowPostFeedService.FeedVisibilityScope.PUBLIC),
                     need
             ));
         }
@@ -120,23 +100,7 @@ public class HomeFeedMixingService {
             ));
         }
         List<FeedItemResponse> page = limit(items, TARGET_SIZE);
-        recordHomeDeliveries(userId, page, homeBoosts);
         return new FeedPageResponse(page, 1, TARGET_SIZE, false);
-    }
-
-    /** 记录最终返回页内被 boost 送达的活动（同 bucket 内由 delivery service 聚合去重）。 */
-    private void recordHomeDeliveries(long userId, List<FeedItemResponse> page, Map<Long, PaidBoostCampaign> boosts) {
-        if (boosts.isEmpty()) {
-            return;
-        }
-        List<PaidBoostCampaign> delivered = page.stream()
-                .map(item -> boosts.get(Long.parseLong(item.id())))
-                .filter(Objects::nonNull)
-                .toList();
-        if (delivered.isEmpty()) {
-            return;
-        }
-        paidBoostDeliveryService.recordDeliveries(PaidBoostChannel.HOME_RECOMMENDATION, userId, delivered);
     }
 
     /**
@@ -165,31 +129,6 @@ public class HomeFeedMixingService {
                         allocation.auctionWindowId()));
             }
         }
-    }
-
-    /** 当前 active home_recommendation boost，按 postId 索引（同 post 多活动取首条）。 */
-    private Map<Long, PaidBoostCampaign> homeBoostsByPostId() {
-        List<PaidBoostCampaign> active = paidBoostCacheService.getActive(PaidBoostChannel.HOME_RECOMMENDATION, Instant.now());
-        if (active == null || active.isEmpty()) {
-            return Map.of();
-        }
-        return active.stream()
-                .collect(Collectors.toMap(PaidBoostCampaign::getPostId, Function.identity(), (left, right) -> left));
-    }
-
-    /** 给已 hydrate 的推荐项打 boost 商业标记；非 boost 项原样返回。 */
-    private List<FeedItemResponse> markBoosted(List<FeedItemResponse> items, Map<Long, PaidBoostCampaign> boosts) {
-        if (boosts.isEmpty()) {
-            return items;
-        }
-        List<FeedItemResponse> out = new ArrayList<>(items.size());
-        for (FeedItemResponse item : items) {
-            PaidBoostCampaign campaign = boosts.get(Long.parseLong(item.id()));
-            out.add(campaign == null
-                    ? item
-                    : item.withPromotion(HOME_RECOMMENDATION_BOOST_PLACEMENT, String.valueOf(campaign.getId()), null));
-        }
-        return out;
     }
 
     private List<Long> dedupe(List<Long> ids, Set<Long> seen) {

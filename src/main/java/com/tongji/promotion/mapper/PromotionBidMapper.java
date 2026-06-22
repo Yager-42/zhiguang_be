@@ -12,6 +12,10 @@ public interface PromotionBidMapper {
 
     int insert(PromotionBid bid);
 
+    int insertIgnore(PromotionBid bid);
+
+    int upsertAccepted(PromotionBid bid);
+
     PromotionBid findByCampaignIdAndAuctionWindowId(@Param("campaignId") long campaignId,
                                                     @Param("auctionWindowId") long auctionWindowId);
 
