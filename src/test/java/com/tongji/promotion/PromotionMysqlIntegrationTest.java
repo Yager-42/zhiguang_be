@@ -64,7 +64,7 @@ class PromotionMysqlIntegrationTest {
     void windowEnumRoundTripsAndOpenWindowLookup() {
         long id = uniqueId();
         // 秒对齐：findExactWindow 是精确时间相等查询，纳秒精度会被 DATETIME(3) 毫秒截断/舍入破坏
-        Instant start = Instant.now().truncatedTo(ChronoUnit.SECONDS).minusSeconds(60);
+        Instant start = uniqueOpenWindowStart();
         Instant end = start.plusSeconds(3600);
         insertWindow(id, PromotionResourceType.SEARCH_TOP_SLOT, start, end,
                 1, 10L, PromotionAuctionWindowStatus.OPEN);
@@ -82,7 +82,7 @@ class PromotionMysqlIntegrationTest {
     @Test
     void listClosableWindowsAndMarkSettled() {
         long id = uniqueId();
-        Instant start = Instant.now().truncatedTo(ChronoUnit.SECONDS).minusSeconds(7200);
+        Instant start = uniqueClosableWindowStart();
         Instant end = start.plusSeconds(3600);
         insertWindow(id, PromotionResourceType.FEED_TOP_SLOT, start, end,
                 1, 10L, PromotionAuctionWindowStatus.OPEN);
@@ -101,15 +101,21 @@ class PromotionMysqlIntegrationTest {
         long campaignId = uniqueId();
         long windowId = uniqueId();
         long bidId = uniqueId();
-        insertCampaign(campaignId, PromotionResourceType.FEED_TOP_SLOT);
-        insertWindow(windowId, PromotionResourceType.FEED_TOP_SLOT,
-                Instant.now().minusSeconds(60), Instant.now().plusSeconds(3600),
+        Instant windowStartAt = uniqueOpenWindowStart();
+        Instant windowEndAt = windowStartAt.plusSeconds(3600);
+        long windowSpanSeconds = windowEndAt.getEpochSecond() - windowStartAt.getEpochSecond();
+        Instant allocationStartAt = windowEndAt;
+        Instant allocationEndAt = allocationStartAt.plusSeconds(windowSpanSeconds);
+        insertCampaign(campaignId, PromotionResourceType.FEED_TOP_SLOT,
+                allocationStartAt, allocationEndAt,
+                PromotionCampaignStatus.ACTIVE);
+        insertWindow(windowId, PromotionResourceType.FEED_TOP_SLOT, windowStartAt, windowEndAt,
                 2, 10L, PromotionAuctionWindowStatus.OPEN);
         insertBid(bidId, campaignId, windowId, 42L, 120L, PromotionBidStatus.ACTIVE);
 
         assertThat(bidMapper.findByCampaignIdAndAuctionWindowId(campaignId, windowId)).isNotNull();
         // listActiveBidsByWindowId JOIN campaign 回填 postId
-        List<PromotionBid> active = bidMapper.listActiveBidsByWindowId(windowId);
+        List<PromotionBid> active = bidMapper.listActiveBidsByWindowId(windowId, allocationStartAt, allocationEndAt);
         assertThat(active).extracting(PromotionBid::getId).contains(bidId);
         assertThat(active.getFirst().getPostId()).isEqualTo(5000L + campaignId);
 
@@ -117,15 +123,61 @@ class PromotionMysqlIntegrationTest {
         assertThat(bidMapper.findByCampaignIdAndAuctionWindowId(campaignId, windowId).getStatus())
                 .isEqualTo(PromotionBidStatus.WON);
         // WON 后不再属于 ACTIVE 列表
-        assertThat(bidMapper.listActiveBidsByWindowId(windowId).stream().map(PromotionBid::getId))
+        assertThat(bidMapper.listActiveBidsByWindowId(windowId, allocationStartAt, allocationEndAt).stream()
+                .map(PromotionBid::getId))
                 .doesNotContain(bidId);
 
         long loserId = uniqueId();
         long loserCampaignId = uniqueId();
+        insertCampaign(loserCampaignId, PromotionResourceType.FEED_TOP_SLOT,
+                allocationStartAt, allocationEndAt,
+                PromotionCampaignStatus.ACTIVE);
         insertBid(loserId, loserCampaignId, windowId, 43L, 70L, PromotionBidStatus.ACTIVE);
         assertThat(bidMapper.markLost(loserId)).isEqualTo(1);
         assertThat(bidMapper.findByCampaignIdAndAuctionWindowId(loserCampaignId, windowId).getStatus())
                 .isEqualTo(PromotionBidStatus.LOST);
+    }
+
+    @Test
+    void listActiveBidsExcludesCampaignOutsideAllocationWindow() {
+        long windowId = uniqueId();
+        Instant windowStartAt = uniqueOpenWindowStart();
+        Instant windowEndAt = windowStartAt.plusSeconds(3600);
+        long windowSpanSeconds = windowEndAt.getEpochSecond() - windowStartAt.getEpochSecond();
+        Instant allocationStartAt = windowEndAt;
+        Instant allocationEndAt = allocationStartAt.plusSeconds(windowSpanSeconds);
+        insertWindow(windowId, PromotionResourceType.FEED_TOP_SLOT, windowStartAt, windowEndAt,
+                2, 10L, PromotionAuctionWindowStatus.OPEN);
+
+        long eligibleCampaignId = uniqueId();
+        insertCampaign(eligibleCampaignId, PromotionResourceType.FEED_TOP_SLOT,
+                allocationStartAt, allocationEndAt,
+                PromotionCampaignStatus.ACTIVE);
+        long eligibleBidId = uniqueId();
+        insertBid(eligibleBidId, eligibleCampaignId, windowId, 42L, 120L, PromotionBidStatus.ACTIVE);
+
+        long endedEarlyCampaignId = uniqueId();
+        insertCampaign(endedEarlyCampaignId, PromotionResourceType.FEED_TOP_SLOT,
+                allocationStartAt.minusSeconds(60), allocationEndAt.minusSeconds(1),
+                PromotionCampaignStatus.ACTIVE);
+        long endedEarlyBidId = uniqueId();
+        insertBid(endedEarlyBidId, endedEarlyCampaignId, windowId, 43L, 110L, PromotionBidStatus.ACTIVE);
+
+        long startsLateCampaignId = uniqueId();
+        insertCampaign(startsLateCampaignId, PromotionResourceType.FEED_TOP_SLOT,
+                allocationStartAt.plusSeconds(1), allocationEndAt.plusSeconds(60),
+                PromotionCampaignStatus.ACTIVE);
+        long startsLateBidId = uniqueId();
+        insertBid(startsLateBidId, startsLateCampaignId, windowId, 44L, 100L, PromotionBidStatus.ACTIVE);
+
+        assertThat(bidMapper.listActiveBidsByWindowId(windowId, allocationStartAt, allocationEndAt))
+                .extracting(PromotionBid::getId)
+                .contains(eligibleBidId)
+                .doesNotContain(endedEarlyBidId, startsLateBidId);
+        assertThat(bidMapper.listActiveBidsByWindowId(windowId, allocationStartAt, allocationEndAt))
+                .extracting(PromotionBid::getCampaignId)
+                .contains(eligibleCampaignId)
+                .doesNotContain(endedEarlyCampaignId, startsLateCampaignId);
     }
 
     @Test
@@ -164,10 +216,16 @@ class PromotionMysqlIntegrationTest {
 
     private void insertCampaign(long id, PromotionResourceType type) {
         Instant now = Instant.now();
+        insertCampaign(id, type, now.minusSeconds(3600), now.plusSeconds(3600), PromotionCampaignStatus.ACTIVE);
+    }
+
+    private void insertCampaign(long id, PromotionResourceType type, Instant startAt, Instant endAt,
+                                PromotionCampaignStatus status) {
+        Instant now = Instant.now();
         campaignMapper.insert(PromotionCampaign.builder()
                 .id(id).creatorUserId(42L).postId(5000L + id).resourceType(type)
-                .status(PromotionCampaignStatus.ACTIVE)
-                .startAt(now.minusSeconds(3600)).endAt(now.plusSeconds(3600))
+                .status(status)
+                .startAt(startAt).endAt(endAt)
                 .createdAt(now).updatedAt(now).build());
     }
 
@@ -181,6 +239,18 @@ class PromotionMysqlIntegrationTest {
 
     private static long uniqueId() {
         return 7_700_000_000L + (System.nanoTime() % 1_000_000L);
+    }
+
+    private static Instant uniqueOpenWindowStart() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        long offsetSeconds = uniqueId() % 1_800L;
+        return now.minusSeconds(1_800L + offsetSeconds);
+    }
+
+    private static Instant uniqueClosableWindowStart() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        long offsetSeconds = uniqueId() % 1_800L;
+        return now.minusSeconds(7_200L + offsetSeconds);
     }
 
     static boolean mysqlReachable() {
