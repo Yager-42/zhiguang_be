@@ -21,6 +21,10 @@ public class PromotionBid {
     private long bidderUserId;
     private long bidAmount;
     private String walletBusinessRef;
+    private String commandId;
+    private String decisionId;
+    private String decisionStatus;
+    private Long projectionOffset;
     private PromotionBidStatus status;
     private Long clearingPrice;
     private Integer slotIndex;

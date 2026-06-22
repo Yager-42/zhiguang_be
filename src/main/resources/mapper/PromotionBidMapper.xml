@@ -21,10 +21,44 @@
 
     <insert id="insert" parameterType="com.tongji.promotion.model.PromotionBid">
         INSERT INTO promotion_bid (
-            id, campaign_id, auction_window_id, bidder_user_id, bid_amount, wallet_business_ref, status, clearing_price, slot_index, created_at, updated_at
+            id, campaign_id, auction_window_id, bidder_user_id, bid_amount, wallet_business_ref, command_id, decision_id,
+            decision_status, projection_offset, status, clearing_price, slot_index, created_at, updated_at
         ) VALUES (
-            #{id}, #{campaignId}, #{auctionWindowId}, #{bidderUserId}, #{bidAmount}, #{walletBusinessRef}, #{status}, #{clearingPrice}, #{slotIndex}, #{createdAt}, #{updatedAt}
+            #{id}, #{campaignId}, #{auctionWindowId}, #{bidderUserId}, #{bidAmount}, #{walletBusinessRef}, #{commandId}, #{decisionId},
+            #{decisionStatus}, #{projectionOffset}, #{status}, #{clearingPrice}, #{slotIndex}, #{createdAt}, #{updatedAt}
         )
+    </insert>
+
+    <insert id="insertIgnore" parameterType="com.tongji.promotion.model.PromotionBid">
+        INSERT IGNORE INTO promotion_bid (
+            id, campaign_id, auction_window_id, bidder_user_id, bid_amount, wallet_business_ref, command_id, decision_id,
+            decision_status, projection_offset, status, clearing_price, slot_index, created_at, updated_at
+        ) VALUES (
+            #{id}, #{campaignId}, #{auctionWindowId}, #{bidderUserId}, #{bidAmount}, #{walletBusinessRef}, #{commandId}, #{decisionId},
+            #{decisionStatus}, #{projectionOffset}, #{status}, #{clearingPrice}, #{slotIndex}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <insert id="upsertAccepted" parameterType="com.tongji.promotion.model.PromotionBid">
+        INSERT INTO promotion_bid (
+            id, campaign_id, auction_window_id, bidder_user_id, bid_amount, wallet_business_ref, command_id, decision_id,
+            decision_status, projection_offset, status, clearing_price, slot_index, created_at, updated_at
+        ) VALUES (
+            #{id}, #{campaignId}, #{auctionWindowId}, #{bidderUserId}, #{bidAmount}, #{walletBusinessRef}, #{commandId}, #{decisionId},
+            #{decisionStatus}, #{projectionOffset}, #{status}, #{clearingPrice}, #{slotIndex}, #{createdAt}, #{updatedAt}
+        )
+        ON DUPLICATE KEY UPDATE
+            bidder_user_id      = VALUES(bidder_user_id),
+            bid_amount          = VALUES(bid_amount),
+            wallet_business_ref = VALUES(wallet_business_ref),
+            command_id          = VALUES(command_id),
+            decision_id         = VALUES(decision_id),
+            decision_status     = VALUES(decision_status),
+            projection_offset   = VALUES(projection_offset),
+            status              = VALUES(status),
+            clearing_price      = NULL,
+            slot_index          = NULL,
+            updated_at          = VALUES(updated_at)
     </insert>
 
     <select id="findByCampaignIdAndAuctionWindowId" resultMap="PromotionBidResultMap">

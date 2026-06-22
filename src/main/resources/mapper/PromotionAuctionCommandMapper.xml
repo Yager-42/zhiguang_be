@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.promotion.bprime.mapper.PromotionAuctionCommandMapper">
+
+    <resultMap id="PromotionAuctionCommandRecordResultMap" type="com.tongji.promotion.bprime.model.PromotionAuctionCommandRecord">
+        <id column="id" property="id"/>
+        <result column="command_id" property="commandId"/>
+        <result column="idempotency_key" property="idempotencyKey"/>
+        <result column="request_hash" property="requestHash"/>
+        <result column="auction_window_id" property="auctionWindowId"/>
+        <result column="campaign_id" property="campaignId"/>
+        <result column="bidder_user_id" property="bidderUserId"/>
+        <result column="post_id" property="postId"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="bid_amount" property="bidAmount"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.promotion.bprime.model.PromotionAuctionCommandRecord">
+        INSERT INTO promotion_auction_command (
+            id, command_id, idempotency_key, request_hash, auction_window_id, campaign_id, bidder_user_id,
+            post_id, resource_type, bid_amount, status, created_at, updated_at
+        ) VALUES (
+            #{id}, #{commandId}, #{idempotencyKey}, #{requestHash}, #{auctionWindowId}, #{campaignId}, #{bidderUserId},
+            #{postId}, #{resourceType}, #{bidAmount}, #{status}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="findByCommandId" resultMap="PromotionAuctionCommandRecordResultMap">
+        SELECT * FROM promotion_auction_command WHERE command_id = #{commandId} LIMIT 1
+    </select>
+
+    <select id="findByIdempotency" resultMap="PromotionAuctionCommandRecordResultMap">
+        SELECT *
+        FROM promotion_auction_command
+        WHERE auction_window_id = #{auctionWindowId}
+          AND bidder_user_id = #{bidderUserId}
+          AND idempotency_key = #{idempotencyKey}
+        LIMIT 1
+    </select>
+
+    <update id="updateStatus">
+        UPDATE promotion_auction_command
+        SET status = #{status}, updated_at = NOW(3)
+        WHERE command_id = #{commandId}
+    </update>
+</mapper>

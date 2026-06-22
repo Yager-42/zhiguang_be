@@ -12,6 +12,8 @@ public final class ReconciliationTaskType {
     public static final String COMMENT_COUNT = "comment_count";
     public static final String FOLLOW_GRAPH = "follow_graph";
     public static final String FOLLOW_INBOX = "follow_inbox";
+    public static final String PROMOTION_DECISION_PROJECTION = "promotion_decision_projection";
+    public static final String PROMOTION_ALLOCATION_REBUILD = "promotion_allocation_rebuild";
 
     public static final List<String> ALL = List.of(
             ES_INDEX,
@@ -22,7 +24,9 @@ public final class ReconciliationTaskType {
             CASSANDRA_TEXT,
             COMMENT_COUNT,
             FOLLOW_GRAPH,
-            FOLLOW_INBOX
+            FOLLOW_INBOX,
+            PROMOTION_DECISION_PROJECTION,
+            PROMOTION_ALLOCATION_REBUILD
     );
 
     private ReconciliationTaskType() {
