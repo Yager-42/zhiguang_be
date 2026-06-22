@@ -29,9 +29,6 @@ import java.util.List;
 @Service
 public class PromotionAuctionService {
 
-    private static final String CAPTURE_REF = "promotion-settle:bid:";
-    private static final String RELEASE_REF = "promotion-settle:bid:";
-
     private final PromotionAuctionWindowMapper windowMapper;
     private final PromotionBidMapper bidMapper;
     private final PromotionSlotAllocationMapper allocationMapper;
@@ -82,11 +79,12 @@ public class PromotionAuctionService {
         // clearingPrice <= bidAmount 由「仅有效出价（>= reserve）可中标 + 排序保证 nextBid <= winner.bidAmount」
         // 结构性保证（见类注释），并由边界测试守护；此处直接扣成交价，不做掩盖性 clamp。
         walletService.captureHoldToPlatform(bid.getBidderUserId(), clearingPrice,
-                WalletBusinessType.PROMOTION, CAPTURE_REF + bid.getId() + ":capture");
+                WalletLedgerReason.PROMOTION_BPRIME_CAPTURE, WalletBusinessType.PROMOTION,
+                businessRef(window, bid, "capture"));
         if (releaseAmount > 0) {
             walletService.releaseHold(bid.getBidderUserId(), releaseAmount,
-                    WalletLedgerReason.PROMOTION_BID_RELEASE, WalletBusinessType.PROMOTION,
-                    RELEASE_REF + bid.getId() + ":release");
+                    WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION,
+                    businessRef(window, bid, "release"));
         }
         bidMapper.markWon(bid.getId(), slotIndex, clearingPrice);
         allocationMapper.insert(buildAllocation(window, bid, slotIndex, clearingPrice, settledAt));
@@ -94,9 +92,13 @@ public class PromotionAuctionService {
 
     private void settleLoser(PromotionBid bid) {
         walletService.releaseHold(bid.getBidderUserId(), bid.getBidAmount(),
-                WalletLedgerReason.PROMOTION_BID_RELEASE, WalletBusinessType.PROMOTION,
-                RELEASE_REF + bid.getId() + ":release");
+                WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION,
+                "promotion-bprime:" + bid.getAuctionWindowId() + ":" + bid.getCampaignId() + ":release");
         bidMapper.markLost(bid.getId());
+    }
+
+    private String businessRef(PromotionAuctionWindow window, PromotionBid bid, String effect) {
+        return "promotion-bprime:" + window.getId() + ":" + bid.getCampaignId() + ":" + effect;
     }
 
     private PromotionSlotAllocation buildAllocation(PromotionAuctionWindow window, PromotionBid bid,

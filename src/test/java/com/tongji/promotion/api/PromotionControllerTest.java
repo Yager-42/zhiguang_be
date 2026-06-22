@@ -2,11 +2,11 @@ package com.tongji.promotion.api;
 
 import com.tongji.auth.token.JwtService;
 import com.tongji.promotion.api.dto.CreatePromotionCampaignRequest;
-import com.tongji.promotion.api.dto.PromotionBidResponse;
 import com.tongji.promotion.api.dto.PromotionCampaignResponse;
+import com.tongji.promotion.api.dto.SubmitPromotionBidCommandResponse;
 import com.tongji.promotion.api.dto.SubmitPromotionBidRequest;
-import com.tongji.promotion.model.PromotionBid;
-import com.tongji.promotion.model.PromotionBidStatus;
+import com.tongji.promotion.bprime.service.PromotionSnapshotService;
+import com.tongji.promotion.bprime.service.PromotionCommandSubmissionService;
 import com.tongji.promotion.model.PromotionCampaign;
 import com.tongji.promotion.model.PromotionCampaignStatus;
 import com.tongji.promotion.model.PromotionResourceType;
@@ -33,6 +33,12 @@ class PromotionControllerTest {
     private PromotionCampaignService campaignService;
 
     @Mock
+    private PromotionCommandSubmissionService commandSubmissionService;
+
+    @Mock
+    private PromotionSnapshotService snapshotService;
+
+    @Mock
     private PromotionAllocationService allocationService;
 
     @Mock
@@ -42,24 +48,23 @@ class PromotionControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new PromotionController(campaignService, allocationService, jwtService);
+        controller = new PromotionController(campaignService, commandSubmissionService, snapshotService,
+                allocationService, jwtService);
     }
 
     @Test
-    void submitBidDelegatesToServiceWithExtractedUser() {
+    void submitBidDelegatesToCommandSubmissionWithoutDirectBidMutation() {
         when(jwtService.extractUserId(any())).thenReturn(42L);
-        PromotionBid bid = PromotionBid.builder()
-                .id(401L).campaignId(201L).auctionWindowId(301L).bidderUserId(42L)
-                .bidAmount(120L).walletBusinessRef("promotion-bid:401")
-                .status(PromotionBidStatus.ACTIVE).build();
-        when(campaignService.submitBid(eq(42L), eq(201L), eq(120L), any())).thenReturn(bid);
+        when(commandSubmissionService.submit(eq(42L), eq(201L), eq(120L), eq("idem-1"), any()))
+                .thenReturn(new SubmitPromotionBidCommandResponse("cmd-1", "301", "SUBMITTED", false));
 
-        PromotionBidResponse response = controller.submitBid(201L, new SubmitPromotionBidRequest(120L), null);
+        SubmitPromotionBidCommandResponse response = controller.submitBid(
+                201L, new SubmitPromotionBidRequest(120L, "idem-1"), null);
 
-        verify(campaignService).submitBid(eq(42L), eq(201L), eq(120L), any());
-        assertThat(response.id()).isEqualTo("401");
-        assertThat(response.campaignId()).isEqualTo("201");
+        verify(commandSubmissionService).submit(eq(42L), eq(201L), eq(120L), eq("idem-1"), any());
+        assertThat(response.commandId()).isEqualTo("cmd-1");
         assertThat(response.auctionWindowId()).isEqualTo("301");
+        assertThat(response.resultAvailable()).isFalse();
     }
 
     @Test

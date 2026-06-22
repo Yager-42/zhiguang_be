@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper">
+    <insert id="upsert">
+        INSERT INTO promotion_projection_checkpoint (
+            auction_window_id, last_decision_id, last_kafka_topic, last_kafka_partition, last_kafka_offset, updated_at
+        )
+        VALUES (
+            #{auctionWindowId}, #{lastDecisionId}, #{lastKafkaTopic}, #{lastKafkaPartition}, #{lastKafkaOffset}, NOW(3)
+        )
+        ON DUPLICATE KEY UPDATE
+            last_decision_id = VALUES(last_decision_id),
+            last_kafka_topic = COALESCE(VALUES(last_kafka_topic), last_kafka_topic),
+            last_kafka_partition = COALESCE(VALUES(last_kafka_partition), last_kafka_partition),
+            last_kafka_offset = COALESCE(VALUES(last_kafka_offset), last_kafka_offset),
+            updated_at = NOW(3)
+    </insert>
+</mapper>

@@ -18,6 +18,8 @@ public interface PromotionAuctionWindowMapper {
 
     int insert(PromotionAuctionWindow window);
 
+    PromotionAuctionWindow findById(@Param("id") long id);
+
     /** 当前处于 OPEN 且时间覆盖 now 的窗口（收单窗口）。 */
     PromotionAuctionWindow findOpenWindow(@Param("resourceType") PromotionResourceType resourceType,
                                           @Param("now") Instant now);

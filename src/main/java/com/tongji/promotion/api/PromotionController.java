@@ -5,9 +5,12 @@ import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.promotion.api.dto.CreatePromotionCampaignRequest;
 import com.tongji.promotion.api.dto.PromotionAllocationView;
-import com.tongji.promotion.api.dto.PromotionBidResponse;
 import com.tongji.promotion.api.dto.PromotionCampaignResponse;
+import com.tongji.promotion.api.dto.SubmitPromotionBidCommandResponse;
 import com.tongji.promotion.api.dto.SubmitPromotionBidRequest;
+import com.tongji.promotion.bprime.model.PromotionAuctionSnapshot;
+import com.tongji.promotion.bprime.service.PromotionSnapshotService;
+import com.tongji.promotion.bprime.service.PromotionCommandSubmissionService;
 import com.tongji.promotion.model.PromotionResourceType;
 import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.promotion.service.PromotionCampaignService;
@@ -35,6 +38,8 @@ import java.util.List;
 public class PromotionController {
 
     private final PromotionCampaignService campaignService;
+    private final PromotionCommandSubmissionService commandSubmissionService;
+    private final PromotionSnapshotService snapshotService;
     private final PromotionAllocationService allocationService;
     private final JwtService jwtService;
 
@@ -54,18 +59,23 @@ public class PromotionController {
     }
 
     @PostMapping("/campaigns/{campaignId}/bids")
-    public PromotionBidResponse submitBid(@PathVariable long campaignId,
-                                          @Valid @RequestBody SubmitPromotionBidRequest request,
-                                          @AuthenticationPrincipal Jwt jwt) {
+    public SubmitPromotionBidCommandResponse submitBid(@PathVariable long campaignId,
+                                                       @Valid @RequestBody SubmitPromotionBidRequest request,
+                                                       @AuthenticationPrincipal Jwt jwt) {
         long userId = jwtService.extractUserId(jwt);
-        return PromotionBidResponse.from(
-                campaignService.submitBid(userId, campaignId, request.bidAmount(), Instant.now()));
+        return commandSubmissionService.submit(userId, campaignId, request.bidAmount(),
+                request.idempotencyKey(), Instant.now());
     }
 
     @GetMapping("/allocations/active")
     public List<PromotionAllocationView> getActiveAllocations(@RequestParam String resourceType) {
         PromotionResourceType type = parseResourceType(resourceType);
         return allocationService.getActive(type);
+    }
+
+    @GetMapping("/windows/{auctionWindowId}/snapshot")
+    public PromotionAuctionSnapshot snapshot(@PathVariable long auctionWindowId) {
+        return snapshotService.snapshot(auctionWindowId);
     }
 
     private PromotionResourceType parseResourceType(String raw) {
