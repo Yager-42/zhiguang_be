@@ -41,6 +41,9 @@
                  LEFT JOIN promotion_campaign c ON c.id = b.campaign_id
         WHERE b.auction_window_id = #{auctionWindowId}
           AND b.status = 'ACTIVE'
+          AND c.status = 'ACTIVE'
+          AND c.start_at <![CDATA[<=]]> #{allocationStartAt}
+          AND c.end_at <![CDATA[>=]]> #{allocationEndAt}
         ORDER BY b.bid_amount DESC, b.id ASC
     </select>
 

@@ -51,7 +51,10 @@ class PromotionAuctionWindowCloserTest {
         PromotionAuctionWindow window = window(301L, PromotionResourceType.FEED_TOP_SLOT,
                 "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
         when(windowMapper.listClosableWindows(any(), eq(50))).thenReturn(List.of(window));
-        when(bidMapper.listActiveBidsByWindowId(301L)).thenReturn(List.of(bid(401L, 201L, 42L, 120L)));
+        when(bidMapper.listActiveBidsByWindowId(301L,
+                Instant.parse("2026-06-20T11:00:00Z"),
+                Instant.parse("2026-06-20T12:00:00Z")))
+                .thenReturn(List.of(bid(401L, 201L, 42L, 120L)));
 
         closer.closeDueWindows(Instant.parse("2026-06-20T11:00:00Z"), 50);
 
