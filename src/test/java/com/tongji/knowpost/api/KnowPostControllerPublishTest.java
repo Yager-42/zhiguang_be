@@ -37,7 +37,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -59,8 +58,6 @@ class KnowPostControllerPublishTest {
     private KnowPostFeedService knowPostFeedService;
     private HomeFeedMixingService homeFeedMixingService;
     private FollowFeedService followFeedService;
-    private com.tongji.promotion.service.PaidBoostCacheService paidBoostCacheService;
-    private com.tongji.promotion.service.PaidBoostDeliveryService paidBoostDeliveryService;
     private RecommendationEngine recommendationEngine;
     private KnowPostMapper knowPostMapper;
     private JwtService jwtService;
@@ -72,8 +69,6 @@ class KnowPostControllerPublishTest {
         knowPostFeedService = Mockito.mock(KnowPostFeedService.class);
         publishManager = Mockito.mock(PublishManager.class);
         followFeedService = Mockito.mock(FollowFeedService.class);
-        paidBoostCacheService = Mockito.mock(com.tongji.promotion.service.PaidBoostCacheService.class);
-        paidBoostDeliveryService = Mockito.mock(com.tongji.promotion.service.PaidBoostDeliveryService.class);
         recommendationEngine = Mockito.mock(RecommendationEngine.class);
         knowPostMapper = Mockito.mock(KnowPostMapper.class);
         homeFeedMixingService = new HomeFeedMixingService(
@@ -81,11 +76,7 @@ class KnowPostControllerPublishTest {
                 recommendationEngine,
                 knowPostMapper,
                 knowPostFeedService,
-                Mockito.mock(com.tongji.promotion.service.PromotionAllocationService.class),
-                Mockito.mock(com.tongji.promotion.service.PaidBoostCacheService.class),
-                new com.tongji.promotion.service.PaidBoostRankingService(
-                        new com.tongji.promotion.config.PaidBoostProperties()),
-                Mockito.mock(com.tongji.promotion.service.PaidBoostDeliveryService.class)
+                Mockito.mock(com.tongji.promotion.service.PromotionAllocationService.class)
         );
         AuthProperties authProperties = new AuthProperties();
         authProperties.getJwt().setIssuer("test-issuer");
@@ -469,8 +460,6 @@ class KnowPostControllerPublishTest {
                 publishManager,
                 homeFeedMixingService,
                 followFeedService,
-                paidBoostCacheService,
-                paidBoostDeliveryService,
                 mixedFeedEnabled
         );
 
@@ -514,13 +503,10 @@ class KnowPostControllerPublishTest {
     }
 
     @Test
-    void followFeedPrefersBoostedItemWithinSelectionWindow() throws Exception {
+    void followFeedKeepsOrganicOrderWhenMoreThanOnePageAvailable() throws Exception {
         MockMvc mockMvc = createMockMvc(true);
-        // 21 条原始 timeline（id 1 最新 … id 21 最旧），纯 recency 的 top-20 会排除最旧的 21
         List<Long> ids = java.util.stream.LongStream.rangeClosed(1, 21).boxed().toList();
-        when(paidBoostCacheService.getActive(eq(com.tongji.promotion.model.PaidBoostChannel.FOLLOW_DELIVERY), any()))
-                .thenReturn(List.of(followBoostCampaign(21L, 20L)));
-        when(followFeedService.getTimeline(USER_ID, null, 40))
+        when(followFeedService.getTimeline(USER_ID, null, 20))
                 .thenReturn(new TimelinePage(timelineItems(ids, "2026-06-18T12:00:00Z"), null));
         when(knowPostFeedService.getFeedByIds(anyList(), eq(USER_ID), eq(KnowPostFeedService.FeedVisibilityScope.FOLLOW)))
                 .thenAnswer(invocation -> ((List<Long>) invocation.getArgument(0)).stream()
@@ -530,26 +516,10 @@ class KnowPostControllerPublishTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(20))
                 .andExpect(jsonPath("$.items[0].id").value("1"))
-                // boost 把最旧的 21 抬进页内（挤掉纯 recency 本应在页内的 20），并打商业标记
-                .andExpect(jsonPath("$.items[19].id").value("21"))
-                .andExpect(jsonPath("$.items[19].commercial").value(true))
-                .andExpect(jsonPath("$.items[19].placementType").value("follow_delivery_boost"));
+                .andExpect(jsonPath("$.items[19].id").value("20"))
+                .andExpect(jsonPath("$.items[19].commercial").value(false));
 
-        verify(followFeedService).getTimeline(USER_ID, null, 40);
-    }
-
-    private com.tongji.promotion.model.PaidBoostCampaign followBoostCampaign(long postId, long boostValue) {
-        return com.tongji.promotion.model.PaidBoostCampaign.builder()
-                .id(postId).creatorUserId(USER_ID).postId(postId)
-                .channel(com.tongji.promotion.model.PaidBoostChannel.FOLLOW_DELIVERY)
-                .bidAmount(boostValue).boostValue(boostValue).unitPrice(2L).budgetTotal(100L).budgetConsumed(0L)
-                .reserveBusinessRef("paid-boost:" + postId + ":reserve")
-                .status(com.tongji.promotion.model.PaidBoostCampaignStatus.ACTIVE)
-                .startAt(Instant.parse("2026-06-21T10:00:00Z"))
-                .endAt(Instant.parse("2026-06-21T12:00:00Z"))
-                .createdAt(Instant.parse("2026-06-21T10:00:00Z"))
-                .updatedAt(Instant.parse("2026-06-21T10:00:00Z"))
-                .build();
+        verify(followFeedService).getTimeline(USER_ID, null, 20);
     }
 
     private com.tongji.recommendation.feed.TimelineItem timelineItem(long contentId, String publishTs) {

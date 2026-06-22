@@ -1,5 +1,10 @@
 package com.tongji.promotion.schedule;
 
+import com.tongji.common.id.IdNamespace;
+import com.tongji.common.id.IdService;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
+import com.tongji.promotion.bprime.kafka.PromotionDecisionLogPort;
+import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
@@ -21,6 +26,8 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentCaptor.forClass;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,17 +44,46 @@ class PromotionAuctionWindowCloserTest {
     private PromotionAuctionService auctionService;
 
     @Mock
+    private PromotionDecisionLogPort decisionLogPort;
+
+    @Mock
+    private IdService idService;
+
+    @Mock
     private PromotionAllocationCacheService cacheService;
 
     private PromotionAuctionWindowCloser closer;
+    private PromotionBPrimeProperties properties;
 
     @BeforeEach
     void setUp() {
-        closer = new PromotionAuctionWindowCloser(windowMapper, bidMapper, auctionService, cacheService);
+        properties = new PromotionBPrimeProperties();
+        properties.setEnabled(true);
+        closer = new PromotionAuctionWindowCloser(windowMapper, bidMapper, auctionService, decisionLogPort,
+                cacheService, idService, properties);
     }
 
     @Test
     void closesDueWindowsAndRefreshesCache() {
+        PromotionAuctionWindow window = window(301L, PromotionResourceType.FEED_TOP_SLOT,
+                "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
+        when(windowMapper.listClosableWindows(any(), eq(50))).thenReturn(List.of(window));
+        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(9001L);
+
+        closer.closeDueWindows(Instant.parse("2026-06-20T11:00:00Z"), 50);
+
+        org.mockito.ArgumentCaptor<PromotionAuctionDecision> captor = forClass(PromotionAuctionDecision.class);
+        verify(decisionLogPort).append(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().decisionType()).isEqualTo("WINDOW_CLOSED");
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().auctionWindowId()).isEqualTo(301L);
+        verify(cacheService).refreshActiveAllocations(PromotionResourceType.FEED_TOP_SLOT,
+                Instant.parse("2026-06-20T11:00:00Z"));
+        verify(windowMapper, never()).markSettled(eq(301L), any());
+    }
+
+    @Test
+    void closesDueWindowsDirectlyWhenBprimeDisabled() {
+        properties.setEnabled(false);
         PromotionAuctionWindow window = window(301L, PromotionResourceType.FEED_TOP_SLOT,
                 "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
         when(windowMapper.listClosableWindows(any(), eq(50))).thenReturn(List.of(window));
@@ -59,8 +95,7 @@ class PromotionAuctionWindowCloserTest {
         closer.closeDueWindows(Instant.parse("2026-06-20T11:00:00Z"), 50);
 
         verify(auctionService).settleWindow(eq(window), anyList(), eq(Instant.parse("2026-06-20T11:00:00Z")));
-        verify(cacheService).refreshActiveAllocations(PromotionResourceType.FEED_TOP_SLOT,
-                Instant.parse("2026-06-20T11:00:00Z"));
+        verify(decisionLogPort, never()).append(any());
     }
 
     @Test
