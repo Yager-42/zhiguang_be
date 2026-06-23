@@ -1,9 +1,9 @@
 package com.tongji.reconciliation.executor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tongji.promotion.bprime.mapper.PromotionAuctionDecisionMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
-import com.tongji.promotion.bprime.model.PromotionAuctionDecisionRecord;
+import com.tongji.promotion.bprime.model.PromotionAuctionDecisionLogEnvelope;
+import com.tongji.promotion.bprime.kafka.PromotionDecisionKafkaSupport;
 import com.tongji.promotion.bprime.service.PromotionDecisionProjectionService;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTask;
@@ -13,16 +13,21 @@ import org.springframework.stereotype.Component;
 @Component
 public class PromotionDecisionProjectionReconciler implements Reconciler {
 
-    private final PromotionAuctionDecisionMapper decisionMapper;
     private final PromotionDecisionProjectionService projectionService;
     private final ObjectMapper objectMapper;
+    private final PromotionDecisionKafkaSupport support;
 
-    public PromotionDecisionProjectionReconciler(PromotionAuctionDecisionMapper decisionMapper,
-                                                 PromotionDecisionProjectionService projectionService,
+    public PromotionDecisionProjectionReconciler(PromotionDecisionProjectionService projectionService,
                                                  ObjectMapper objectMapper) {
-        this.decisionMapper = decisionMapper;
+        this(projectionService, objectMapper, new PromotionDecisionKafkaSupport());
+    }
+
+    public PromotionDecisionProjectionReconciler(PromotionDecisionProjectionService projectionService,
+                                                 ObjectMapper objectMapper,
+                                                 PromotionDecisionKafkaSupport support) {
         this.projectionService = projectionService;
         this.objectMapper = objectMapper;
+        this.support = support;
     }
 
     @Override
@@ -37,19 +42,19 @@ public class PromotionDecisionProjectionReconciler implements Reconciler {
         }
         try {
             if (task.getTaskPayload() != null && task.getTaskPayload().trim().startsWith("{")) {
-                projectionService.project(objectMapper.readValue(task.getTaskPayload(), PromotionAuctionDecision.class));
+                projectionService.project(readDecision(task.getTaskPayload()));
                 return;
             }
-            String decisionId = task.getTaskPayload() == null || task.getTaskPayload().isBlank()
-                    ? String.valueOf(task.getTargetId())
-                    : task.getTaskPayload();
-            PromotionAuctionDecisionRecord record = decisionMapper.findByDecisionId(decisionId);
-            if (record == null) {
-                throw new IllegalStateException("promotion decision not found: " + decisionId);
-            }
-            projectionService.project(objectMapper.readValue(record.getPayloadJson(), PromotionAuctionDecision.class));
+            throw new IllegalStateException("promotion decision replay requires Kafka decision payload");
         } catch (Exception e) {
             throw new IllegalStateException("Failed to replay promotion decision projection", e);
         }
+    }
+
+    private PromotionAuctionDecision readDecision(String payload) throws Exception {
+        if (payload.contains("\"eventType\"")) {
+            return support.requireDecision(objectMapper.readValue(payload, PromotionAuctionDecisionLogEnvelope.class));
+        }
+        throw new IllegalStateException("promotion decision replay requires Kafka decision envelope");
     }
 }

@@ -2,6 +2,7 @@ local stateKey = KEYS[1]
 local commandsKey = KEYS[2]
 local rankingKey = KEYS[3]
 local campaignKey = KEYS[4]
+local versionKey = KEYS[5]
 
 local commandId = ARGV[1]
 local requestHash = ARGV[2]
@@ -46,14 +47,17 @@ local function ranking_json(pendingCampaignId, pendingBidderUserId, pendingPostI
     return '[' .. table.concat(limited, ',') .. ']'
 end
 
-local function decision_json(accepted, decisionType, reason, effects, ranking)
+local function decision_json(accepted, decisionType, reason, effects, ranking, decisionVersion)
+    local version = decisionVersion or tonumber(redis.call('INCR', versionKey))
+    local previousVersion = version - 1
     local rejection = reason and ('"' .. reason .. '"') or 'null'
     local walletEffects = effects or '[]'
     local rankingPayload = ranking or ranking_json()
     return '{"decisionId":"' .. commandId .. ':decision","commandId":"' .. commandId .. '","requestHash":"' .. requestHash
-            .. '","auctionWindowId":' .. auctionWindowId .. ',"campaignId":' .. campaignId
+            .. '","auctionWindowId":' .. auctionWindowId .. ',"decisionVersion":' .. version
+            .. ',"previousVersion":' .. previousVersion .. ',"campaignId":' .. campaignId
             .. ',"bidderUserId":' .. bidderUserId .. ',"postId":' .. postId
-            .. ',"resourceType":"' .. resourceType .. '","decisionType":"' .. decisionType
+            .. ',"resourceType":"' .. resourceType .. '","type":"' .. decisionType
             .. '","accepted":' .. tostring(accepted) .. ',"rejectionReason":' .. rejection
             .. ',"bidAmount":' .. bidAmount .. ',"ranking":' .. rankingPayload
             .. ',"walletEffects":' .. walletEffects .. ',"decidedAt":"' .. os.date('!%Y-%m-%dT%H:%M:%SZ', math.floor(nowEpochMs / 1000)) .. '"}'

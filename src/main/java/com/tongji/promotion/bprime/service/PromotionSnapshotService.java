@@ -1,19 +1,17 @@
 package com.tongji.promotion.bprime.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tongji.promotion.bprime.mapper.PromotionAuctionDecisionMapper;
-import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
-import com.tongji.promotion.bprime.model.PromotionAuctionDecisionRecord;
 import com.tongji.promotion.bprime.model.PromotionAuctionSnapshot;
 import com.tongji.promotion.bprime.model.PromotionRankingItem;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
+import com.tongji.promotion.mapper.PromotionSlotAllocationMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
+import com.tongji.promotion.model.PromotionAuctionWindowStatus;
+import com.tongji.promotion.model.PromotionSlotAllocation;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 
@@ -21,39 +19,31 @@ import java.util.Set;
 public class PromotionSnapshotService {
 
     private final PromotionAuctionWindowMapper windowMapper;
-    private final PromotionAuctionDecisionMapper decisionMapper;
+    private final PromotionSlotAllocationMapper allocationMapper;
     private final StringRedisTemplate redisTemplate;
-    private final ObjectMapper objectMapper;
 
     public PromotionSnapshotService(PromotionAuctionWindowMapper windowMapper,
-                                    PromotionAuctionDecisionMapper decisionMapper,
-                                    StringRedisTemplate redisTemplate,
-                                    ObjectMapper objectMapper) {
+                                    PromotionSlotAllocationMapper allocationMapper,
+                                    StringRedisTemplate redisTemplate) {
         this.windowMapper = windowMapper;
-        this.decisionMapper = decisionMapper;
+        this.allocationMapper = allocationMapper;
         this.redisTemplate = redisTemplate;
-        this.objectMapper = objectMapper;
     }
 
     public PromotionAuctionSnapshot snapshot(long auctionWindowId) {
         PromotionAuctionWindow window = windowMapper.findById(auctionWindowId);
         String status = window == null || window.getStatus() == null ? "UNKNOWN" : window.getStatus().name();
+        if (window != null && window.getStatus() == PromotionAuctionWindowStatus.SETTLED) {
+            return new PromotionAuctionSnapshot(auctionWindowId, status, allocationRanking(auctionWindowId),
+                    Instant.now(), redisDecisionVersion(auctionWindowId));
+        }
         List<PromotionRankingItem> hotRanking = hotRanking(auctionWindowId);
         if (!hotRanking.isEmpty()) {
-            return new PromotionAuctionSnapshot(auctionWindowId, status, hotRanking, Instant.now());
+            return new PromotionAuctionSnapshot(auctionWindowId, status, hotRanking, Instant.now(),
+                    redisDecisionVersion(auctionWindowId));
         }
-        List<PromotionRankingItem> sorted = decisionMapper.listAcceptedByWindow(auctionWindowId).stream()
-                .map(this::toDecision)
-                .map(decision -> new PromotionRankingItem(decision.campaignId(), decision.bidderUserId(),
-                        decision.postId(), decision.bidAmount(), 0))
-                .sorted(Comparator.comparingLong(PromotionRankingItem::bidAmount).reversed()
-                        .thenComparingLong(PromotionRankingItem::campaignId))
-                .toList();
-        List<PromotionRankingItem> ranking = java.util.stream.IntStream.range(0, sorted.size())
-                .mapToObj(i -> new PromotionRankingItem(sorted.get(i).campaignId(), sorted.get(i).bidderUserId(),
-                        sorted.get(i).postId(), sorted.get(i).bidAmount(), i + 1))
-                .toList();
-        return new PromotionAuctionSnapshot(auctionWindowId, status, ranking, Instant.now());
+        return new PromotionAuctionSnapshot(auctionWindowId, status, List.of(), Instant.now(),
+                redisDecisionVersion(auctionWindowId));
     }
 
     private List<PromotionRankingItem> hotRanking(long auctionWindowId) {
@@ -78,11 +68,19 @@ public class PromotionSnapshotService {
         return items;
     }
 
-    private PromotionAuctionDecision toDecision(PromotionAuctionDecisionRecord record) {
-        try {
-            return objectMapper.readValue(record.getPayloadJson(), PromotionAuctionDecision.class);
-        } catch (Exception e) {
-            throw new IllegalStateException("Invalid promotion decision payload", e);
-        }
+    private long redisDecisionVersion(long auctionWindowId) {
+        String value = redisTemplate.opsForValue().get("promotion:auction:" + auctionWindowId + ":decision_version");
+        return value == null || value.isBlank() ? 0L : Long.parseLong(value);
+    }
+
+    private List<PromotionRankingItem> allocationRanking(long auctionWindowId) {
+        return allocationMapper.listByAuctionWindowId(auctionWindowId).stream()
+                .map(this::toRankingItem)
+                .toList();
+    }
+
+    private PromotionRankingItem toRankingItem(PromotionSlotAllocation allocation) {
+        return new PromotionRankingItem(allocation.getCampaignId(), allocation.getBidderUserId(),
+                allocation.getPostId(), allocation.getClearingPrice(), allocation.getSlotIndex() + 1);
     }
 }

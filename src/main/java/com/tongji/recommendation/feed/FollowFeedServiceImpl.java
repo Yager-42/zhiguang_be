@@ -30,7 +30,7 @@ public class FollowFeedServiceImpl implements FollowFeedService {
     /** 默认关注流页面大小，也是 timeline 缓存命中的唯一尺寸：只缓存默认页，更大 limit 请求自然旁路缓存。 */
     private static final int DEFAULT_TIMELINE_PAGE_SIZE = 20;
 
-    /** 单次从 inbox/author_feed 拉取的原始 timeline 行数上限（boost 受限选择可请求更大窗口）。 */
+    /** 单次从 inbox/author_feed 拉取的原始 timeline 行数上限（混排补位可请求更大窗口）。 */
     @Value("${feed.follow.max-source-slice-limit:100}")
     private int maxSourceSliceLimit = 100;
 

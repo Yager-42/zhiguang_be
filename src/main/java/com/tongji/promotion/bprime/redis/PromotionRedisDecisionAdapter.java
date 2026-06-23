@@ -67,4 +67,17 @@ public class PromotionRedisDecisionAdapter {
         redisTemplate.opsForHash().put(prefix + ":state", "status", "OPEN");
         redisTemplate.opsForHash().put(prefix + ":state", "updatedAt", String.valueOf(decision.decidedAt().toEpochMilli()));
     }
+
+    public void rollback(PromotionAuctionDecision decision) {
+        String prefix = "promotion:auction:" + decision.auctionWindowId();
+        String commandsKey = prefix + ":commands";
+        redisTemplate.opsForHash().delete(commandsKey,
+                decision.commandId() + ":hash",
+                decision.commandId() + ":decision");
+        String versionKey = prefix + ":decision_version";
+        String currentVersion = redisTemplate.opsForValue().get(versionKey);
+        if (currentVersion != null && currentVersion.equals(String.valueOf(decision.decisionVersion()))) {
+            redisTemplate.opsForValue().set(versionKey, String.valueOf(decision.previousVersion()));
+        }
+    }
 }

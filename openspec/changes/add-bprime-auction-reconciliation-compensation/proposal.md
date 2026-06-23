@@ -9,9 +9,9 @@ B' 推广竞价已经把关键事实分散到 RocketMQ command、Redis hot state
 - 新增 B' 推广竞价深度对账补偿能力，范围只覆盖 promotion auction，不做全平台统一对账升级。
 - 扩展现有 `reconciliation_task` 框架，不另造第二套任务系统。
 - 增加 Redis hot ranking / command replay / window state drift 检测和标记。
-- 增加 Redis hot state rebuild：从 Kafka/MySQL durable facts 重建 active 或 recently closed auction window 的热排名与 campaign state。
+- 增加 Redis hot state rebuild：从 Kafka decision log 与 MySQL final projection/wallet facts 重建 active 或 recently closed auction window 的热排名与 campaign state。
 - 增加 wallet effect repair：按 B' decision wallet effects 和 wallet businessRef 检查 HOLD / CAPTURE / RELEASE 是否存在且参数一致，缺失则补偿，冲突则进入 dead/error。
-- 增加 B' chain audit：按 auction window 串联 command、decision、projection checkpoint、wallet ledger、slot allocation，生成 repair tasks。
+- 增加 B' chain audit：按 auction window 串联 command、Kafka decision log、projection checkpoint、wallet ledger、slot allocation，生成 repair tasks。
 - 保留当前已有最小修复：decision projection replay 和 allocation rebuild。
 - 不把 WebSocket delivery 纳入事实修复；fanout 失败只影响展示，客户端可用 snapshot 恢复。
 

@@ -1,21 +1,23 @@
 package com.tongji.promotion.schedule;
 
-import com.tongji.common.id.IdNamespace;
-import com.tongji.common.id.IdService;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.kafka.PromotionDecisionLogPort;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
+import com.tongji.promotion.model.PromotionBid;
 import com.tongji.promotion.model.PromotionResourceType;
 import com.tongji.promotion.service.PromotionAllocationCacheService;
 import com.tongji.promotion.service.PromotionAuctionService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -26,8 +28,8 @@ public class PromotionAuctionWindowCloser {
     private final PromotionAuctionService auctionService;
     private final PromotionDecisionLogPort decisionLogPort;
     private final PromotionAllocationCacheService cacheService;
-    private final IdService idService;
     private final PromotionBPrimeProperties bprimeProperties;
+    private final StringRedisTemplate redisTemplate;
 
     public void closeDueWindows(Instant now, int batchSize) {
         for (PromotionAuctionWindow window : windowMapper.listClosableWindows(now, batchSize)) {
@@ -41,11 +43,26 @@ public class PromotionAuctionWindowCloser {
                 cacheService.refreshActiveAllocations(window.getResourceType(), now);
                 continue;
             }
+            Instant allocationStartAt = window.getWindowEndAt();
+            long spanSeconds = window.getWindowEndAt().getEpochSecond() - window.getWindowStartAt().getEpochSecond();
+            Instant allocationEndAt = allocationStartAt.plusSeconds(spanSeconds);
+            List<PromotionBid> ranked = bidMapper.listActiveBidsByWindowId(window.getId(), allocationStartAt, allocationEndAt)
+                    .stream()
+                    .sorted(Comparator.comparingLong(PromotionBid::getBidAmount).reversed()
+                            .thenComparingLong(PromotionBid::getId))
+                    .toList();
+            int winnerCount = (int) ranked.stream()
+                    .takeWhile(bid -> bid.getBidAmount() >= window.getReservePrice())
+                    .limit(window.getSlotCount())
+                    .count();
+            long decisionVersion = nextDecisionVersion(window.getId());
             decisionLogPort.append(new PromotionAuctionDecision(
-                    "promotion-bprime-close-" + idService.nextId(IdNamespace.ADMIN_OPERATION),
+                    "promotion-bprime-close-window-" + window.getId() + "-v" + decisionVersion,
                     "promotion-bprime-close-window-" + window.getId(),
                     "window-close:" + window.getId() + ":" + window.getWindowEndAt(),
                     window.getId(),
+                    decisionVersion,
+                    decisionVersion - 1,
                     0L,
                     0L,
                     0L,
@@ -54,8 +71,17 @@ public class PromotionAuctionWindowCloser {
                     false,
                     null,
                     0L,
-                    List.of(),
-                    List.of(),
+                    finalRanking(ranked),
+                    closeWalletEffects(window, ranked, winnerCount),
+                    Map.of(
+                            "finalRanking", finalRanking(ranked),
+                            "winners", winners(window, ranked, winnerCount),
+                            "clearingPrices", clearingPrices(window, ranked, winnerCount),
+                            "walletEffects", closeWalletEffects(window, ranked, winnerCount),
+                            "allocationStartAt", allocationStartAt.toString(),
+                            "allocationEndAt", allocationEndAt.toString(),
+                            "finalWindowStatus", "SETTLED"
+                    ),
                     now));
             cacheService.refreshActiveAllocations(window.getResourceType(), now);
         }
@@ -65,4 +91,82 @@ public class PromotionAuctionWindowCloser {
         cacheService.refreshActiveAllocations(PromotionResourceType.FEED_TOP_SLOT, now);
         cacheService.refreshActiveAllocations(PromotionResourceType.SEARCH_TOP_SLOT, now);
     }
+
+    private List<com.tongji.promotion.bprime.model.PromotionRankingItem> finalRanking(List<PromotionBid> ranked) {
+        return java.util.stream.IntStream.range(0, ranked.size())
+                .mapToObj(i -> new com.tongji.promotion.bprime.model.PromotionRankingItem(
+                        ranked.get(i).getCampaignId(), ranked.get(i).getBidderUserId(),
+                        ranked.get(i).getPostId(), ranked.get(i).getBidAmount(), i + 1))
+                .toList();
+    }
+
+    private List<Map<String, Object>> winners(PromotionAuctionWindow window, List<PromotionBid> ranked, int winnerCount) {
+        return java.util.stream.IntStream.range(0, winnerCount)
+                .mapToObj(i -> Map.<String, Object>of(
+                        "campaignId", ranked.get(i).getCampaignId(),
+                        "bidderUserId", ranked.get(i).getBidderUserId(),
+                        "postId", ranked.get(i).getPostId(),
+                        "slotIndex", i,
+                        "clearingPrice", clearingPrice(window, ranked, i)))
+                .toList();
+    }
+
+    private List<Map<String, Object>> clearingPrices(PromotionAuctionWindow window, List<PromotionBid> ranked,
+                                                     int winnerCount) {
+        return java.util.stream.IntStream.range(0, winnerCount)
+                .mapToObj(i -> Map.<String, Object>of(
+                        "campaignId", ranked.get(i).getCampaignId(),
+                        "slotIndex", i,
+                        "clearingPrice", clearingPrice(window, ranked, i)))
+                .toList();
+    }
+
+    private List<com.tongji.promotion.bprime.model.PromotionWalletEffect> closeWalletEffects(
+            PromotionAuctionWindow window, List<PromotionBid> ranked, int winnerCount) {
+        return java.util.stream.IntStream.range(0, ranked.size())
+                .boxed()
+                .flatMap(i -> walletEffectsForBid(window, ranked, winnerCount, i).stream())
+                .toList();
+    }
+
+    private List<com.tongji.promotion.bprime.model.PromotionWalletEffect> walletEffectsForBid(
+            PromotionAuctionWindow window, List<PromotionBid> ranked, int winnerCount, int index) {
+        PromotionBid bid = ranked.get(index);
+        if (index >= winnerCount) {
+            return List.of(new com.tongji.promotion.bprime.model.PromotionWalletEffect(
+                    bid.getBidderUserId(), bid.getBidAmount(), "RELEASE",
+                    "promotion-bprime:" + bid.getAuctionWindowId() + ":" + bid.getCampaignId() + ":release"));
+        }
+        long clearingPrice = clearingPrice(window, ranked, index);
+        long releaseAmount = bid.getBidAmount() - clearingPrice;
+        var capture = new com.tongji.promotion.bprime.model.PromotionWalletEffect(
+                bid.getBidderUserId(), clearingPrice, "CAPTURE",
+                "promotion-bprime:" + window.getId() + ":" + bid.getCampaignId() + ":capture");
+        if (releaseAmount <= 0) {
+            return List.of(capture);
+        }
+        return List.of(capture, new com.tongji.promotion.bprime.model.PromotionWalletEffect(
+                bid.getBidderUserId(), releaseAmount, "RELEASE",
+                "promotion-bprime:" + window.getId() + ":" + bid.getCampaignId() + ":release"));
+    }
+
+    private long clearingPrice(PromotionAuctionWindow window, List<PromotionBid> ranked, int slotIndex) {
+        long nextBid = (slotIndex + 1 < ranked.size()) ? ranked.get(slotIndex + 1).getBidAmount() : window.getReservePrice();
+        return Math.max(nextBid, window.getReservePrice());
+    }
+
+    private long nextDecisionVersion(long auctionWindowId) {
+        String pendingKey = "promotion:auction:" + auctionWindowId + ":close_decision_version";
+        String pendingVersion = redisTemplate.opsForValue().get(pendingKey);
+        if (pendingVersion != null && !pendingVersion.isBlank()) {
+            return Long.parseLong(pendingVersion);
+        }
+        Long version = redisTemplate.opsForValue().increment("promotion:auction:" + auctionWindowId + ":decision_version");
+        if (version == null) {
+            throw new IllegalStateException("promotion decision version increment failed: " + auctionWindowId);
+        }
+        redisTemplate.opsForValue().set(pendingKey, String.valueOf(version));
+        return version;
+    }
+
 }

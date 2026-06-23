@@ -5,7 +5,7 @@ TBD - created by archiving change add-slot-auction-promotions. Update Purpose af
 ## Requirements
 ### Requirement: Slot auction promotions SHALL model zhiguang promotion resources
 
-The system SHALL model slot auction promotions around zhiguang fixed position resources instead of `bytedance` product-auction terms. Supported first-phase resources SHALL include `feed_top_slot` and `search_top_slot`; each resource SHALL define a fixed `slotCount`, reserve price, bidding window, and allocation window.
+The system SHALL model slot auction promotions around zhiguang fixed advertising-slot resources instead of `bytedance` product-auction terms. Supported first-phase resources SHALL include `feed_top_slot` and `search_top_slot`; each resource SHALL define a fixed `slotCount`, reserve price, bidding window, and allocation window.
 
 #### Scenario: Promotion campaign targets feed slot
 - **WHEN** creator submits slot promotion for a post
@@ -67,7 +67,7 @@ The system SHALL enforce configured promoted-slot count limits and SHALL mark pr
 
 ### Requirement: Slot auction promotions SHALL reject paid boost semantics
 
-The system SHALL NOT treat slot auction promotion as paid boost, paid ranking weight, or `organic score + boost effect`. Fixed position allocation SHALL be the only commercial promotion distribution mechanism in this capability.
+The system SHALL NOT treat slot auction promotion as paid boost, paid ranking weight, weight slot auction, or `organic score + boost effect`. Fixed advertising-slot allocation SHALL be the only commercial promotion distribution mechanism in this capability.
 
 #### Scenario: Creator requests ranking weight purchase
 - **WHEN** creator attempts to create a promotion that buys recommendation weight without competing for fixed position

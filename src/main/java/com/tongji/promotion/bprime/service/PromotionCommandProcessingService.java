@@ -38,7 +38,7 @@ public class PromotionCommandProcessingService {
 
     public void process(PromotionAuctionCommand command) {
         var commandRecord = commandMapper.findByCommandId(command.commandId());
-        if (commandRecord != null && "LOG_FAILED".equals(commandRecord.getStatus())) {
+        if (commandRecord != null && "DECIDED".equals(commandRecord.getStatus())) {
             return;
         }
         PromotionAuctionWindow window = windowMapper.findById(command.auctionWindowId());
@@ -72,6 +72,7 @@ public class PromotionCommandProcessingService {
                             WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION,
                             "promotion-bprime:" + command.commandId() + ":hold-release-after-log-fail");
                 }
+                redisDecisionAdapter.rollback(decision);
                 commandMapper.updateStatus(command.commandId(), "LOG_FAILED");
             }
             throw e;

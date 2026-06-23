@@ -377,24 +377,10 @@ CREATE TABLE IF NOT EXISTS promotion_auction_command (
     KEY idx_promotion_command_window_status (auction_window_id, status, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS promotion_auction_decision (
-    id BIGINT UNSIGNED NOT NULL,
-    decision_id VARCHAR(64) NOT NULL,
-    command_id VARCHAR(64) NOT NULL,
-    auction_window_id BIGINT UNSIGNED NOT NULL,
-    decision_type VARCHAR(32) NOT NULL,
-    accepted TINYINT(1) NOT NULL,
-    rejection_reason VARCHAR(64) NULL,
-    payload_json JSON NOT NULL,
-    created_at DATETIME(3) NOT NULL,
-    PRIMARY KEY (id),
-    UNIQUE KEY uk_promotion_decision_id (decision_id),
-    KEY idx_promotion_decision_window (auction_window_id, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS promotion_projection_checkpoint (
     auction_window_id BIGINT UNSIGNED NOT NULL,
     last_decision_id VARCHAR(64) NOT NULL,
+    last_decision_version BIGINT NOT NULL,
     last_kafka_topic VARCHAR(128) NULL,
     last_kafka_partition INT NULL,
     last_kafka_offset BIGINT NULL,
