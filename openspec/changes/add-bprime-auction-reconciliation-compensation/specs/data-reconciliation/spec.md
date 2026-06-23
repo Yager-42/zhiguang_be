@@ -2,13 +2,19 @@
 
 ### Requirement: Reconciliation SHALL cover B' position auction command and decision chain
 
-The system SHALL repair B' inconsistencies where Kafka decision payloads or MySQL decision facts need replay into MySQL projection facts, where closed windows are missing slot allocation, where Redis hot state drifts from durable facts, and where wallet effects are missing or inconsistent. RocketMQ command records, Redis hot state, Kafka/MySQL decisions, projection checkpoints, wallet ledger facts, and slot allocations SHALL be audited as one B' promotion auction chain.
+The system SHALL repair B' inconsistencies where Kafka decision payloads need replay into MySQL projection facts, where closed windows are missing slot allocation, where Redis hot state drifts from durable facts, and where wallet effects are missing or inconsistent. RocketMQ command records, Redis hot state, Kafka decisions, projection checkpoints, wallet ledger facts, and slot allocations SHALL be audited as one B' promotion auction chain. MySQL per-decision facts SHALL NOT be used because `promotion_auction_decision` is removed by the promotion realtime change.
 
 #### Scenario: Decision is logged but projection is missing
 - **WHEN** Kafka decision log contains an accepted position auction decision
 - **AND** MySQL projection for that decision is missing
 - **THEN** reconciliation schedules or executes projection replay
 - **AND** wallet and bid facts remain idempotent
+
+#### Scenario: Decision log has expired
+- **WHEN** MySQL projection is missing
+- **AND** required Kafka promotion decision facts are older than the 7-day retention window
+- **THEN** reconciliation marks the task failed or dead for operator-visible follow-up
+- **AND** does not use a MySQL per-decision backup table as an alternate replay source
 
 #### Scenario: Slot allocation is missing after closed window
 - **WHEN** a position auction window has a logged close decision
@@ -36,6 +42,6 @@ The system SHALL keep first-phase B' reconciliation compatible with existing pro
 - **AND** wallet ledger repair is attempted only from logged B' wallet effects or settled projection facts
 
 #### Scenario: Non-B' target is encountered
-- **WHEN** a B' deep compensation task receives a target type outside promotion auction decision, window, wallet effect, or Redis hot state
+- **WHEN** a B' deep compensation task receives a target type outside Kafka promotion decision id, promotion auction window, wallet effect, or Redis hot state
 - **THEN** system rejects the task
 - **AND** does not run generic full-platform repair

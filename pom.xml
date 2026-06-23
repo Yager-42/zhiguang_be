@@ -85,6 +85,12 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- Spring WebSocket：推广竞价实时 STOMP 推送 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
         <!-- Spring AI OpenAI Starter：接入 OpenAI 模型调用能力 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>

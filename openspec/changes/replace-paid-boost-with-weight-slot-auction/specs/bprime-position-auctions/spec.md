@@ -4,9 +4,13 @@
 
 The system SHALL append accepted, rejected, and terminal promotion auction decisions to a Kafka decision log before treating the decision as user-visible confirmation. Kafka decision log SHALL be the confirmation boundary for realtime fanout and final MySQL projection. MySQL SHALL NOT be the high-frequency store for every bid decision payload.
 
+All promotion auction decision types SHALL share topic `zhiguang.promotion.auction.decisions.v2` and Kafka key `auctionWindowId`. The common envelope SHALL follow the bytedance B' shape: `schemaVersion`, outer `eventType=AUCTION_DECISION`, nested `decision`, `decisionHash`, and `producedAt`. Business type SHALL be carried by nested `decision.type`, not by topic, partition, or outer event type. The system SHALL NOT move `WINDOW_CLOSED` to a separate topic or partition scheme.
+
 #### Scenario: Decision log append succeeds
 - **WHEN** command processing produces an accepted decision
 - **THEN** system appends the decision to the configured Kafka decision topic
+- **AND** uses Kafka key `auctionWindowId`
+- **AND** includes a consumer-verifiable `decisionHash`
 - **AND** downstream projection can replay the decision from Kafka
 - **AND** downstream realtime fanout can publish the decision from Kafka
 - **AND** user-visible confirmation references the logged decision
@@ -57,11 +61,20 @@ The system SHALL run final MySQL projection and realtime fanout as separate cons
 ### Requirement: Closed position auction SHALL project only final results to MySQL
 The system SHALL project final promotion auction results to MySQL when a `WINDOW_CLOSED` decision is consumed. Final projection SHALL include winners, slot allocation, settlement/wallet effects, final window status, and projection checkpoint. Rejected bid decisions and transient ranking updates SHALL remain in Kafka and Redis hot state, not per-decision MySQL rows.
 
+#### Scenario: Accepted decision is projected
+- **WHEN** a `BID_ACCEPTED` decision is consumed by projection
+- **THEN** system upserts the lightweight `promotion_bid` fact for campaign, auction window, bidder, bid amount, command id, decision id, and projection source
+- **AND** applies the wallet hold state needed by the accepted bid
+- **AND** advances projection checkpoint
+- **AND** does not create slot allocation or feed/search-visible commercial placement before window close
+
 #### Scenario: Window close decision is projected
 - **WHEN** a `WINDOW_CLOSED` decision is consumed by projection
+- **AND** the decision payload contains final ranking, winners, clearing prices, wallet effects, allocation window, and final window status
 - **THEN** system writes final slot allocation for the winning campaigns
 - **AND** writes final settlement or wallet effects needed by the business
 - **AND** records final window status and projection checkpoint
+- **AND** does not read Redis hot ranking as final settlement authority
 - **AND** does not require every prior accepted or rejected bid decision to already exist as a MySQL row
 
 #### Scenario: Rejected decision is consumed

@@ -34,6 +34,13 @@
         WHERE auction_window_id = #{auctionWindowId}
     </select>
 
+    <select id="listByAuctionWindowId" resultMap="PromotionSlotAllocationResultMap">
+        SELECT *
+        FROM promotion_slot_allocation
+        WHERE auction_window_id = #{auctionWindowId}
+        ORDER BY slot_index ASC
+    </select>
+
     <select id="listActive" resultMap="PromotionSlotAllocationResultMap">
         SELECT *
         FROM promotion_slot_allocation

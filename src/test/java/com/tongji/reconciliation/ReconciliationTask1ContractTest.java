@@ -33,9 +33,17 @@ class ReconciliationTask1ContractTest {
                 "cassandra_text",
                 "comment_count",
                 "follow_graph",
-                "follow_inbox"
+                "follow_inbox",
+                "promotion_decision_projection",
+                "promotion_allocation_rebuild"
         );
-        assertThat(ReconciliationTargetType.ALL).containsExactly("post", "comment", "user");
+        assertThat(ReconciliationTargetType.ALL).containsExactly(
+                "post",
+                "comment",
+                "user",
+                "promotion_decision",
+                "promotion_auction_window"
+        );
         assertThat(ReconciliationScanType.ALL).containsExactly(
                 "post_es",
                 "post_rag",
