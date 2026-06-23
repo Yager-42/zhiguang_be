@@ -112,6 +112,7 @@ promotion:
     command-consumer-group: ${PROMOTION_BPRIME_COMMAND_CONSUMER_GROUP:zhiguang-promotion-command-consumer}
     decision-topic: ${PROMOTION_BPRIME_DECISION_TOPIC:zhiguang.promotion.auction.decisions.v2}
     projection-consumer-group: ${PROMOTION_BPRIME_PROJECTION_CONSUMER_GROUP:zhiguang-promotion-projection-consumer}
+    fanout-consumer-group: ${PROMOTION_BPRIME_FANOUT_CONSUMER_GROUP:zhiguang-promotion-fanout-consumer}
     kafka-send-timeout-ms: ${PROMOTION_BPRIME_KAFKA_SEND_TIMEOUT_MS:10000}
     hot-state-ttl-seconds: ${PROMOTION_BPRIME_HOT_STATE_TTL_SECONDS:86400}
     feed-slot-count: ${PROMOTION_FEED_TOP_SLOT_COUNT:1}

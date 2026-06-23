@@ -1,0 +1,35 @@
+package com.tongji.promotion.bprime.kafka;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.promotion.bprime.model.PromotionAuctionDecisionLogEnvelope;
+import com.tongji.promotion.bprime.service.PromotionDecisionFanoutService;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.stereotype.Component;
+
+@Component
+@ConditionalOnProperty(name = "promotion.bprime.enabled", havingValue = "true")
+public class PromotionDecisionFanoutKafkaListener {
+
+    private final ObjectMapper objectMapper;
+    private final PromotionDecisionKafkaSupport support;
+    private final PromotionDecisionFanoutService fanoutService;
+
+    public PromotionDecisionFanoutKafkaListener(ObjectMapper objectMapper,
+                                                PromotionDecisionKafkaSupport support,
+                                                PromotionDecisionFanoutService fanoutService) {
+        this.objectMapper = objectMapper;
+        this.support = support;
+        this.fanoutService = fanoutService;
+    }
+
+    @KafkaListener(topics = "${promotion.bprime.decision-topic:zhiguang.promotion.auction.decisions.v2}",
+            groupId = "${promotion.bprime.fanout-consumer-group:zhiguang-promotion-fanout-consumer}")
+    public void onMessage(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
+        fanoutService.publishDecision(support.requireDecision(record.key(),
+                objectMapper.readValue(record.value(), PromotionAuctionDecisionLogEnvelope.class)));
+        ack.acknowledge();
+    }
+}

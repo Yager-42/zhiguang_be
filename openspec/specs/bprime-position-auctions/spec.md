@@ -72,7 +72,7 @@ The system SHALL expose current position auction snapshot from Redis hot state a
 
 ### Requirement: Paid boost SHALL be out of scope for B' position auctions
 
-The system SHALL NOT implement paid boost, paid ranking weight, or organic score plus boost effect as part of B' position auctions. Commercial promotion distribution SHALL use fixed position allocation.
+The system SHALL NOT implement paid boost, paid ranking weight, or organic score plus boost effect as part of B' position auctions. Commercial promotion distribution SHALL use fixed advertising-slot allocation.
 
 #### Scenario: Feed commercial item is selected
 - **WHEN** feed returns commercial promotion content

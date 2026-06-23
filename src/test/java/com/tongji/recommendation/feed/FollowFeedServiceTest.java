@@ -272,7 +272,7 @@ class FollowFeedServiceTest {
 
     @Test
     void serviceSupportsLimitGreaterThanTwenty() {
-        // boost 受限选择会请求大于 20 的 raw timeline 窗口；Cassandra 绑定值应跟随请求 limit，而非写死 20
+        // 混排补位会请求大于 20 的 raw timeline 窗口；Cassandra 绑定值应跟随请求 limit，而非写死 20
         when(relationService.listFollowedLargeAuthorRowsForFeed(42L, null, null, 100)).thenReturn(List.of());
         when(cqlSession.execute(any(BoundStatement.class))).thenReturn(inboxResultSet);
         when(inboxResultSet.all()).thenReturn(List.of());

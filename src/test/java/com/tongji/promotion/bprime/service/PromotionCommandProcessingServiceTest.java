@@ -93,7 +93,7 @@ class PromotionCommandProcessingServiceTest {
     }
 
     @Test
-    void kafkaAppendFailureAfterHoldReleasesHoldAndMarksLogFailed() {
+    void kafkaAppendFailureAfterHoldReleasesHoldRollsBackRedisDecisionAndMarksLogFailed() {
         PromotionAuctionCommand command = command();
         PromotionAuctionDecision decision = acceptedDecision();
         when(redisDecisionAdapter.decide(eq(command), eq(100L), eq("OPEN"), any())).thenReturn(decision);
@@ -103,7 +103,9 @@ class PromotionCommandProcessingServiceTest {
 
         verify(walletService).releaseHold(42L, 120L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE,
                 WalletBusinessType.PROMOTION, "promotion-bprime:cmd-1:hold-release-after-log-fail");
+        verify(redisDecisionAdapter).rollback(decision);
         verify(commandMapper).updateStatus("cmd-1", "LOG_FAILED");
+        verify(redisDecisionAdapter, never()).commit(any());
     }
 
     @Test
@@ -145,11 +147,11 @@ class PromotionCommandProcessingServiceTest {
     }
 
     @Test
-    void logFailedCommandIsTerminalAndDoesNotReplayReleasedHoldDecision() {
+    void decidedCommandIsTerminalAndDoesNotReplayDecision() {
         PromotionAuctionCommand command = command();
         when(commandMapper.findByCommandId("cmd-1")).thenReturn(PromotionAuctionCommandRecord.builder()
                 .commandId("cmd-1")
-                .status("LOG_FAILED")
+                .status("DECIDED")
                 .build());
 
         service.process(command);

@@ -13,7 +13,8 @@ public final class PromotionAuctionRedisKeys {
                 prefix + ":state",
                 prefix + ":commands",
                 prefix + ":ranking",
-                prefix + ":campaign:" + campaignId
+                prefix + ":campaign:" + campaignId,
+                prefix + ":decision_version"
         );
     }
 }

@@ -18,6 +18,8 @@ public interface PromotionSlotAllocationMapper {
 
     int countByAuctionWindowId(@Param("auctionWindowId") long auctionWindowId);
 
+    List<PromotionSlotAllocation> listByAuctionWindowId(@Param("auctionWindowId") long auctionWindowId);
+
     /** 当前时间覆盖 [allocation_start_at, allocation_end_at) 的有效占位，按位号升序。 */
     List<PromotionSlotAllocation> listActive(@Param("resourceType") PromotionResourceType resourceType,
                                              @Param("now") Instant now);

@@ -15,6 +15,7 @@ public class PromotionBPrimeProperties {
     private String commandConsumerGroup = "zhiguang-promotion-command-consumer";
     private String decisionTopic = "zhiguang.promotion.auction.decisions.v2";
     private String projectionConsumerGroup = "zhiguang-promotion-projection-consumer";
+    private String fanoutConsumerGroup = "zhiguang-promotion-fanout-consumer";
     private long kafkaSendTimeoutMs = 10000L;
     private long hotStateTtlSeconds = 86400L;
     private int feedSlotCount = 1;
@@ -28,6 +29,7 @@ public class PromotionBPrimeProperties {
         requireText(commandConsumerGroup, "promotion.bprime.command-consumer-group");
         requireText(decisionTopic, "promotion.bprime.decision-topic");
         requireText(projectionConsumerGroup, "promotion.bprime.projection-consumer-group");
+        requireText(fanoutConsumerGroup, "promotion.bprime.fanout-consumer-group");
         if (kafkaSendTimeoutMs <= 0 || hotStateTtlSeconds <= 0
                 || feedSlotCount <= 0 || searchSlotCount <= 0
                 || feedReservePrice <= 0 || searchReservePrice <= 0) {

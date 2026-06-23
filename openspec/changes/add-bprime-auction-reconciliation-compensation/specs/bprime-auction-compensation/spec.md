@@ -1,16 +1,16 @@
 ## ADDED Requirements
 
 ### Requirement: B' compensation SHALL audit auction chain consistency
-The system SHALL audit B' promotion auction chain consistency across command records, Kafka/MySQL decision facts, projection checkpoints, wallet ledger facts, Redis hot state, and slot allocations for one auction window.
+The system SHALL audit B' promotion auction chain consistency across command records, Kafka decision facts, projection checkpoints, wallet ledger facts, Redis hot state, and slot allocations for one auction window.
 
 #### Scenario: Window chain audit finds missing projection
-- **WHEN** an auction window has accepted Kafka or MySQL decision facts
+- **WHEN** an auction window has accepted Kafka decision facts
 - **AND** projection checkpoint or projected bid facts are missing
 - **THEN** system schedules promotion decision projection repair tasks
 - **AND** each repair task remains idempotent by decision id
 
 #### Scenario: Window chain audit finds missing allocation
-- **WHEN** an auction window has close or settled decision facts
+- **WHEN** an auction window has close decision facts in Kafka or settled projection facts in MySQL
 - **AND** no slot allocation exists for winning positions
 - **THEN** system schedules promotion allocation rebuild repair
 - **AND** allocation rebuild uses durable projected bid facts
@@ -29,7 +29,7 @@ The system SHALL detect drift between Redis promotion auction hot state and dura
 - **THEN** system can rebuild Redis replay state from durable facts
 
 ### Requirement: B' compensation SHALL rebuild Redis hot state from durable facts
-The system SHALL rebuild B' promotion auction Redis hot state from Kafka/MySQL decision facts and projection facts. Rebuild SHALL restore window state, campaign bid state, command replay state, and ranking state needed by snapshot and active auction display.
+The system SHALL rebuild B' promotion auction Redis hot state from Kafka decision facts and MySQL projection facts. Rebuild SHALL restore window state, campaign bid state, command replay state, and ranking state needed by snapshot and active auction display.
 
 #### Scenario: Active window hot ranking is rebuilt
 - **WHEN** an active auction window has durable accepted decision facts
@@ -41,6 +41,12 @@ The system SHALL rebuild B' promotion auction Redis hot state from Kafka/MySQL d
 - **WHEN** durable facts have a decision version gap
 - **THEN** system does not rebuild Redis from partial facts
 - **AND** records reconciliation error for operator-visible follow-up
+
+#### Scenario: Rebuild source has expired
+- **WHEN** Redis hot state rebuild requires Kafka promotion decisions older than the 7-day retention window
+- **AND** no final MySQL projection facts can recover the requested state
+- **THEN** system marks the rebuild task failed or dead
+- **AND** does not recreate MySQL per-decision storage to hide the expired replay gap
 
 ### Requirement: B' compensation SHALL repair wallet effects idempotently
 The system SHALL verify and repair B' wallet effects for accepted, rejected, losing, and winning promotion auction decisions. Repairs SHALL use wallet businessRef idempotency and SHALL reject mismatched existing ledger facts.

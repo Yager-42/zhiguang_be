@@ -7,5 +7,11 @@ public record PromotionAuctionSnapshot(
         long auctionWindowId,
         String status,
         List<PromotionRankingItem> ranking,
-        Instant serverTime
-) {}
+        Instant serverTime,
+        long decisionVersion
+) {
+    public PromotionAuctionSnapshot(long auctionWindowId, String status, List<PromotionRankingItem> ranking,
+                                    Instant serverTime) {
+        this(auctionWindowId, status, ranking, serverTime, 0L);
+    }
+}

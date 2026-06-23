@@ -1,8 +1,8 @@
 ## Context
 
-zhiguang 现有 `data-reconciliation` 已有任务表、checkpoint、error log、scheduler、scan service 和多个 `Reconciler`。B' promotion 已有两类最小修复：`PROMOTION_DECISION_PROJECTION` 重放 decision projection，`PROMOTION_ALLOCATION_REBUILD` 重建 slot allocation。
+zhiguang 现有 `data-reconciliation` 已有任务表、checkpoint、error log、scheduler、scan service 和多个 `Reconciler`。B' promotion 已有两类最小修复：Kafka decision replay 驱动 projection，`PROMOTION_ALLOCATION_REBUILD` 重建 slot allocation。
 
-缺口在更深层：Redis hot ranking / replay state 可能漂移，wallet HOLD/CAPTURE/RELEASE 可能缺失或参数冲突，promotion auction window 可能在 command、decision、projection、wallet、allocation 之间断链。这个 change 只补 B' promotion auction 对账补偿，不做全平台对账大改。
+缺口在更深层：Redis hot ranking / replay state 可能漂移，wallet HOLD/CAPTURE/RELEASE 可能缺失或参数冲突，promotion auction window 可能在 command、Kafka decision log、projection、wallet、allocation 之间断链。这个 change 只补 B' promotion auction 对账补偿，不做全平台对账大改。
 
 ## Goals / Non-Goals
 
@@ -27,13 +27,13 @@ zhiguang 现有 `data-reconciliation` 已有任务表、checkpoint、error log�
 
 补偿权威顺序固定：
 
-1. Kafka decision log 或 MySQL `promotion_auction_decision`
+1. Kafka decision log
 2. MySQL projection checkpoint / `promotion_bid` / `promotion_slot_allocation`
 3. Wallet ledger/account
 4. Redis hot state
 5. WebSocket delivery
 
-Redis 和 WebSocket 永远不是事实源。Redis 可重建，WebSocket 可丢。
+`promotion_auction_decision` 不再存在，也不是补偿事实源。Redis 和 WebSocket 永远不是事实源。Redis 可重建，WebSocket 可丢。
 
 替代方案：Redis 当前排名优先。拒绝。Redis 是热状态，拿它反改 ledger 或 decision 是数据腐败。
 
@@ -54,7 +54,7 @@ Redis 和 WebSocket 永远不是事实源。Redis 可重建，WebSocket 可丢�
 ### 3. Chain audit 只负责发现和派发
 
 `PromotionAuctionChainAuditReconciler` 不直接做所有修复。它读取一个 auctionWindowId，检查：
-- accepted/closed decision 是否有 projection
+- Kafka accepted/closed decision 是否有 projection
 - closed window 是否有 allocation
 - decision walletEffects 是否有 ledger
 - Redis ranking/campaign/replay 是否和 durable facts 对得上
@@ -75,7 +75,7 @@ Redis rebuild 只在 durable facts 没有明显 gap 时执行。重建内容：
 - command replay / decision replay
 - ranking zset/hash
 
-如果 decision version 或 close facts 不完整，任务进入 failed/dead，不从半截事实拼 Redis。
+Kafka decision log replay window 固定为 7 天。如果 decision version 或 close facts 不完整，或所需 Kafka decision 已超过 7 天保留窗口且没有 MySQL final projection facts 可用，任务进入 failed/dead，不从半截事实拼 Redis，也不新建 MySQL per-decision 备份表。
 
 ### 6. Scan 策略分两层
 
@@ -86,7 +86,7 @@ Redis rebuild 只在 durable facts 没有明显 gap 时执行。重建内容：
 ## Risks / Trade-offs
 
 - [重复修钱包导致多扣] -> 只通过 WalletService businessRef 幂等入口修复，测试覆盖重复 task。
-- [Redis rebuild 用了不完整事实] -> rebuild 前检查 decision/projection 连续性；发现 gap 就 dead task。
+- [Redis rebuild 用了不完整事实] -> rebuild 前检查 Kafka decision/projection 连续性与 7 天 Kafka retention；发现 gap 就 dead task。
 - [全链路 audit 太慢] -> 只扫最近窗口和异常窗口，使用 checkpoint 分批。
 - [任务 payload 复杂] -> payload 使用 JSON，包含 decisionId、businessRef、effectType、expected ledger identity；dedupeScope 包含 payload digest。
 - [与当前 WebSocket change 重叠] -> 本 change 不修 fanout；只保证 snapshot/rebuild 后客户端可恢复展示。
