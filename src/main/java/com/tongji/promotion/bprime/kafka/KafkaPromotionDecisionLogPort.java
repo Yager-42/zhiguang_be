@@ -3,9 +3,12 @@ package com.tongji.promotion.bprime.kafka;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
+import com.tongji.promotion.bprime.model.PromotionAuctionDecisionLogEnvelope;
+import com.tongji.promotion.bprime.model.PromotionDecisionHasher;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 
 @Component
@@ -26,7 +29,9 @@ public class KafkaPromotionDecisionLogPort implements PromotionDecisionLogPort {
     @Override
     public void append(PromotionAuctionDecision decision) {
         try {
-            String payload = objectMapper.writeValueAsString(decision);
+            PromotionAuctionDecisionLogEnvelope envelope = PromotionAuctionDecisionLogEnvelope.auctionDecision(
+                    decision, PromotionDecisionHasher.hash(decision), Instant.now());
+            String payload = objectMapper.writeValueAsString(envelope);
             kafkaTemplate.send(properties.getDecisionTopic(), String.valueOf(decision.auctionWindowId()), payload)
                     .get(properties.getKafkaSendTimeoutMs(), TimeUnit.MILLISECONDS);
         } catch (Exception e) {

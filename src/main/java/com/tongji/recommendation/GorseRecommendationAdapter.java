@@ -57,7 +57,7 @@ public class GorseRecommendationAdapter implements RecommendationEngine {
 
     /**
      * 给候选按原始顺序赋予单调递减的 organic 基线分（首个 = count，依次 -1）。
-     * <p>递减而非平坦：保证本地 boost 排序叠加 boostEffect 后，未被 boost 的候选仍按来源相关度顺序排列，
+     * <p>递减而非平坦：保证自然候选按来源相关度顺序排列，
      * 不会因同分被 contentId 重排破坏 gorse/hot 的原始召回顺序。</p>
      */
     private List<RecommendationCandidate> scoreByPosition(List<Long> ids, int count, String source) {

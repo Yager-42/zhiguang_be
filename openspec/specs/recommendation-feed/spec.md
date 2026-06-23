@@ -103,7 +103,7 @@ The follow feed SHALL paginate using a waterfall cursor of `(publish_ts, content
 
 ### Requirement: Home feed SHALL mix multiple sources
 
-The home feed SHALL insert active promoted feed slots from B' fixed position auction allocations before organic mixed feed results, then combine follow feed, recommendation candidates, and hot fallback content for the remaining organic positions. Home feed SHALL NOT apply paid boost weighting or `organic score + boost effect`.
+The home feed SHALL insert active promoted feed slots from B' fixed advertising-slot auction allocations before organic mixed feed results, then combine follow feed, recommendation candidates, and hot fallback content for the remaining organic positions. Home feed SHALL NOT apply paid boost weighting, weight slot scoring, or `organic score + boost effect`.
 
 #### Scenario: Build home feed with promoted slot
 - **WHEN** a user requests home feed during an active feed slot allocation window
