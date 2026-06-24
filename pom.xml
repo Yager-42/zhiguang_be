@@ -20,6 +20,7 @@
     <properties>
         <java.version>21</java.version>
         <lombok.version>1.18.46</lombok.version>
+        <elasticsearch.version>8.12.2</elasticsearch.version>
     </properties>
 
     <repositories>
@@ -69,14 +70,14 @@
         <dependency>
             <groupId>co.elastic.clients</groupId>
             <artifactId>elasticsearch-java</artifactId>
-            <version>9.2.1</version>
+            <version>${elasticsearch.version}</version>
         </dependency>
 
         <!-- Elasticsearch 低层 REST 客户端（底层通信与兼容性组件） -->
         <dependency>
             <groupId>org.elasticsearch.client</groupId>
             <artifactId>elasticsearch-rest-client</artifactId>
-            <version>9.2.1</version>
+            <version>${elasticsearch.version}</version>
         </dependency>
 
         <!-- Spring Web：提供 MVC、REST Controller、RestTemplate 等 Web 能力 -->
