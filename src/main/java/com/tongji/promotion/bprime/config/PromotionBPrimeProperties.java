@@ -18,6 +18,7 @@ public class PromotionBPrimeProperties {
     private String fanoutConsumerGroup = "zhiguang-promotion-fanout-consumer";
     private long kafkaSendTimeoutMs = 10000L;
     private long hotStateTtlSeconds = 86400L;
+    private long settledCompensationLookbackSeconds = 604800L;
     private int feedSlotCount = 1;
     private int searchSlotCount = 1;
     private long feedReservePrice = 1L;
@@ -30,7 +31,7 @@ public class PromotionBPrimeProperties {
         requireText(decisionTopic, "promotion.bprime.decision-topic");
         requireText(projectionConsumerGroup, "promotion.bprime.projection-consumer-group");
         requireText(fanoutConsumerGroup, "promotion.bprime.fanout-consumer-group");
-        if (kafkaSendTimeoutMs <= 0 || hotStateTtlSeconds <= 0
+        if (kafkaSendTimeoutMs <= 0 || hotStateTtlSeconds <= 0 || settledCompensationLookbackSeconds <= 0
                 || feedSlotCount <= 0 || searchSlotCount <= 0
                 || feedReservePrice <= 0 || searchReservePrice <= 0) {
             throw new IllegalStateException("promotion.bprime numeric config must be positive");

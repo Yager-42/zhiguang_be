@@ -72,6 +72,11 @@ public class ReconciliationScheduler {
         reconciliationExecutor.execute(scanService::scanUserFollowGraphBatch);
     }
 
+    @Scheduled(fixedDelay = 300000L, initialDelay = 150000L)
+    public void scanPromotionSettledWindow() {
+        reconciliationExecutor.execute(scanService::scanPromotionSettledWindowBatch);
+    }
+
     @Scheduled(initialDelay = 10000L, fixedDelay = Long.MAX_VALUE)
     public void recoverStuckPublishingOnStartup() {
         reconciliationExecutor.execute(scanService::recoverStuckPublishingPosts);

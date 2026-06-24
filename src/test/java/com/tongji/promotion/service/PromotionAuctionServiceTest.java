@@ -12,6 +12,7 @@ import com.tongji.promotion.model.PromotionBidStatus;
 import com.tongji.promotion.model.PromotionResourceType;
 import com.tongji.wallet.model.WalletBusinessType;
 import com.tongji.wallet.model.WalletLedgerReason;
+import com.tongji.wallet.config.WalletProperties;
 import com.tongji.wallet.service.WalletService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,7 +53,14 @@ class PromotionAuctionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PromotionAuctionService(windowMapper, bidMapper, allocationMapper, walletService, idService);
+        service = new PromotionAuctionService(
+                windowMapper,
+                bidMapper,
+                allocationMapper,
+                walletService,
+                idService,
+                new PromotionAuctionSettlementPlanner(new WalletProperties())
+        );
     }
 
     @Test

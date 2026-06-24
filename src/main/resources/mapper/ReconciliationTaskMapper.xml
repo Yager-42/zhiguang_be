@@ -142,6 +142,15 @@
         )
     </select>
 
+    <select id="existsByDedupeScopeAndStatus" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1
+            FROM reconciliation_task
+            WHERE dedupe_scope = #{dedupeScope}
+              AND status = #{status}
+        )
+    </select>
+
     <select id="query" parameterType="com.tongji.reconciliation.model.ReconciliationTaskQuery" resultMap="ReconciliationTaskResultMap">
         SELECT *
         FROM reconciliation_task

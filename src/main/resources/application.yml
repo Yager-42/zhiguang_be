@@ -115,6 +115,7 @@ promotion:
     fanout-consumer-group: ${PROMOTION_BPRIME_FANOUT_CONSUMER_GROUP:zhiguang-promotion-fanout-consumer}
     kafka-send-timeout-ms: ${PROMOTION_BPRIME_KAFKA_SEND_TIMEOUT_MS:10000}
     hot-state-ttl-seconds: ${PROMOTION_BPRIME_HOT_STATE_TTL_SECONDS:86400}
+    settled-compensation-lookback-seconds: ${PROMOTION_BPRIME_SETTLED_COMPENSATION_LOOKBACK_SECONDS:604800}
     feed-slot-count: ${PROMOTION_FEED_TOP_SLOT_COUNT:1}
     search-slot-count: ${PROMOTION_SEARCH_TOP_SLOT_COUNT:1}
     feed-reserve-price: ${PROMOTION_FEED_RESERVE_PRICE:1}

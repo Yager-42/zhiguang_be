@@ -5,6 +5,10 @@ import com.tongji.knowpost.manager.PublishAttemptService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPostDetailRow;
 import com.tongji.llm.rag.RagIndexService;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
+import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
+import com.tongji.promotion.model.PromotionAuctionWindow;
+import com.tongji.promotion.model.PromotionAuctionWindowStatus;
 import com.tongji.reconciliation.executor.FollowInboxReconciler.FollowInboxPayload;
 import com.tongji.reconciliation.mapper.ReconciliationCheckpointMapper;
 import com.tongji.reconciliation.model.ReconciliationCheckpoint;
@@ -23,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.function.IntSupplier;
@@ -46,6 +51,9 @@ public class ReconciliationScanService {
     private final RagIndexService ragIndexService;
     private final PostTextRepository postTextRepository;
     private final CommentTextRepository commentTextRepository;
+    private final PromotionAuctionWindowMapper promotionAuctionWindowMapper;
+    private final PromotionAuctionCompensationService promotionAuctionCompensationService;
+    private final PromotionBPrimeProperties promotionBPrimeProperties;
     private final IntSupplier stuckPublishingRecoverer;
     private final Clock clock;
 
@@ -63,6 +71,9 @@ public class ReconciliationScanService {
                                      RagIndexService ragIndexService,
                                      PostTextRepository postTextRepository,
                                      CommentTextRepository commentTextRepository,
+                                     PromotionAuctionWindowMapper promotionAuctionWindowMapper,
+                                     PromotionAuctionCompensationService promotionAuctionCompensationService,
+                                     PromotionBPrimeProperties promotionBPrimeProperties,
                                      PublishAttemptService publishAttemptService) {
         this(
                 checkpointMapper,
@@ -78,6 +89,9 @@ public class ReconciliationScanService {
                 ragIndexService,
                 postTextRepository,
                 commentTextRepository,
+                promotionAuctionWindowMapper,
+                promotionAuctionCompensationService,
+                promotionBPrimeProperties,
                 publishAttemptService::recoverStuckPublishingAttempts,
                 Clock.systemDefaultZone()
         );
@@ -96,6 +110,9 @@ public class ReconciliationScanService {
                               RagIndexService ragIndexService,
                               PostTextRepository postTextRepository,
                               CommentTextRepository commentTextRepository,
+                              PromotionAuctionWindowMapper promotionAuctionWindowMapper,
+                              PromotionAuctionCompensationService promotionAuctionCompensationService,
+                              PromotionBPrimeProperties promotionBPrimeProperties,
                               IntSupplier stuckPublishingRecoverer,
                               Clock clock) {
         this.checkpointMapper = checkpointMapper;
@@ -111,6 +128,9 @@ public class ReconciliationScanService {
         this.ragIndexService = ragIndexService;
         this.postTextRepository = postTextRepository;
         this.commentTextRepository = commentTextRepository;
+        this.promotionAuctionWindowMapper = promotionAuctionWindowMapper;
+        this.promotionAuctionCompensationService = promotionAuctionCompensationService;
+        this.promotionBPrimeProperties = promotionBPrimeProperties;
         this.stuckPublishingRecoverer = stuckPublishingRecoverer;
         this.clock = clock;
     }
@@ -269,6 +289,38 @@ public class ReconciliationScanService {
         );
     }
 
+    public void scanPromotionSettledWindowBatch() {
+        ReconciliationCheckpoint checkpoint = currentCheckpointRow(ReconciliationScanType.PROMOTION_SETTLED_WINDOW);
+        Instant lookbackStart = Instant.now(clock)
+                .minus(java.time.Duration.ofSeconds(promotionBPrimeProperties.getSettledCompensationLookbackSeconds()));
+        List<PromotionAuctionWindow> windows = promotionAuctionWindowMapper.listSettledWindowsCursor(
+                checkpoint.getLastScannedAt(),
+                checkpoint.getLastScannedId() == null ? 0L : checkpoint.getLastScannedId(),
+                lookbackStart,
+                BATCH_SIZE
+        );
+        if (windows.isEmpty()) {
+            return;
+        }
+        for (PromotionAuctionWindow window : windows) {
+            promotionAuctionCompensationService.scanWindow(window, reconciliationService);
+        }
+        PromotionAuctionWindow last = windows.getLast();
+        checkpointMapper.updateTimeCheckpoint(
+                ReconciliationScanType.PROMOTION_SETTLED_WINDOW,
+                last.getSettledAt(),
+                last.getId()
+        );
+    }
+
+    public List<com.tongji.reconciliation.model.ReconciliationTask> rerunPromotionAuctionWindow(long windowId) {
+        PromotionAuctionWindow window = promotionAuctionWindowMapper.findById(windowId);
+        if (window == null || window.getStatus() != PromotionAuctionWindowStatus.SETTLED) {
+            return List.of();
+        }
+        return promotionAuctionCompensationService.reconcileWindow(window, reconciliationService);
+    }
+
     private void scanIds(String scanType,
                          java.util.function.Function<Long, List<Long>> loader,
                          java.util.function.Consumer<Long> taskCreator) {
@@ -285,16 +337,25 @@ public class ReconciliationScanService {
     }
 
     private long currentCheckpoint(String scanType) {
+        ReconciliationCheckpoint checkpoint = currentCheckpointRow(scanType);
+        return checkpoint.getLastScannedId() == null ? 0L : checkpoint.getLastScannedId();
+    }
+
+    private ReconciliationCheckpoint currentCheckpointRow(String scanType) {
         ReconciliationCheckpoint checkpoint = checkpointMapper.findByScanType(scanType);
         if (checkpoint != null) {
-            return checkpoint.getLastScannedId() == null ? 0L : checkpoint.getLastScannedId();
+            return checkpoint;
         }
         checkpointMapper.upsert(ReconciliationCheckpoint.builder()
                 .scanType(scanType)
                 .lastScannedId(0L)
                 .updatedAt(LocalDateTime.now(clock))
                 .build());
-        return 0L;
+        return ReconciliationCheckpoint.builder()
+                .scanType(scanType)
+                .lastScannedId(0L)
+                .updatedAt(LocalDateTime.now(clock))
+                .build();
     }
 
     private boolean postEsMissingOrDrifted(long postId) {

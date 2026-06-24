@@ -4,6 +4,9 @@ import com.tongji.comment.mapper.CommentMapper;
 import com.tongji.counter.service.CounterService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.llm.rag.RagIndexService;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
+import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
+import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.reconciliation.mapper.ReconciliationCheckpointMapper;
 import com.tongji.reconciliation.model.ReconciliationCheckpoint;
 import com.tongji.reconciliation.model.ReconciliationScanType;
@@ -50,6 +53,9 @@ class ReconciliationScanServiceTest {
     private GorseProperties gorseProperties;
     private PostTextRepository postTextRepository;
     private CommentTextRepository commentTextRepository;
+    private PromotionAuctionWindowMapper promotionAuctionWindowMapper;
+    private PromotionAuctionCompensationService promotionAuctionCompensationService;
+    private PromotionBPrimeProperties promotionBPrimeProperties;
     private RecordingSearchIndexService searchIndexService;
     private RecordingRagIndexService ragIndexService;
 
@@ -71,6 +77,9 @@ class ReconciliationScanServiceTest {
         gorseProperties.setEnabled(true);
         postTextRepository = org.mockito.Mockito.mock(PostTextRepository.class);
         commentTextRepository = org.mockito.Mockito.mock(CommentTextRepository.class);
+        promotionAuctionWindowMapper = org.mockito.Mockito.mock(PromotionAuctionWindowMapper.class);
+        promotionAuctionCompensationService = org.mockito.Mockito.mock(PromotionAuctionCompensationService.class);
+        promotionBPrimeProperties = new PromotionBPrimeProperties();
         searchIndexService = new RecordingSearchIndexService();
         ragIndexService = new RecordingRagIndexService();
         recovered = new AtomicInteger();
@@ -88,6 +97,9 @@ class ReconciliationScanServiceTest {
                 ragIndexService,
                 postTextRepository,
                 commentTextRepository,
+                promotionAuctionWindowMapper,
+                promotionAuctionCompensationService,
+                promotionBPrimeProperties,
                 () -> {
                     recovered.incrementAndGet();
                     return 7;
@@ -432,6 +444,67 @@ class ReconciliationScanServiceTest {
 
         assertThat(recoveredCount).isEqualTo(7);
         assertThat(recovered.get()).isEqualTo(1);
+    }
+
+    @Test
+    void scanPromotionSettledWindowBatchKeepsCheckpointWhenNoNewWindows() {
+        Instant checkpointAt = NOW.minusSeconds(60);
+        when(checkpointMapper.findByScanType(ReconciliationScanType.PROMOTION_SETTLED_WINDOW))
+                .thenReturn(ReconciliationCheckpoint.builder()
+                        .scanType(ReconciliationScanType.PROMOTION_SETTLED_WINDOW)
+                        .lastScannedAt(checkpointAt)
+                        .lastScannedId(9L)
+                        .build());
+        when(promotionAuctionWindowMapper.listSettledWindowsCursor(
+                checkpointAt,
+                9L,
+                NOW.minusSeconds(promotionBPrimeProperties.getSettledCompensationLookbackSeconds()),
+                1000
+        )).thenReturn(List.of());
+
+        service.scanPromotionSettledWindowBatch();
+
+        verifyNoInteractions(promotionAuctionCompensationService);
+        verify(checkpointMapper, never()).updateTimeCheckpoint(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong()
+        );
+    }
+
+    @Test
+    void scanPromotionSettledWindowBatchScansSettledWindowsAndAdvancesTimeCursor() {
+        Instant checkpointAt = NOW.minusSeconds(120);
+        PromotionAuctionWindow first = PromotionAuctionWindow.builder()
+                .id(10L)
+                .settledAt(NOW.minusSeconds(90))
+                .build();
+        PromotionAuctionWindow second = PromotionAuctionWindow.builder()
+                .id(11L)
+                .settledAt(NOW.minusSeconds(30))
+                .build();
+        when(checkpointMapper.findByScanType(ReconciliationScanType.PROMOTION_SETTLED_WINDOW))
+                .thenReturn(ReconciliationCheckpoint.builder()
+                        .scanType(ReconciliationScanType.PROMOTION_SETTLED_WINDOW)
+                        .lastScannedAt(checkpointAt)
+                        .lastScannedId(9L)
+                        .build());
+        when(promotionAuctionWindowMapper.listSettledWindowsCursor(
+                checkpointAt,
+                9L,
+                NOW.minusSeconds(promotionBPrimeProperties.getSettledCompensationLookbackSeconds()),
+                1000
+        )).thenReturn(List.of(first, second));
+
+        service.scanPromotionSettledWindowBatch();
+
+        verify(promotionAuctionCompensationService).scanWindow(first, reconciliationService);
+        verify(promotionAuctionCompensationService).scanWindow(second, reconciliationService);
+        verify(checkpointMapper).updateTimeCheckpoint(
+                ReconciliationScanType.PROMOTION_SETTLED_WINDOW,
+                second.getSettledAt(),
+                second.getId()
+        );
     }
 
     private static final class RecordingSearchIndexService extends SearchIndexService {

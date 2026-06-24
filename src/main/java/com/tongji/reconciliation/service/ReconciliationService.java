@@ -16,6 +16,9 @@ public interface ReconciliationService {
 
     ReconciliationTask createDeadTaskIfAbsent(String taskType, String targetType, Long targetId, String lastError);
 
+    ReconciliationTask createDeadTaskIfAbsent(String taskType, String targetType, Long targetId,
+                                              String taskPayload, String lastError);
+
     ReconciliationTask retryTask(Long taskId);
 
     List<ReconciliationTask> rerunTarget(String targetType, Long targetId);
