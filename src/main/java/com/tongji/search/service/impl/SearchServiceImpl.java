@@ -9,7 +9,6 @@ import co.elastic.clients.elasticsearch._types.query_dsl.FunctionBoostMode;
 import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.Suggestion;
-import co.elastic.clients.util.NamedValue;
 import com.tongji.knowpost.api.dto.FeedItemResponse;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.counter.service.CounterService;
@@ -129,8 +128,10 @@ public class SearchServiceImpl implements SearchService {
                         ))
                         // 返回 title/body 高亮片段，后续合并为 snippet
                         .highlight(h -> h
-                                .fields(new NamedValue<>("title", new HighlightField.Builder().build()))
-                                .fields(new NamedValue<>("body", new HighlightField.Builder().build()))
+                                .fields(Map.of(
+                                        "title", new HighlightField.Builder().build(),
+                                        "body", new HighlightField.Builder().build()
+                                ))
                         )
                         .sort(sorts);
                 // 游标分页：携带上一次最后命中的 sort 值

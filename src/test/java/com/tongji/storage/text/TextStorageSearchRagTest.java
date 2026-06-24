@@ -357,15 +357,6 @@ class TextStorageSearchRagTest {
             }
 
             @Override
-            public void updateToken(String token) {
-            }
-
-            @Override
-            public boolean keepResponseBodyOnException() {
-                return false;
-            }
-
-            @Override
             public Builder toBuilder() {
                 throw new UnsupportedOperationException();
             }
