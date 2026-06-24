@@ -1,77 +1,55 @@
 ## ADDED Requirements
 
-### Requirement: B' compensation SHALL audit auction chain consistency
-The system SHALL audit B' promotion auction chain consistency across command records, Kafka decision facts, projection checkpoints, wallet ledger facts, Redis hot state, and slot allocations for one auction window.
+### Requirement: B' compensation SHALL repair settled-window facts only
+The system SHALL run B' promotion auction compensation only for `SETTLED` auction windows. This change SHALL repair settled projection, slot allocation, and wallet settlement facts, and SHALL NOT repair Redis hot state, WebSocket delivery, or in-flight bidding state.
 
-#### Scenario: Window chain audit finds missing projection
+#### Scenario: Settled window projection is missing
 - **WHEN** an auction window has accepted Kafka decision facts
 - **AND** projection checkpoint or projected bid facts are missing
 - **THEN** system schedules promotion decision projection repair tasks
 - **AND** each repair task remains idempotent by decision id
 
-#### Scenario: Window chain audit finds missing allocation
-- **WHEN** an auction window has close decision facts in Kafka or settled projection facts in MySQL
-- **AND** no slot allocation exists for winning positions
+#### Scenario: Settled window allocation is fully missing
+- **WHEN** a `SETTLED` auction window has enough durable settled facts to recompute winners and clearing prices
+- **AND** no slot allocation row exists for that window
 - **THEN** system schedules promotion allocation rebuild repair
-- **AND** allocation rebuild uses durable projected bid facts
+- **AND** allocation rebuild recomputes winners from durable bid and window facts instead of trusting existing projected slot indexes or clearing prices
 
-### Requirement: B' compensation SHALL detect Redis hot-state drift
-The system SHALL detect drift between Redis promotion auction hot state and durable B' decision/projection facts. Redis SHALL be treated as a repair target, not the final authority.
-
-#### Scenario: Redis ranking differs from durable ranking
-- **WHEN** Redis ranking for an auction window differs from durable accepted decisions or projected bid facts
-- **THEN** system records a drift issue or repair task for that auction window
-- **AND** does not change Kafka decision facts or wallet ledger facts based on Redis alone
-
-#### Scenario: Redis command replay is missing
-- **WHEN** durable command or decision facts exist
-- **AND** Redis command replay state is missing for an active or recently closed window
-- **THEN** system can rebuild Redis replay state from durable facts
-
-### Requirement: B' compensation SHALL rebuild Redis hot state from durable facts
-The system SHALL rebuild B' promotion auction Redis hot state from Kafka decision facts and MySQL projection facts. Rebuild SHALL restore window state, campaign bid state, command replay state, and ranking state needed by snapshot and active auction display.
-
-#### Scenario: Active window hot ranking is rebuilt
-- **WHEN** an active auction window has durable accepted decision facts
-- **AND** Redis hot ranking is missing or stale
-- **THEN** system rebuilds Redis ranking and campaign state from durable facts
-- **AND** snapshot can return rebuilt ranking
-
-#### Scenario: Rebuild skips unknown durable gap
-- **WHEN** durable facts have a decision version gap
-- **THEN** system does not rebuild Redis from partial facts
-- **AND** records reconciliation error for operator-visible follow-up
-
-#### Scenario: Rebuild source has expired
-- **WHEN** Redis hot state rebuild requires Kafka promotion decisions older than the 7-day retention window
-- **AND** no final MySQL projection facts can recover the requested state
-- **THEN** system marks the rebuild task failed or dead
-- **AND** does not recreate MySQL per-decision storage to hide the expired replay gap
+#### Scenario: Settled window allocation is partially present
+- **WHEN** a `SETTLED` auction window has some slot allocation rows
+- **AND** the row count, slot continuity, or winner set is inconsistent with recomputed durable facts
+- **THEN** system marks the window reconciliation as `dead`
+- **AND** does not try to auto-heal the partial allocation set
 
 ### Requirement: B' compensation SHALL repair wallet effects idempotently
-The system SHALL verify and repair B' wallet effects for accepted, rejected, losing, and winning promotion auction decisions. Repairs SHALL use wallet businessRef idempotency and SHALL reject mismatched existing ledger facts.
-
-#### Scenario: Missing hold is repaired
-- **WHEN** an accepted B' bid decision requires a hold
-- **AND** wallet ledger has no matching hold businessRef
-- **THEN** system executes the hold repair with the original owner, amount, reason, business type, and businessRef
-- **AND** repeated repair does not duplicate ledger movement
+The system SHALL verify and repair only settled-window `CAPTURE` and `RELEASE` wallet effects. Repairs SHALL use wallet businessRef idempotency, SHALL create repair tasks per missing effect, and SHALL reject mismatched existing ledger facts.
 
 #### Scenario: Missing winner capture is repaired
-- **WHEN** a closed auction window marks a bid as winning with a clearing price
+- **WHEN** a `SETTLED` auction window recomputes a winning bid with a clearing price
 - **AND** wallet ledger has no matching capture businessRef
-- **THEN** system captures held balance to platform ledger subject
-- **AND** releases any excess hold through its idempotent businessRef
+- **THEN** system schedules or executes one capture repair effect for that winner
+- **AND** repeated repair does not duplicate ledger movement
+
+#### Scenario: Missing loser or winner release is repaired
+- **WHEN** a `SETTLED` auction window recomputes a required release amount
+- **AND** wallet ledger has no matching release businessRef
+- **THEN** system schedules or executes one release repair effect for that bid
+- **AND** repeated repair does not duplicate ledger movement
 
 #### Scenario: Existing wallet ledger conflicts
 - **WHEN** a required B' wallet businessRef already exists with different owner, amount, reason, business type, or balance delta
-- **THEN** system marks the repair task as failed or dead
+- **THEN** system marks the repair task as `dead`
 - **AND** does not append a compensating ledger movement that hides the mismatch
+
+#### Scenario: Hold would be required to trust the result
+- **WHEN** settled wallet repair cannot safely derive the expected settled effect without trusting a missing or inconsistent historical hold fact
+- **THEN** system marks the repair task as `dead`
+- **AND** does not auto-create a settled-phase hold repair
 
 ### Requirement: B' compensation SHALL remain eventual and non-blocking
 The system SHALL run B' compensation as eventual reconciliation work. Normal bid submission, decision fanout, feed/search rendering, and snapshot reads SHALL NOT synchronously wait for deep compensation scans.
 
 #### Scenario: Drift exists during user flow
-- **WHEN** Redis or wallet drift is detected after a user bid flow has completed
+- **WHEN** settled allocation or wallet drift is detected after a user bid flow has completed
 - **THEN** system schedules or executes reconciliation asynchronously
 - **AND** does not block unrelated feed/search requests
