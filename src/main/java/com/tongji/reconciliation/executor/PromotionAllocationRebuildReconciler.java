@@ -46,13 +46,15 @@ public class PromotionAllocationRebuildReconciler implements Reconciler {
         if (window == null) {
             throw new IllegalStateException("promotion auction window not found: " + task.getTargetId());
         }
-        if (allocationMapper.countByAuctionWindowId(window.getId()) > 0) {
-            return;
+        int allocationCount = allocationMapper.countByAuctionWindowId(window.getId());
+        if (allocationCount > 0) {
+            throw new NonRetryableReconciliationException(
+                    "promotion allocation rebuild only repairs fully missing allocation, existing rows=" + allocationCount);
         }
         Instant allocationStartAt = window.getWindowEndAt();
         long spanSeconds = window.getWindowEndAt().getEpochSecond() - window.getWindowStartAt().getEpochSecond();
         Instant allocationEndAt = allocationStartAt.plusSeconds(spanSeconds);
-        List<PromotionBid> bids = bidMapper.listActiveBidsByWindowId(window.getId(), allocationStartAt, allocationEndAt);
+        List<PromotionBid> bids = bidMapper.listSettledBidsByWindowId(window.getId(), allocationStartAt, allocationEndAt);
         Instant settledAt = window.getSettledAt() == null ? Instant.now() : window.getSettledAt();
         auctionService.settleWindow(window, bids, settledAt);
     }

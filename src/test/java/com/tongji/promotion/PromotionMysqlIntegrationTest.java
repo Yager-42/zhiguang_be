@@ -126,6 +126,9 @@ class PromotionMysqlIntegrationTest {
         assertThat(bidMapper.listActiveBidsByWindowId(windowId, allocationStartAt, allocationEndAt).stream()
                 .map(PromotionBid::getId))
                 .doesNotContain(bidId);
+        assertThat(bidMapper.listSettledBidsByWindowId(windowId, allocationStartAt, allocationEndAt).stream()
+                .map(PromotionBid::getId))
+                .contains(bidId);
 
         long loserId = uniqueId();
         long loserCampaignId = uniqueId();
@@ -136,6 +139,9 @@ class PromotionMysqlIntegrationTest {
         assertThat(bidMapper.markLost(loserId)).isEqualTo(1);
         assertThat(bidMapper.findByCampaignIdAndAuctionWindowId(loserCampaignId, windowId).getStatus())
                 .isEqualTo(PromotionBidStatus.LOST);
+        assertThat(bidMapper.listSettledBidsByWindowId(windowId, allocationStartAt, allocationEndAt).stream()
+                .map(PromotionBid::getId))
+                .contains(bidId, loserId);
     }
 
     @Test

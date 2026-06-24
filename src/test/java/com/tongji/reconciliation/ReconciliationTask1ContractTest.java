@@ -1,5 +1,6 @@
 package com.tongji.reconciliation;
 
+import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.reconciliation.mapper.ReconciliationCheckpointMapper;
 import com.tongji.reconciliation.mapper.ReconciliationErrorLogMapper;
 import com.tongji.reconciliation.mapper.ReconciliationTaskMapper;
@@ -35,7 +36,8 @@ class ReconciliationTask1ContractTest {
                 "follow_graph",
                 "follow_inbox",
                 "promotion_decision_projection",
-                "promotion_allocation_rebuild"
+                "promotion_allocation_rebuild",
+                "promotion_wallet_effect_repair"
         );
         assertThat(ReconciliationTargetType.ALL).containsExactly(
                 "post",
@@ -53,6 +55,7 @@ class ReconciliationTask1ContractTest {
                 "post_comment_count",
                 "comment_reply_count",
                 "user_follow_graph",
+                "promotion_settled_window",
                 "running_timeout"
         );
         assertThat(ReconciliationTaskStatus.ALL).containsExactly("pending", "running", "succeeded", "dead");
@@ -73,8 +76,9 @@ class ReconciliationTask1ContractTest {
                 "existsActiveTask",
                 "query"
         );
-        assertThat(methodNames(ReconciliationCheckpointMapper.class)).contains("findByScanType", "upsert", "updateCheckpoint");
+        assertThat(methodNames(ReconciliationCheckpointMapper.class)).contains("findByScanType", "upsert", "updateCheckpoint", "updateTimeCheckpoint");
         assertThat(methodNames(ReconciliationErrorLogMapper.class)).contains("insert");
+        assertThat(methodNames(PromotionBidMapper.class)).contains("listActiveBidsByWindowId", "listSettledBidsByWindowId");
 
         ReconciliationTaskQuery query = ReconciliationTaskQuery.builder()
                 .status("pending")
@@ -93,6 +97,7 @@ class ReconciliationTask1ContractTest {
         String schema = Files.readString(Path.of("db/schema.sql"));
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS reconciliation_task");
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS reconciliation_checkpoint");
+        assertThat(schema).contains("last_scanned_at DATETIME(3) NULL");
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS reconciliation_error_log");
         assertThat(schema).contains("KEY idx_reconciliation_task_scheduled (status, next_execute_at)");
         assertThat(schema).contains("KEY idx_reconciliation_task_target (target_type, target_id, task_type)");

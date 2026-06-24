@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -34,71 +33,54 @@ public class PromotionAuctionService {
     private final PromotionSlotAllocationMapper allocationMapper;
     private final WalletService walletService;
     private final IdService idService;
+    private final PromotionAuctionSettlementPlanner settlementPlanner;
 
     public PromotionAuctionService(PromotionAuctionWindowMapper windowMapper,
                                    PromotionBidMapper bidMapper,
                                    PromotionSlotAllocationMapper allocationMapper,
                                    WalletService walletService,
-                                   IdService idService) {
+                                   IdService idService,
+                                   PromotionAuctionSettlementPlanner settlementPlanner) {
         this.windowMapper = windowMapper;
         this.bidMapper = bidMapper;
         this.allocationMapper = allocationMapper;
         this.walletService = walletService;
         this.idService = idService;
+        this.settlementPlanner = settlementPlanner;
     }
 
     @Transactional
     public void settleWindow(PromotionAuctionWindow window, List<PromotionBid> bids, Instant settledAt) {
-        List<PromotionBid> ranked = bids.stream()
-                .sorted(Comparator.comparingLong(PromotionBid::getBidAmount).reversed()
-                        .thenComparingLong(PromotionBid::getId))
-                .toList();
-        long reserve = window.getReservePrice();
-        // 有效出价（>= reserve）在降序排名中是前缀；取前 slotCount 个有效出价为 winner，其余全为 loser
-        int winners = (int) ranked.stream()
-                .takeWhile(bid -> bid.getBidAmount() >= reserve)
-                .limit(window.getSlotCount())
-                .count();
-        for (int i = 0; i < ranked.size(); i++) {
-            PromotionBid bid = ranked.get(i);
-            if (i < winners) {
-                settleWinner(window, bid, i, ranked, settledAt);
-            } else {
-                settleLoser(bid);
-            }
+        PromotionAuctionSettlementPlan plan = settlementPlanner.plan(window, bids);
+        for (PromotionAuctionSettlementPlan.Winner winner : plan.winners()) {
+            settleWinner(window, winner, settledAt);
+        }
+        for (PromotionBid loser : plan.losers()) {
+            settleLoser(window, loser);
         }
         windowMapper.markSettled(window.getId(), settledAt);
     }
 
-    private void settleWinner(PromotionAuctionWindow window, PromotionBid bid, int slotIndex,
-                              List<PromotionBid> ranked, Instant settledAt) {
-        long nextBid = (slotIndex + 1 < ranked.size()) ? ranked.get(slotIndex + 1).getBidAmount() : window.getReservePrice();
-        long clearingPrice = Math.max(nextBid, window.getReservePrice());
-        long releaseAmount = bid.getBidAmount() - clearingPrice;
-
-        // clearingPrice <= bidAmount 由「仅有效出价（>= reserve）可中标 + 排序保证 nextBid <= winner.bidAmount」
-        // 结构性保证（见类注释），并由边界测试守护；此处直接扣成交价，不做掩盖性 clamp。
-        walletService.captureHoldToPlatform(bid.getBidderUserId(), clearingPrice,
+    private void settleWinner(PromotionAuctionWindow window, PromotionAuctionSettlementPlan.Winner winner, Instant settledAt) {
+        PromotionBid bid = winner.bid();
+        walletService.captureHoldToPlatform(bid.getBidderUserId(), winner.clearingPrice(),
                 WalletLedgerReason.PROMOTION_BPRIME_CAPTURE, WalletBusinessType.PROMOTION,
-                businessRef(window, bid, "capture"));
+                settlementPlanner.businessRef(window, bid, "capture"));
+        long releaseAmount = bid.getBidAmount() - winner.clearingPrice();
         if (releaseAmount > 0) {
             walletService.releaseHold(bid.getBidderUserId(), releaseAmount,
                     WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION,
-                    businessRef(window, bid, "release"));
+                    settlementPlanner.businessRef(window, bid, "release"));
         }
-        bidMapper.markWon(bid.getId(), slotIndex, clearingPrice);
-        allocationMapper.insert(buildAllocation(window, bid, slotIndex, clearingPrice, settledAt));
+        bidMapper.markWon(bid.getId(), winner.slotIndex(), winner.clearingPrice());
+        allocationMapper.insert(buildAllocation(window, bid, winner.slotIndex(), winner.clearingPrice(), settledAt));
     }
 
-    private void settleLoser(PromotionBid bid) {
+    private void settleLoser(PromotionAuctionWindow window, PromotionBid bid) {
         walletService.releaseHold(bid.getBidderUserId(), bid.getBidAmount(),
                 WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION,
-                "promotion-bprime:" + bid.getAuctionWindowId() + ":" + bid.getCampaignId() + ":release");
+                settlementPlanner.businessRef(window, bid, "release"));
         bidMapper.markLost(bid.getId());
-    }
-
-    private String businessRef(PromotionAuctionWindow window, PromotionBid bid, String effect) {
-        return "promotion-bprime:" + window.getId() + ":" + bid.getCampaignId() + ":" + effect;
     }
 
     private PromotionSlotAllocation buildAllocation(PromotionAuctionWindow window, PromotionBid bid,

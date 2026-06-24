@@ -36,8 +36,9 @@ class ReconciliationSchedulerTest {
         scheduler.scanPostCommentCount();
         scheduler.scanCommentReplyCount();
         scheduler.scanUserFollowGraph();
+        scheduler.scanPromotionSettledWindow();
         scheduler.recoverStuckPublishingOnStartup();
 
-        verify(reconciliationExecutor, times(11)).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
+        verify(reconciliationExecutor, times(12)).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
     }
 }

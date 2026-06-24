@@ -122,6 +122,23 @@ class ReconciliationTaskExecutorTest {
     }
 
     @Test
+    void nonRetryableFailureMarksDeadImmediately() {
+        ReconciliationTask task = task(42L, "es_index", 0);
+        when(taskMapper.pollPending(50)).thenReturn(List.of(task));
+        lock.locked = true;
+        when(taskMapper.markRunning(42L)).thenReturn(1);
+        when(idService.nextId(IdNamespace.RECONCILIATION_TASK)).thenReturn(100L);
+        org.mockito.Mockito.doThrow(new NonRetryableReconciliationException("dirty facts"))
+                .when(reconciler).reconcile(task);
+
+        executor.executePending();
+
+        verify(taskMapper).markDead(42L, 0L, "dirty facts");
+        verify(taskMapper, never()).markPendingRetry(any(), any(Integer.class), any(), any(Long.class), any());
+        verify(errorLogMapper).insert(any(ReconciliationErrorLog.class));
+    }
+
+    @Test
     void skipsTaskWhenLockCannotBeAcquired() {
         ReconciliationTask task = task(42L, "es_index", 0);
         when(taskMapper.pollPending(50)).thenReturn(List.of(task));

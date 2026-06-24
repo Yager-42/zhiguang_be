@@ -2,7 +2,9 @@ package com.tongji.reconciliation.service.impl;
 
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.reconciliation.mapper.ReconciliationErrorLogMapper;
 import com.tongji.reconciliation.mapper.ReconciliationTaskMapper;
+import com.tongji.reconciliation.model.ReconciliationErrorLog;
 import com.tongji.reconciliation.scan.ReconciliationScanService;
 import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskQuery;
@@ -26,22 +28,26 @@ import java.util.List;
 public class ReconciliationServiceImpl implements ReconciliationService {
 
     private final ReconciliationTaskMapper taskMapper;
+    private final ReconciliationErrorLogMapper errorLogMapper;
     private final IdService idService;
     private final Clock clock;
     private final ReconciliationScanService scanService;
 
     @Autowired
     public ReconciliationServiceImpl(ReconciliationTaskMapper taskMapper,
+                                     ReconciliationErrorLogMapper errorLogMapper,
                                      IdService idService,
                                      ReconciliationScanService scanService) {
-        this(taskMapper, idService, scanService, Clock.systemDefaultZone());
+        this(taskMapper, errorLogMapper, idService, scanService, Clock.systemDefaultZone());
     }
 
     public ReconciliationServiceImpl(ReconciliationTaskMapper taskMapper,
+                                     ReconciliationErrorLogMapper errorLogMapper,
                                      IdService idService,
                                      ReconciliationScanService scanService,
                                      Clock clock) {
         this.taskMapper = taskMapper;
+        this.errorLogMapper = errorLogMapper;
         this.idService = idService;
         this.scanService = scanService;
         this.clock = clock;
@@ -93,8 +99,15 @@ public class ReconciliationServiceImpl implements ReconciliationService {
 
     @Override
     public ReconciliationTask createDeadTaskIfAbsent(String taskType, String targetType, Long targetId, String lastError) {
-        if (taskMapper.existsActiveTask(taskType, targetType, targetId)
-                || taskMapper.existsByStatus(taskType, targetType, targetId, ReconciliationTaskStatus.DEAD)) {
+        return createDeadTaskIfAbsent(taskType, targetType, targetId, null, lastError);
+    }
+
+    @Override
+    public ReconciliationTask createDeadTaskIfAbsent(String taskType, String targetType, Long targetId,
+                                                    String taskPayload, String lastError) {
+        String dedupeScope = dedupeScope(taskType, targetType, targetId, taskPayload);
+        if (taskMapper.findActiveByDedupeScope(dedupeScope) != null
+                || taskMapper.existsByDedupeScopeAndStatus(dedupeScope, ReconciliationTaskStatus.DEAD)) {
             return null;
         }
         LocalDateTime now = LocalDateTime.now(clock);
@@ -106,13 +119,25 @@ public class ReconciliationServiceImpl implements ReconciliationService {
                 .status(ReconciliationTaskStatus.DEAD)
                 .retryCount(0)
                 .nextExecuteAt(now)
-                .dedupeScope(dedupeScope(taskType, targetType, targetId, null))
+                .dedupeScope(dedupeScope)
+                .taskPayload(taskPayload)
                 .lastError(lastError)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
-        taskMapper.insert(task);
-        return task;
+        try {
+            taskMapper.insert(task);
+            errorLogMapper.insert(ReconciliationErrorLog.builder()
+                    .id(idService.nextId(IdNamespace.RECONCILIATION_TASK))
+                    .taskId(task.getId())
+                    .executionDurationMs(0L)
+                    .errorMessage(lastError)
+                    .createdAt(now)
+                    .build());
+            return task;
+        } catch (DuplicateKeyException ex) {
+            return null;
+        }
     }
 
     @Override
@@ -149,6 +174,8 @@ public class ReconciliationServiceImpl implements ReconciliationService {
             addIfCreated(tasks, ReconciliationTaskType.COMMENT_COUNT, targetType, targetId);
         } else if (ReconciliationTargetType.USER.equals(targetType)) {
             addIfCreated(tasks, ReconciliationTaskType.FOLLOW_GRAPH, targetType, targetId);
+        } else if (ReconciliationTargetType.PROMOTION_AUCTION_WINDOW.equals(targetType)) {
+            tasks.addAll(scanService.rerunPromotionAuctionWindow(targetId));
         }
         return tasks;
     }

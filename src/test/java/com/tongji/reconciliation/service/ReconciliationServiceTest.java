@@ -2,7 +2,9 @@ package com.tongji.reconciliation.service;
 
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.reconciliation.mapper.ReconciliationErrorLogMapper;
 import com.tongji.reconciliation.mapper.ReconciliationTaskMapper;
+import com.tongji.reconciliation.model.ReconciliationErrorLog;
 import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskQuery;
 import com.tongji.reconciliation.model.ReconciliationTaskStatus;
@@ -24,6 +26,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -36,6 +39,8 @@ class ReconciliationServiceTest {
     @Mock
     private ReconciliationTaskMapper taskMapper;
     @Mock
+    private ReconciliationErrorLogMapper errorLogMapper;
+    @Mock
     private IdService idService;
     @Mock
     private ReconciliationScanService scanService;
@@ -45,7 +50,8 @@ class ReconciliationServiceTest {
     @BeforeEach
     void setUp() {
         org.mockito.MockitoAnnotations.openMocks(this);
-        service = new ReconciliationServiceImpl(taskMapper, idService, scanService, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new ReconciliationServiceImpl(taskMapper, errorLogMapper, idService, scanService,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -179,6 +185,42 @@ class ReconciliationServiceTest {
                 .containsExactly(ReconciliationTaskType.FOLLOW_GRAPH);
         assertThat(postTasks.getLast().getTargetType()).isEqualTo(ReconciliationTargetType.USER);
         assertThat(postTasks.getLast().getTargetId()).isEqualTo(7L);
+    }
+
+    @Test
+    void createDeadTaskIfAbsentWritesTaskAndErrorLog() {
+        when(taskMapper.findActiveByDedupeScope(any())).thenReturn(null);
+        when(taskMapper.existsByDedupeScopeAndStatus(any(), eq(ReconciliationTaskStatus.DEAD))).thenReturn(false);
+        when(idService.nextId(IdNamespace.RECONCILIATION_TASK)).thenReturn(9100L, 9101L);
+
+        ReconciliationTask task = service.createDeadTaskIfAbsent(
+                ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR,
+                ReconciliationTargetType.PROMOTION_AUCTION_WINDOW,
+                301L,
+                "{\"businessRef\":\"promotion-bprime:301:201:capture\"}",
+                "wallet effect conflict"
+        );
+
+        assertThat(task.getStatus()).isEqualTo(ReconciliationTaskStatus.DEAD);
+        assertThat(task.getLastError()).isEqualTo("wallet effect conflict");
+        ArgumentCaptor<ReconciliationErrorLog> captor = ArgumentCaptor.forClass(ReconciliationErrorLog.class);
+        verify(errorLogMapper).insert(captor.capture());
+        assertThat(captor.getValue().getTaskId()).isEqualTo(9100L);
+        assertThat(captor.getValue().getErrorMessage()).isEqualTo("wallet effect conflict");
+    }
+
+    @Test
+    void rerunPromotionAuctionWindowDelegatesSettledWindowCompensation() {
+        ReconciliationTask task = ReconciliationTask.builder()
+                .taskType(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR)
+                .targetType(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW)
+                .targetId(301L)
+                .build();
+        when(scanService.rerunPromotionAuctionWindow(301L)).thenReturn(List.of(task));
+
+        List<ReconciliationTask> tasks = service.rerunTarget(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW, 301L);
+
+        assertThat(tasks).containsExactly(task);
     }
 
     @Test
