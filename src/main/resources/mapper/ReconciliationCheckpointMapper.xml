@@ -5,6 +5,7 @@
     <resultMap id="ReconciliationCheckpointResultMap" type="com.tongji.reconciliation.model.ReconciliationCheckpoint">
         <id property="scanType" column="scan_type" />
         <result property="lastScannedId" column="last_scanned_id" />
+        <result property="lastScannedAt" column="last_scanned_at" />
         <result property="updatedAt" column="updated_at" />
     </resultMap>
 
@@ -16,16 +17,25 @@
     </select>
 
     <insert id="upsert" parameterType="com.tongji.reconciliation.model.ReconciliationCheckpoint">
-        INSERT INTO reconciliation_checkpoint (scan_type, last_scanned_id, updated_at)
-        VALUES (#{scanType}, #{lastScannedId}, #{updatedAt})
+        INSERT INTO reconciliation_checkpoint (scan_type, last_scanned_id, last_scanned_at, updated_at)
+        VALUES (#{scanType}, #{lastScannedId}, #{lastScannedAt}, #{updatedAt})
         ON DUPLICATE KEY UPDATE
             last_scanned_id = VALUES(last_scanned_id),
+            last_scanned_at = VALUES(last_scanned_at),
             updated_at = VALUES(updated_at)
     </insert>
 
     <update id="updateCheckpoint">
         UPDATE reconciliation_checkpoint
         SET last_scanned_id = #{lastScannedId},
+            updated_at = NOW(3)
+        WHERE scan_type = #{scanType}
+    </update>
+
+    <update id="updateTimeCheckpoint">
+        UPDATE reconciliation_checkpoint
+        SET last_scanned_at = #{lastScannedAt},
+            last_scanned_id = #{lastScannedId},
             updated_at = NOW(3)
         WHERE scan_type = #{scanType}
     </update>

@@ -41,7 +41,7 @@ class PromotionAllocationRebuildReconcilerTest {
         List<PromotionBid> bids = List.of(PromotionBid.builder().id(401L).campaignId(201L).build());
         when(windowMapper.findById(301L)).thenReturn(window);
         when(allocationMapper.countByAuctionWindowId(301L)).thenReturn(0);
-        when(bidMapper.listActiveBidsByWindowId(eq(301L), eq(Instant.parse("2026-06-20T11:00:00Z")),
+        when(bidMapper.listSettledBidsByWindowId(eq(301L), eq(Instant.parse("2026-06-20T11:00:00Z")),
                 eq(Instant.parse("2026-06-20T12:00:00Z")))).thenReturn(bids);
         PromotionAllocationRebuildReconciler reconciler = new PromotionAllocationRebuildReconciler(
                 windowMapper, bidMapper, allocationMapper, auctionService);

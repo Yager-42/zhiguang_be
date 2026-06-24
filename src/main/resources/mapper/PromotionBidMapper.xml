@@ -81,6 +81,18 @@
         ORDER BY b.bid_amount DESC, b.id ASC
     </select>
 
+    <select id="listSettledBidsByWindowId" resultMap="PromotionBidResultMap">
+        SELECT b.*, c.post_id AS post_id
+        FROM promotion_bid b
+                 LEFT JOIN promotion_campaign c ON c.id = b.campaign_id
+        WHERE b.auction_window_id = #{auctionWindowId}
+          AND b.status IN ('WON', 'LOST')
+          AND c.status = 'ACTIVE'
+          AND c.start_at <![CDATA[<=]]> #{allocationStartAt}
+          AND c.end_at <![CDATA[>=]]> #{allocationEndAt}
+        ORDER BY b.bid_amount DESC, b.id ASC
+    </select>
+
     <update id="markWon">
         UPDATE promotion_bid
         SET status         = 'WON',
