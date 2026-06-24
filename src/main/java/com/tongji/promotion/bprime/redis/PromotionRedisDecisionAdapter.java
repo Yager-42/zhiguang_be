@@ -1,6 +1,7 @@
 package com.tongji.promotion.bprime.redis;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import org.springframework.core.io.ClassPathResource;
@@ -44,7 +45,12 @@ public class PromotionRedisDecisionAdapter {
                 String.valueOf(command.postId()),
                 command.resourceType());
         try {
-            return objectMapper.readValue(payload, PromotionAuctionDecision.class);
+            ObjectNode node = (ObjectNode) objectMapper.readTree(payload);
+            if (!node.hasNonNull("decidedAt") && node.hasNonNull("decidedAtEpochMs")) {
+                node.put("decidedAt", Instant.ofEpochMilli(node.get("decidedAtEpochMs").asLong()).toString());
+            }
+            node.remove("decidedAtEpochMs");
+            return objectMapper.treeToValue(node, PromotionAuctionDecision.class);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to parse promotion redis decision", e);
         }

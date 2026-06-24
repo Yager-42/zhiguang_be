@@ -60,7 +60,7 @@ local function decision_json(accepted, decisionType, reason, effects, ranking, d
             .. ',"resourceType":"' .. resourceType .. '","type":"' .. decisionType
             .. '","accepted":' .. tostring(accepted) .. ',"rejectionReason":' .. rejection
             .. ',"bidAmount":' .. bidAmount .. ',"ranking":' .. rankingPayload
-            .. ',"walletEffects":' .. walletEffects .. ',"decidedAt":"' .. os.date('!%Y-%m-%dT%H:%M:%SZ', math.floor(nowEpochMs / 1000)) .. '"}'
+            .. ',"walletEffects":' .. walletEffects .. ',"decidedAtEpochMs":' .. nowEpochMs .. '}'
 end
 
 local replayHash = redis.call('HGET', commandsKey, commandId .. ':hash')
