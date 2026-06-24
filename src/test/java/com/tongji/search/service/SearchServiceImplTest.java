@@ -199,11 +199,11 @@ class SearchServiceImplTest {
         Map<String, Object> source = new HashMap<>();
         source.put("content_id", id);
         source.put("title", "title-" + id);
-        return Hit.of(h -> h.index("zhiguang_content_index").source(source).sort(sortOf(lid)));
+        return Hit.of(h -> h.index("zhiguang_content_index").id(id).source(source).sort(sortOf(lid)));
     }
 
     private Hit<Map<String, Object>> invalidHit() {
-        return Hit.of(h -> h.index("zhiguang_content_index").sort(sortOf(0L)));
+        return Hit.of(h -> h.index("zhiguang_content_index").id("invalid").sort(sortOf(0L)));
     }
 
     private List<FieldValue> sortOf(long lid) {
