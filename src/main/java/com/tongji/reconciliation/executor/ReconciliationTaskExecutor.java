@@ -104,7 +104,7 @@ public class ReconciliationTaskExecutor {
     private void handleFailure(ReconciliationTask task, Exception e, long executionDurationMs) {
         int oldRetryCount = task.getRetryCount() == null ? 0 : task.getRetryCount();
         String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-        if (oldRetryCount >= MAX_RETRY_COUNT) {
+        if (e instanceof NonRetryableReconciliationException || oldRetryCount >= MAX_RETRY_COUNT) {
             taskMapper.markDead(task.getId(), executionDurationMs, message);
             errorLogMapper.insert(ReconciliationErrorLog.builder()
                     .id(idService.nextId(IdNamespace.RECONCILIATION_TASK))

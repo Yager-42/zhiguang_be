@@ -49,5 +49,8 @@ public interface ReconciliationTaskMapper {
                            @Param("targetId") Long targetId,
                            @Param("status") String status);
 
+    boolean existsByDedupeScopeAndStatus(@Param("dedupeScope") String dedupeScope,
+                                         @Param("status") String status);
+
     List<ReconciliationTask> query(ReconciliationTaskQuery query);
 }

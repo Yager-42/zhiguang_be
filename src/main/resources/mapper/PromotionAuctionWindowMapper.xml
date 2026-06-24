@@ -60,6 +60,21 @@
         LIMIT #{batchSize}
     </select>
 
+    <select id="listSettledWindowsCursor" resultMap="PromotionAuctionWindowResultMap">
+        SELECT *
+        FROM promotion_auction_window
+        WHERE status = 'SETTLED'
+          AND settled_at IS NOT NULL
+          AND settled_at &gt;= #{lookbackStart}
+          AND (
+            #{lastSettledAt} IS NULL
+            OR settled_at &gt; #{lastSettledAt}
+            OR (settled_at = #{lastSettledAt} AND id &gt; #{lastWindowId})
+          )
+        ORDER BY settled_at ASC, id ASC
+        LIMIT #{batchSize}
+    </select>
+
     <update id="markSettled">
         UPDATE promotion_auction_window
         SET status     = 'SETTLED',

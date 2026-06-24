@@ -33,6 +33,12 @@ public interface PromotionAuctionWindowMapper {
     List<PromotionAuctionWindow> listClosableWindows(@Param("now") Instant now,
                                                      @Param("batchSize") int batchSize);
 
+    /** 已结算窗口游标，用于对账按 settled_at + id 稳定推进。 */
+    List<PromotionAuctionWindow> listSettledWindowsCursor(@Param("lastSettledAt") Instant lastSettledAt,
+                                                          @Param("lastWindowId") long lastWindowId,
+                                                          @Param("lookbackStart") Instant lookbackStart,
+                                                          @Param("batchSize") int batchSize);
+
     /** 标记窗口已结算：status=SETTLED + settled_at。 */
     int markSettled(@Param("id") long id, @Param("settledAt") Instant settledAt);
 }

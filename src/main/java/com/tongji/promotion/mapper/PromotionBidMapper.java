@@ -23,6 +23,10 @@ public interface PromotionBidMapper {
                                                 @Param("allocationStartAt") Instant allocationStartAt,
                                                 @Param("allocationEndAt") Instant allocationEndAt);
 
+    List<PromotionBid> listSettledBidsByWindowId(@Param("auctionWindowId") long auctionWindowId,
+                                                 @Param("allocationStartAt") Instant allocationStartAt,
+                                                 @Param("allocationEndAt") Instant allocationEndAt);
+
     int markWon(@Param("id") long id,
                 @Param("slotIndex") int slotIndex,
                 @Param("clearingPrice") long clearingPrice);

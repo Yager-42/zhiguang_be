@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Data
 @Builder
@@ -14,5 +15,6 @@ import java.time.LocalDateTime;
 public class ReconciliationCheckpoint {
     private String scanType;
     private Long lastScannedId;
+    private Instant lastScannedAt;
     private LocalDateTime updatedAt;
 }

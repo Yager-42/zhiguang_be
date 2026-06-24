@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS reconciliation_task (
 CREATE TABLE IF NOT EXISTS reconciliation_checkpoint (
     scan_type VARCHAR(64) NOT NULL,
     last_scanned_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    last_scanned_at DATETIME(3) NULL,
     updated_at DATETIME(3) NOT NULL,
     PRIMARY KEY (scan_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -330,7 +331,8 @@ CREATE TABLE IF NOT EXISTS promotion_auction_window (
     updated_at DATETIME(3) NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uk_promotion_window_resource_time (resource_type, window_start_at, window_end_at),
-    KEY idx_promotion_window_status_time (status, window_end_at)
+    KEY idx_promotion_window_status_time (status, window_end_at),
+    KEY idx_promotion_window_status_settled (status, settled_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 推广出价：某活动在某窗口的单条出价，接单即冻结申报价；(campaign_id, auction_window_id) 唯一防重复出价。

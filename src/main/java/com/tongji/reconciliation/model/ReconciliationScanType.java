@@ -11,6 +11,7 @@ public final class ReconciliationScanType {
     public static final String POST_COMMENT_COUNT = "post_comment_count";
     public static final String COMMENT_REPLY_COUNT = "comment_reply_count";
     public static final String USER_FOLLOW_GRAPH = "user_follow_graph";
+    public static final String PROMOTION_SETTLED_WINDOW = "promotion_settled_window";
     public static final String RUNNING_TIMEOUT = "running_timeout";
 
     public static final List<String> ALL = List.of(
@@ -22,6 +23,7 @@ public final class ReconciliationScanType {
             POST_COMMENT_COUNT,
             COMMENT_REPLY_COUNT,
             USER_FOLLOW_GRAPH,
+            PROMOTION_SETTLED_WINDOW,
             RUNNING_TIMEOUT
     );
 
