@@ -111,7 +111,9 @@ The home feed SHALL insert active promoted feed slots from B' fixed advertising-
 - **AND** inserts promoted content with commercial marker into configured feed slot position
 - **AND** fills remaining organic positions from local follow candidates, recommendation candidates, and hot fallback
 - **AND** deduplicates, filters, and hydrates the final result
+- **AND** does not use WebSocket events as the feed allocation source
 
 #### Scenario: Build home feed without promoted slot
 - **WHEN** no active feed slot allocation exists for request scope
 - **THEN** the system returns organic home feed built from local follow candidates, recommendation candidates, and hot fallback content
+- **AND** does not calculate paid boost or paid ranking weight for organic candidates
