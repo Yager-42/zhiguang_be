@@ -1,0 +1,5 @@
+# Aegis user-local configuration
+activation_mode = "auto"
+tdd_mode = "auto"
+method_pack_root = "E:/idk/zhiguang_be/.codex/aegis"
+workspace_helper = "E:/idk/zhiguang_be/.codex/aegis/scripts/aegis-workspace.py"

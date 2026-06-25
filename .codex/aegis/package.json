@@ -1,0 +1,17 @@
+{
+  "name": "aegis",
+  "version": "2.2.0",
+  "type": "module",
+  "main": ".opencode/plugins/aegis.js",
+  "keywords": [
+    "pi-package",
+    "agent-skills",
+    "aegis",
+    "method-pack"
+  ],
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  }
+}
