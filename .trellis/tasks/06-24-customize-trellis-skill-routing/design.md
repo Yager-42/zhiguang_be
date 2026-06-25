@@ -245,6 +245,64 @@ Deferred until later:
 - full migration of every existing Trellis enhancer
 - aggressive subagent orchestration changes
 
+## Clone-Usable Packaging
+
+The repository should be self-contained for Codex users who clone it and want
+the same Trellis + Aegis workflow without first creating a separate global
+Aegis checkout.
+
+### Packaging decision
+
+- Commit the vendored Aegis method-pack under `.codex/aegis/`
+- Keep Codex-visible project skills under `.codex/skills/`
+- Do not treat a committed machine-generated `.codex/aegis-config.toml` as the
+  runtime configuration source of truth
+
+### Why committed config is wrong
+
+Current Aegis runtime helpers resolve these as absolute machine-local paths:
+
+- `method_pack_root`
+- `workspace_helper`
+
+So a config generated on one machine cannot be a portable runtime config for a
+different clone path or OS username.
+
+### Bootstrap design
+
+Add a project-local Codex bootstrap script that:
+
+1. computes the current repository root dynamically
+2. treats `.codex/aegis/` as the canonical local method-pack root
+3. writes or refreshes a project-local `.codex/aegis-config.toml`
+4. verifies from the vendored method-pack root with:
+   - `python scripts/aegis-doctor.py --write-config --json`
+   - plus `--discovery-root <repo>/.codex/skills`
+5. remains strictly project-local and does not depend on user-home Aegis
+   config or registry state
+
+### Discovery-root decision
+
+For this project-local Codex workflow, use:
+
+- `.codex/skills/` as the repository discovery root
+- `.codex/aegis-config.toml` as the repository-local config path
+
+Reason:
+
+- it is project-scoped
+- it matches the current local Codex integration already present in the repo
+- doctor can verify that it points at the vendored current version
+- it avoids writing Aegis state into the user's home directory
+- it keeps distribution simple: vendored content plus README guidance
+
+### Update semantics
+
+Vendored `.codex/aegis/` is part of the main repository, not a standalone git
+checkout. Therefore project users should update Aegis by updating this
+repository, rerunning the bootstrap, and reloading Codex rather than expecting
+the vendored subtree to self-update via a separate checkout lifecycle.
+
 ## Risks
 
 - duplicated authority if Aegis is allowed to create peer plans beside
