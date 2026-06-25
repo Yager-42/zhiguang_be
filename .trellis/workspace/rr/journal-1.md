@@ -38,3 +38,36 @@ Implemented settled promotion auction reconciliation compensation with shared se
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Remove AI capability surfaces
+
+**Date**: 2026-06-25
+**Task**: Remove AI capability surfaces
+**Branch**: `plan-rr`
+
+### Summary
+
+Removed AI-facing knowpost APIs, LLM/RAG runtime code, reconciliation and async AI paths, related dependencies/config/tests/docs, and added a backend quality rule for capability retirement across layers.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3da5da3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
