@@ -78,9 +78,9 @@ class PromotionSearchEsIntegrationTest {
                 .properties("status", Property.of(p -> p.keyword(b -> b)))
                 .properties("img_urls", Property.of(p -> p.keyword(b -> b)))
         ));
-        indexDoc(201L, 100, 50, "2026-06-20T10:00:00Z", "llm guide one");
-        indexDoc(202L, 50, 30, "2026-06-20T09:00:00Z", "llm guide two");
-        indexDoc(203L, 10, 5, "2026-06-20T08:00:00Z", "llm guide three");
+        indexDoc(201L, 100, 50, "2026-06-20T10:00:00Z", "search guide one");
+        indexDoc(202L, 50, 30, "2026-06-20T09:00:00Z", "search guide two");
+        indexDoc(203L, 10, 5, "2026-06-20T08:00:00Z", "search guide three");
         es.indices().refresh(r -> r.index(INDEX));
     }
 
@@ -99,7 +99,7 @@ class PromotionSearchEsIntegrationTest {
         when(knowPostFeedService.getFeedByIds(anyList(), eq(42L),
                 eq(KnowPostFeedService.FeedVisibilityScope.PUBLIC))).thenReturn(List.of(feedItem("201")));
 
-        SearchResponse response = searchService.search("llm guide", 2, null, null, 42L);
+        SearchResponse response = searchService.search("search guide", 2, null, null, 42L);
 
         // promoted 201 置顶；organic 仅 202（203 作为多取的探测命中）
         assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("201", "202");
@@ -117,12 +117,12 @@ class PromotionSearchEsIntegrationTest {
         when(knowPostFeedService.getFeedByIds(anyList(), eq(42L),
                 eq(KnowPostFeedService.FeedVisibilityScope.PUBLIC))).thenReturn(List.of(feedItem("201")));
 
-        SearchResponse first = searchService.search("llm guide", 2, null, null, 42L);
+        SearchResponse first = searchService.search("search guide", 2, null, null, 42L);
         assertThat(first.items()).extracting(FeedItemResponse::id).containsExactly("201", "202");
         assertThat(first.hasMore()).isTrue();
 
         // 第二页：after != null 不插 promoted，但仍排除 promoted 帖 201；201 在两页 organic 中都不出现
-        SearchResponse second = searchService.search("llm guide", 2, null, first.nextAfter(), 42L);
+        SearchResponse second = searchService.search("search guide", 2, null, first.nextAfter(), 42L);
         assertThat(second.items()).extracting(FeedItemResponse::id).containsExactly("203");
         assertThat(second.items().get(0).commercial()).isFalse();
     }

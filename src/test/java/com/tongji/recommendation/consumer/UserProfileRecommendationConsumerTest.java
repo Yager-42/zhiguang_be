@@ -43,7 +43,7 @@ class UserProfileRecommendationConsumerTest {
         UserProfileUpdatedEvent event = new UserProfileUpdatedEvent(
                 7L, "neo", "https://img", "bio", "zg007", "MALE",
                 LocalDate.parse("2000-01-02"), "Tongji", "13800000000",
-                "neo@example.com", "[\"ai\"]");
+                "neo@example.com", "[\"java\"]");
 
         consumer.onMessage(canalMessage(event), acknowledgment);
 
@@ -68,7 +68,7 @@ class UserProfileRecommendationConsumerTest {
         UserProfileUpdatedEvent event = new UserProfileUpdatedEvent(
                 7L, "neo", "https://img", "bio", "zg007", "MALE",
                 LocalDate.parse("2000-01-02"), "Tongji", "13800000000",
-                "neo@example.com", "[\"ai\"]");
+                "neo@example.com", "[\"java\"]");
 
         consumer.onMessage(objectMapper.writeValueAsString(Map.of(
                 "table", "outbox",
@@ -91,7 +91,7 @@ class UserProfileRecommendationConsumerTest {
         UserProfileUpdatedEvent event = new UserProfileUpdatedEvent(
                 7L, "neo", "https://img", "bio", "zg007", "MALE",
                 LocalDate.parse("2000-01-02"), "Tongji", "13800000000",
-                "neo@example.com", "[\"ai\"]");
+                "neo@example.com", "[\"java\"]");
         doThrow(new RuntimeException("gorse down")).when(gorseClient).upsertUser(event);
 
         consumer.onMessage(canalMessage(event), acknowledgment);

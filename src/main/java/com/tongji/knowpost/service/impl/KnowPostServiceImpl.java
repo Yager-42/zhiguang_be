@@ -16,7 +16,6 @@ import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.tongji.counter.service.CounterService;
 import com.tongji.storage.MinioStorageService;
-import com.tongji.llm.rag.RagIndexService;
 import com.tongji.relation.outbox.OutboxMapper;
 import com.tongji.cache.hotkey.HotKeyDetector;
 import org.slf4j.Logger;
@@ -50,7 +49,6 @@ public class KnowPostServiceImpl implements KnowPostService {
     private static final Logger log = LoggerFactory.getLogger(KnowPostServiceImpl.class);
     private static final int DETAIL_LAYOUT_VER = 1;
     private final ConcurrentHashMap<String, Object> singleFlight = new ConcurrentHashMap<>();
-    private final RagIndexService ragIndexService;
     private final OutboxMapper outboxMapper;
 
     // 手动编写构造器，Spring的@Qualifier直接标注在参数上（核心）
@@ -64,7 +62,6 @@ public class KnowPostServiceImpl implements KnowPostService {
             StringRedisTemplate redis,
             @Qualifier("knowPostDetailCache") Cache<String, KnowPostDetailResponse> knowPostDetailCache,
             HotKeyDetector hotKey,
-            RagIndexService ragIndexService,
             OutboxMapper outboxMapper
     ) {
         this.mapper = mapper;
@@ -76,7 +73,6 @@ public class KnowPostServiceImpl implements KnowPostService {
         this.redis = redis;
         this.knowPostDetailCache = knowPostDetailCache; // 带@Qualifier的参数赋值
         this.hotKey = hotKey;
-        this.ragIndexService = ragIndexService;
         this.outboxMapper = outboxMapper;
     }
     /**
@@ -127,11 +123,6 @@ public class KnowPostServiceImpl implements KnowPostService {
         invalidateCache(id);
 
         // 触发一次预索引（草稿阶段可能因可见性/状态被跳过）
-        try {
-            ragIndexService.ensureIndexed(id);
-        } catch (Exception e) {
-            log.warn("Pre-index after content confirm failed, post {}: {}", id, e.getMessage());
-        }
     }
 
     /**

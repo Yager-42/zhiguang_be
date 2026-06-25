@@ -27,7 +27,6 @@ class ReconciliationTask1ContractTest {
     void constantsAndMapperContractsMatchTask1Requirements() throws Exception {
         assertThat(ReconciliationTaskType.ALL).containsExactly(
                 "es_index",
-                "rag_index",
                 "feed_cache_invalidate",
                 "gorse_item_upsert",
                 "gorse_feedback",
@@ -48,7 +47,6 @@ class ReconciliationTask1ContractTest {
         );
         assertThat(ReconciliationScanType.ALL).containsExactly(
                 "post_es",
-                "post_rag",
                 "post_gorse",
                 "post_cassandra",
                 "comment_cassandra",

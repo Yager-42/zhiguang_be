@@ -29,7 +29,6 @@ class ReconciliationSchedulerTest {
         scheduler.executePending();
         scheduler.resetStuckRunning();
         scheduler.scanPostEs();
-        scheduler.scanPostRag();
         scheduler.scanPostGorse();
         scheduler.scanPostCassandra();
         scheduler.scanCommentCassandra();
@@ -39,6 +38,6 @@ class ReconciliationSchedulerTest {
         scheduler.scanPromotionSettledWindow();
         scheduler.recoverStuckPublishingOnStartup();
 
-        verify(reconciliationExecutor, times(12)).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
+        verify(reconciliationExecutor, times(11)).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
     }
 }
