@@ -3,7 +3,6 @@ package com.tongji.reconciliation.scan;
 import com.tongji.comment.mapper.CommentMapper;
 import com.tongji.counter.service.CounterService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
-import com.tongji.llm.rag.RagIndexService;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
@@ -22,6 +21,7 @@ import com.tongji.user.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -30,14 +30,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
 
 class ReconciliationScanServiceTest {
 
@@ -57,10 +56,7 @@ class ReconciliationScanServiceTest {
     private PromotionAuctionCompensationService promotionAuctionCompensationService;
     private PromotionBPrimeProperties promotionBPrimeProperties;
     private RecordingSearchIndexService searchIndexService;
-    private RecordingRagIndexService ragIndexService;
-
     private AtomicInteger recovered;
-
     private ReconciliationScanService service;
 
     @BeforeEach
@@ -81,7 +77,6 @@ class ReconciliationScanServiceTest {
         promotionAuctionCompensationService = org.mockito.Mockito.mock(PromotionAuctionCompensationService.class);
         promotionBPrimeProperties = new PromotionBPrimeProperties();
         searchIndexService = new RecordingSearchIndexService();
-        ragIndexService = new RecordingRagIndexService();
         recovered = new AtomicInteger();
         service = new ReconciliationScanService(
                 checkpointMapper,
@@ -94,7 +89,6 @@ class ReconciliationScanServiceTest {
                 new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules(),
                 counterService,
                 searchIndexService,
-                ragIndexService,
                 postTextRepository,
                 commentTextRepository,
                 promotionAuctionWindowMapper,
@@ -156,49 +150,6 @@ class ReconciliationScanServiceTest {
     }
 
     @Test
-    void scanPostRagBatchSkipsHealthyRowsAndOnlyCreatesMissingIndexTasks() {
-        when(checkpointMapper.findByScanType(ReconciliationScanType.POST_RAG))
-                .thenReturn(ReconciliationCheckpoint.builder()
-                        .scanType(ReconciliationScanType.POST_RAG)
-                        .lastScannedId(10L)
-                        .build());
-        when(knowPostMapper.listPublicPublishedPostIdsCursor(10L, 1000)).thenReturn(List.of(11L, 12L));
-        ragIndexService.setExists(11L, true);
-        ragIndexService.setExists(12L, false);
-
-        service.scanPostRagBatch();
-
-        verify(reconciliationService).createTaskIfAbsent(
-                ReconciliationTaskType.RAG_INDEX,
-                ReconciliationTargetType.POST,
-                12L
-        );
-        verify(checkpointMapper).updateCheckpoint(ReconciliationScanType.POST_RAG, 12L);
-    }
-
-    @Test
-    void scanPostRagBatchSkipsPublishedButNonPublicPosts() {
-        when(checkpointMapper.findByScanType(ReconciliationScanType.POST_RAG))
-                .thenReturn(ReconciliationCheckpoint.builder()
-                        .scanType(ReconciliationScanType.POST_RAG)
-                        .lastScannedId(10L)
-                        .build());
-        when(knowPostMapper.listPublishedPostIdsCursor(10L, 1000)).thenReturn(List.of(11L, 12L));
-        when(knowPostMapper.listPublicPublishedPostIdsCursor(10L, 1000)).thenReturn(List.of(12L));
-        ragIndexService.setExists(12L, false);
-
-        service.scanPostRagBatch();
-
-        verify(knowPostMapper, never()).listPublishedPostIdsCursor(10L, 1000);
-        verify(reconciliationService).createTaskIfAbsent(
-                ReconciliationTaskType.RAG_INDEX,
-                ReconciliationTargetType.POST,
-                12L
-        );
-        assertThat(ragIndexService.queriedPostIds()).containsExactly(12L);
-    }
-
-    @Test
     void scanPostEsBatchPropagatesProbeFailureWithoutEnqueueingTasks() {
         when(checkpointMapper.findByScanType(ReconciliationScanType.POST_ES))
                 .thenReturn(ReconciliationCheckpoint.builder()
@@ -211,37 +162,6 @@ class ReconciliationScanServiceTest {
         assertThatThrownBy(() -> service.scanPostEsBatch())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("es probe failed");
-
-        verifyNoInteractions(reconciliationService);
-    }
-
-    @Test
-    void scanPostRagBatchResetsCheckpointAfterFullPass() {
-        when(checkpointMapper.findByScanType(ReconciliationScanType.POST_RAG))
-                .thenReturn(ReconciliationCheckpoint.builder()
-                        .scanType(ReconciliationScanType.POST_RAG)
-                        .lastScannedId(105L)
-                        .build());
-        when(knowPostMapper.listPublicPublishedPostIdsCursor(105L, 1000)).thenReturn(List.of());
-
-        service.scanPostRagBatch();
-
-        verify(checkpointMapper).updateCheckpoint(ReconciliationScanType.POST_RAG, 0L);
-    }
-
-    @Test
-    void scanPostRagBatchPropagatesProbeFailureWithoutEnqueueingTasks() {
-        when(checkpointMapper.findByScanType(ReconciliationScanType.POST_RAG))
-                .thenReturn(ReconciliationCheckpoint.builder()
-                        .scanType(ReconciliationScanType.POST_RAG)
-                        .lastScannedId(10L)
-                        .build());
-        when(knowPostMapper.listPublicPublishedPostIdsCursor(10L, 1000)).thenReturn(List.of(11L));
-        ragIndexService.setFailure(11L, new IllegalStateException("rag probe failed"));
-
-        assertThatThrownBy(() -> service.scanPostRagBatch())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("rag probe failed");
 
         verifyNoInteractions(reconciliationService);
     }
@@ -544,38 +464,6 @@ class ReconciliationScanServiceTest {
                 throw failure;
             }
             return counts.getOrDefault(id, Map.of());
-        }
-    }
-
-    private static final class RecordingRagIndexService extends RagIndexService {
-        private final Map<Long, Boolean> existing = new HashMap<>();
-        private final Map<Long, RuntimeException> failures = new HashMap<>();
-        private final List<Long> queriedPostIds = new ArrayList<>();
-
-        private RecordingRagIndexService() {
-            super(null, null, null, null, null);
-        }
-
-        void setExists(long postId, boolean exists) {
-            existing.put(postId, exists);
-        }
-
-        void setFailure(long postId, RuntimeException failure) {
-            failures.put(postId, failure);
-        }
-
-        @Override
-        public boolean hasIndexForPost(long postId) {
-            queriedPostIds.add(postId);
-            RuntimeException failure = failures.get(postId);
-            if (failure != null) {
-                throw failure;
-            }
-            return existing.getOrDefault(postId, false);
-        }
-
-        List<Long> queriedPostIds() {
-            return queriedPostIds;
         }
     }
 }

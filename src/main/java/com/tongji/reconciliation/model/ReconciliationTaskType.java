@@ -4,7 +4,6 @@ import java.util.List;
 
 public final class ReconciliationTaskType {
     public static final String ES_INDEX = "es_index";
-    public static final String RAG_INDEX = "rag_index";
     public static final String FEED_CACHE_INVALIDATE = "feed_cache_invalidate";
     public static final String GORSE_ITEM_UPSERT = "gorse_item_upsert";
     public static final String GORSE_FEEDBACK = "gorse_feedback";
@@ -18,7 +17,6 @@ public final class ReconciliationTaskType {
 
     public static final List<String> ALL = List.of(
             ES_INDEX,
-            RAG_INDEX,
             FEED_CACHE_INVALIDATE,
             GORSE_ITEM_UPSERT,
             GORSE_FEEDBACK,

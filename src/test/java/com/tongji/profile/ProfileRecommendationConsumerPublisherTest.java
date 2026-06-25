@@ -48,13 +48,13 @@ class ProfileRecommendationConsumerPublisherTest {
         updated.setSchool("Tongji");
         updated.setPhone("13800000000");
         updated.setEmail("neo@example.com");
-        updated.setTagsJson("[\"ai\"]");
+        updated.setTagsJson("[\"java\"]");
 
         when(userMapper.findById(7L)).thenReturn(current, updated);
 
         service.updateProfile(7L, new ProfilePatchRequest(
                 "neo", "bio", "male", LocalDate.parse("2000-01-02"),
-                "zg007", "Tongji", "[\"ai\"]"));
+                "zg007", "Tongji", "[\"java\"]"));
 
         ArgumentCaptor<UserProfileUpdatedEvent> eventCaptor = ArgumentCaptor.forClass(UserProfileUpdatedEvent.class);
         verify(userProfileUpdatedProducer).publish(eventCaptor.capture());
@@ -83,7 +83,7 @@ class ProfileRecommendationConsumerPublisherTest {
         UserProfileUpdatedEvent event = new UserProfileUpdatedEvent(
                 7L, "neo", "https://img", "bio", "zg007", "MALE",
                 LocalDate.parse("2000-01-02"), "Tongji", "13800000000",
-                "neo@example.com", "[\"ai\"]");
+                "neo@example.com", "[\"java\"]");
 
         producer.publish(event);
 

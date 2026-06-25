@@ -37,14 +37,9 @@ docker compose up -d
 mvn spring-boot:run
 ```
 
-Optional external-service environment variables:
+Optional environment variables:
 
 ```bash
-export SILICONFLOW_API_KEY=your_siliconflow_key
-export SILICONFLOW_BASE_URL=https://api.siliconflow.com
-export SILICONFLOW_CHAT_MODEL=Qwen/Qwen3-32B
-export SILICONFLOW_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
-export SILICONFLOW_EMBEDDING_DIMENSIONS=1024
 export MINIO_ENDPOINT=http://localhost:9000
 export MINIO_PUBLIC_ENDPOINT=http://localhost:9000
 export MINIO_ACCESS_KEY=minioadmin
@@ -53,7 +48,7 @@ export MINIO_BUCKET=zhiguang
 export MINIO_PUBLIC_DOMAIN=
 ```
 
-AI/RAG features need `SILICONFLOW_API_KEY`. The app uses SiliconFlow through Spring AI's OpenAI-compatible client. Object upload uses the local MinIO service by default.
+Object upload uses the local MinIO service by default.
 
 ## Run Frontend Locally
 
