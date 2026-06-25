@@ -15,10 +15,14 @@ task execution.
   - Task 3 - Add Aegis execution bridge skill
   - Task 4 - Align execution enhancers
   - Task 5 - Review integration wording
-- Next candidate: integration dry run on a real task
+- Task 6 - Define Aegis durable execution artifact ownership
+- Next candidate: commit / finish-work
 - Notes: This convention exists so `trellis-aegis-execution` can identify the
   current top-level execution unit without guessing. The design slice for this
-  task is complete; the next meaningful step is a real-task handoff trial.
+  task is complete; real-task handoff has already been trialed separately.
+  Integrated mode now keeps Aegis durable artifacts limited to
+  `docs/aegis/plans/` and `docs/aegis/work/`, with Aegis-native creation
+  timing and Trellis-owned top-level authority.
 
 ## Execution Order
 
@@ -29,6 +33,8 @@ task execution.
 4. Wire the workflow text so Aegis replaces Trellis-owned implementation flow,
    while `trellis-before-dev` and Trellis finish stages stay intact.
 5. Review for authority conflicts and wording drift.
+6. Define whether Aegis durable execution artifacts are suppressed or retained
+   in the integrated mode, and document the result.
 
 ## Tasks
 

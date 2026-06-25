@@ -87,6 +87,24 @@ Hard rules:
 - If `implement.md` is too vague to execute safely, execution must stop and the
   flow must return to Trellis planning to revise `implement.md`.
 
+### Aegis durable execution artifacts
+
+In the integrated mode, Aegis may keep only two durable project-local artifact
+families:
+
+- `docs/aegis/plans/`
+- `docs/aegis/work/`
+
+Rules:
+
+- Aegis decides creation timing using its own workflow thresholds.
+- `docs/aegis/plans/` is a derived execution-detail plan for the active
+  `implement.md` step.
+- `docs/aegis/work/` follows native Aegis checkpoint / evidence / drift rules.
+- These artifacts do not change Trellis task authority.
+- `docs/aegis/specs/`, `docs/aegis/baseline/`, and `docs/aegis/adr/` stay out
+  of the default integrated execution flow.
+
 ## `trellis-before-dev` Role
 
 `trellis-before-dev` is retained.
@@ -223,8 +241,7 @@ First integration slice should cover:
 
 Deferred until later:
 
-- Aegis workspace persistence
-- Aegis `docs/aegis/` project records
+- Aegis `specs/`, `baseline/`, and `adr/` project records
 - full migration of every existing Trellis enhancer
 - aggressive subagent orchestration changes
 
