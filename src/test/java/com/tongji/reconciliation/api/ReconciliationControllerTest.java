@@ -63,12 +63,12 @@ class ReconciliationControllerTest {
 
     @Test
     void detailReturnsTask() throws Exception {
-        when(reconciliationService.findById(11L)).thenReturn(task(11L, ReconciliationTaskType.RAG_INDEX));
+        when(reconciliationService.findById(11L)).thenReturn(task(11L, ReconciliationTaskType.ES_INDEX));
 
         mockMvc.perform(get("/api/v1/reconciliation/tasks/{id}", 11L))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(11L))
-                .andExpect(jsonPath("$.taskType").value(ReconciliationTaskType.RAG_INDEX));
+                .andExpect(jsonPath("$.taskType").value(ReconciliationTaskType.ES_INDEX));
     }
 
     @Test
@@ -105,13 +105,13 @@ class ReconciliationControllerTest {
         when(reconciliationService.rerunTarget(ReconciliationTargetType.POST, 101L))
                 .thenReturn(List.of(
                         task(21L, ReconciliationTaskType.ES_INDEX),
-                        task(22L, ReconciliationTaskType.RAG_INDEX)
+                        task(22L, ReconciliationTaskType.GORSE_ITEM_UPSERT)
                 ));
 
         mockMvc.perform(post("/api/v1/reconciliation/targets/{type}/{id}/rerun", ReconciliationTargetType.POST, 101L))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(21L))
-                .andExpect(jsonPath("$[1].taskType").value(ReconciliationTaskType.RAG_INDEX));
+                .andExpect(jsonPath("$[1].taskType").value(ReconciliationTaskType.GORSE_ITEM_UPSERT));
     }
 
     private ReconciliationTask task(long id, String taskType) {

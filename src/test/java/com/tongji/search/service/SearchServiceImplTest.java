@@ -64,7 +64,7 @@ class SearchServiceImplTest {
                 eq(KnowPostFeedService.FeedVisibilityScope.PUBLIC))).thenReturn(List.of(feedItem("201")));
         stubEs("201", "202");
 
-        SearchResponse response = service.search("llm", 2, null, null, 42L);
+        SearchResponse response = service.search("guide", 2, null, null, 42L);
 
         // promoted 201 在前；organic 命中的 201 被去重，仅保留 202
         assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("201", "202");
@@ -81,7 +81,7 @@ class SearchServiceImplTest {
                 eq(KnowPostFeedService.FeedVisibilityScope.PUBLIC))).thenReturn(List.of(feedItem("201")));
         stubEs("202", "203");
 
-        SearchResponse response = service.search("llm", 2, null, null, 42L);
+        SearchResponse response = service.search("guide", 2, null, null, 42L);
 
         // 只返回 promoted 201 + organic 202；nextAfter 基于 202（organic 最后返回项），而非多取的 203
         assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("201", "202");
@@ -94,7 +94,7 @@ class SearchServiceImplTest {
         // after != null：不插 promoted，直接走 organic 分页
         stubEs("301", "302");
 
-        SearchResponse response = service.search("llm", 2, null, "cGFnZTI=", 42L);
+        SearchResponse response = service.search("guide", 2, null, "cGFnZTI=", 42L);
 
         assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("301", "302");
         assertThat(response.items()).allSatisfy(item -> assertThat(item.commercial()).isFalse());
@@ -109,7 +109,7 @@ class SearchServiceImplTest {
                 eq(KnowPostFeedService.FeedVisibilityScope.PUBLIC))).thenReturn(List.of(feedItem("201")));
         stubEs("201", "202");
 
-        SearchResponse response = service.search("llm", 2, null, null, 42L);
+        SearchResponse response = service.search("guide", 2, null, null, 42L);
 
         assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("201", "202");
         assertThat(response.hasMore()).isFalse();
@@ -121,7 +121,7 @@ class SearchServiceImplTest {
         // 非首屏（无 promoted）；ES 返回重复命中，去重后只接受 1 条，不应误报 hasMore
         stubEs("301", "301");
 
-        SearchResponse response = service.search("llm", 2, null, "cGFnZTI=", 42L);
+        SearchResponse response = service.search("guide", 2, null, "cGFnZTI=", 42L);
 
         assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("301");
         assertThat(response.hasMore()).isFalse();
@@ -136,7 +136,7 @@ class SearchServiceImplTest {
                 eq(KnowPostFeedService.FeedVisibilityScope.PUBLIC))).thenReturn(List.of(feedItem("201")));
         stubEs("202", "203");
 
-        service.search("llm", 2, null, null, 42L);
+        service.search("guide", 2, null, null, 42L);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Function<SearchRequest.Builder, ObjectBuilder<SearchRequest>>> captor = ArgumentCaptor.forClass(Function.class);
@@ -160,7 +160,7 @@ class SearchServiceImplTest {
         // 关键：若 lookahead 预算只够 organicNeed+1，被丢弃的命中会吃掉预算导致 false negative。
         stubEs(null, null, "301", "302", "303");
 
-        SearchResponse response = service.search("llm", 2, null, "cGFnZTI=", 42L);
+        SearchResponse response = service.search("guide", 2, null, "cGFnZTI=", 42L);
 
         assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("301", "302");
         assertThat(response.hasMore()).isTrue();

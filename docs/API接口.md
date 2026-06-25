@@ -197,14 +197,8 @@
 - 响应：`204 No Content`
 - 示例：`curl -X DELETE "https://host/api/v1/knowposts/123" -H "Authorization: Bearer <access>"`
 
-### 8. 生成描述（LLM）
-- 方法：`POST`
-- 路径：`/api/v1/knowposts/description/suggest`
-- 鉴权：需要
-- 请求体：`{ content: "..." }`
-- 响应：`object`
-  - `description` `string` 不超过50字中文描述
-- 示例：`curl -X POST "https://host/api/v1/knowposts/description/suggest" -H "Authorization: Bearer <access>" -H "Content-Type: application/json" -d '{"content":"..."}'`
+### 8. 已移除接口
+- 已移除：知文描述生成、问答流式输出、索引重建接口不再提供。
 
 ## Feed 与查询
 ### 1. 首页 Feed（公开）

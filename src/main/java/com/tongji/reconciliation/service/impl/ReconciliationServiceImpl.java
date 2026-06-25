@@ -153,7 +153,6 @@ public class ReconciliationServiceImpl implements ReconciliationService {
         List<ReconciliationTask> tasks = new ArrayList<>();
         if (ReconciliationTargetType.POST.equals(targetType)) {
             addIfCreated(tasks, ReconciliationTaskType.ES_INDEX, targetType, targetId);
-            addIfCreated(tasks, ReconciliationTaskType.RAG_INDEX, targetType, targetId);
             addIfCreated(tasks, ReconciliationTaskType.GORSE_ITEM_UPSERT, targetType, targetId);
             addIfCreated(tasks, ReconciliationTaskType.CASSANDRA_TEXT, targetType, targetId);
             addIfCreated(tasks, ReconciliationTaskType.COMMENT_COUNT, targetType, targetId);
