@@ -15,14 +15,17 @@ task execution.
   - Task 3 - Add Aegis execution bridge skill
   - Task 4 - Align execution enhancers
   - Task 5 - Review integration wording
-- Task 6 - Define Aegis durable execution artifact ownership
-- Next candidate: commit / finish-work
+  - Task 6 - Define Aegis durable execution artifact ownership
+  - Task 7 - Add clone-usable vendored Aegis bootstrap
+- Next candidate: validate bootstrap / commit / finish-work
 - Notes: This convention exists so `trellis-aegis-execution` can identify the
   current top-level execution unit without guessing. The design slice for this
   task is complete; real-task handoff has already been trialed separately.
   Integrated mode now keeps Aegis durable artifacts limited to
   `docs/aegis/plans/` and `docs/aegis/work/`, with Aegis-native creation
-  timing and Trellis-owned top-level authority.
+  timing and Trellis-owned top-level authority. This task now also covers
+  portable project-local bootstrap so a fresh clone can recreate machine-local
+  Aegis runtime wiring without committing absolute-path config.
 
 ## Execution Order
 
@@ -35,6 +38,8 @@ task execution.
 5. Review for authority conflicts and wording drift.
 6. Define whether Aegis durable execution artifacts are suppressed or retained
    in the integrated mode, and document the result.
+7. Add project-local bootstrap and docs so the vendored Aegis runtime is
+   clone-usable in Codex without a separate global install.
 
 ## Tasks
 
@@ -142,6 +147,36 @@ Validation:
 
 - manual read-through of modified files
 
+### Task 7: Add clone-usable vendored Aegis bootstrap
+
+Files:
+
+- `.codex/scripts/setup-aegis.ps1`
+- `docs/aegis/README.md`
+- `.gitignore`
+- `README.md`
+- task artifacts if needed
+
+Work:
+
+- add a project-local bootstrap script for Codex users
+- generate current-machine Aegis config under `.codex/aegis-config.toml`
+- keep the setup path repo-only and avoid user-home Aegis state
+- verify from the vendored method-pack root, not the target project root
+- verify `.codex/skills/` as the current discovery root
+- document restart/reload requirements
+- document that vendored Aegis updates happen through repository updates, not
+  a standalone method-pack checkout lifecycle
+
+Validation:
+
+- run the bootstrap locally
+- confirm doctor JSON includes:
+  - `"ok": true`
+  - `"workspaceSupport": "available"`
+  - `"configStatus": "configured"`
+- confirm doctor also validates `.codex/skills/` as the discovery root
+
 ## Review Gate
 
 Before considering implementation complete, confirm:
@@ -149,12 +184,15 @@ Before considering implementation complete, confirm:
 - `implement.md` remains the sole top-level execution authority
 - Aegis is clearly an execution-layer engine, not project-task authority
 - Trellis still owns planning artifacts and finish stages
+- clone-and-use setup does not rely on a committed machine-specific absolute
+  path config file
 
 ## Final Validation
 
 - inspect changed workflow text
 - inspect changed routing skill text
 - inspect bridge skill text
+- run vendored Aegis bootstrap and doctor verification
 - ensure the resulting flow reads as:
 
 ```text

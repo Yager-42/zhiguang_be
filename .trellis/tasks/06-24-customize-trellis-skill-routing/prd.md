@@ -28,6 +28,12 @@ are ready.
   Trellis `implement.md` step, not as a peer project plan.
 - Keep `trellis-before-dev`, `trellis-check`, `trellis-update-spec`, and
   `trellis-finish-work` in the final integrated flow.
+- Make the integrated workflow clone-usable from the repository itself instead
+  of depending on one machine's preinstalled global Aegis checkout.
+- Avoid committing machine-specific Aegis runtime config with absolute paths.
+- Provide a project-local bootstrap path that configures the current machine
+  against the vendored Aegis method-pack and verifies discovery against the
+  vendored current version.
 
 ## Acceptance Criteria
 
@@ -48,6 +54,10 @@ are ready.
   artifacts are limited to `docs/aegis/plans/` and `docs/aegis/work/`.
 - [x] Aegis `plans/` are described as execution-detail expansions of the
   active `implement.md` step instead of peer authority artifacts.
+- [x] The repository now contains a project-local Aegis bootstrap path for
+  Codex clone-and-use setup.
+- [x] Machine-specific `.codex/aegis-config.toml` is no longer required as a
+  committed portable runtime artifact.
 
 ## Notes
 
