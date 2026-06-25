@@ -20,6 +20,12 @@ are ready.
 - Replace Trellis-owned task execution flow with an Aegis execution bridge.
 - Keep `implement.md` as the authoritative top-level execution plan, while
   allowing Aegis to refine execution at the step/slice level only.
+- In the integrated mode, keep Aegis durable execution artifacts limited to
+  `docs/aegis/plans/` and `docs/aegis/work/`.
+- Let Aegis decide when those two artifact families are created using its own
+  workflow thresholds.
+- Treat Aegis `plans/` as a more detailed execution expansion of the active
+  Trellis `implement.md` step, not as a peer project plan.
 - Keep `trellis-before-dev`, `trellis-check`, `trellis-update-spec`, and
   `trellis-finish-work` in the final integrated flow.
 
@@ -38,6 +44,10 @@ are ready.
   Aegis execution -> Trellis finish stages.
 - [x] Workflow text now makes clear that `implement.md` remains the
   authoritative top-level execution plan.
+- [x] Project-local routing and bridge text now state that Aegis durable
+  artifacts are limited to `docs/aegis/plans/` and `docs/aegis/work/`.
+- [x] Aegis `plans/` are described as execution-detail expansions of the
+  active `implement.md` step instead of peer authority artifacts.
 
 ## Notes
 

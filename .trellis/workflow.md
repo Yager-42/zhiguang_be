@@ -237,10 +237,14 @@ Dispatch prompt starts with `Active task: <task path from task.py current>`. Rea
      instead of dispatching sub-agents. -->
 
 [workflow-state:in_progress-inline]
-Flow: `trellis-before-dev` -> edit -> `trellis-check` -> validation -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
-Do not dispatch implement/check sub-agents in inline mode.
+Flow: `trellis-before-dev` -> `trellis-aegis-execution` -> Aegis task execution -> `trellis-check` -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
+Do not dispatch Trellis implement/check sub-agents in inline mode.
 Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, plus relevant spec/research loaded by skills.
-For zhiguang_be, load `zhiguang-trellis-flow`. Use `alibaba-java-coding-guidelines-skill` for Java/Spring/MyBatis/Maven/MySQL/SQL/logging/exception/transaction/database work. Use `ponytail` during implementation to keep the change small and direct. Use `tdd` only when a clear behavior seam exists. During `trellis-check`, apply `code-review-skill` and Alibaba Java review as enhancers, not standalone replacement phases.
+For zhiguang_be, load `zhiguang-trellis-flow`.
+Ownership: Trellis owns project governance and planning artifacts; Aegis owns task execution method. `implement.md` remains the authoritative top-level execution plan.
+Keep `trellis-before-dev` before execution. If `implement.md` is too vague to execute safely, return to Trellis planning instead of improvising a peer implementation plan.
+Inside Aegis execution, prefer `aegis:systematic-debugging` for bug execution, `aegis:test-driven-development` for strict test-first execution, `ponytail` as an implementation-style enhancer, and `alibaba-java-coding-guidelines-skill` for Java/Spring/MyBatis/Maven/MySQL/SQL/logging/exception/transaction/database work.
+Before returning to Trellis finish stages, run `aegis:verification-before-completion`. During `trellis-check`, apply `code-review-skill` and Alibaba Java review as enhancers, not standalone replacement phases.
 [/workflow-state:in_progress-inline]
 
 ### Phase 3: Finish
