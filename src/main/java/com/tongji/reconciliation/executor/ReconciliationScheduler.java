@@ -37,11 +37,6 @@ public class ReconciliationScheduler {
         reconciliationExecutor.execute(scanService::scanPostEsBatch);
     }
 
-    @Scheduled(fixedDelay = 300000L, initialDelay = 45000L)
-    public void scanPostRag() {
-        reconciliationExecutor.execute(scanService::scanPostRagBatch);
-    }
-
     @Scheduled(fixedDelay = 300000L, initialDelay = 60000L)
     public void scanPostGorse() {
         reconciliationExecutor.execute(scanService::scanPostGorseBatch);

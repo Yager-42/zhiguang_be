@@ -4,7 +4,6 @@ import com.tongji.comment.mapper.CommentMapper;
 import com.tongji.knowpost.manager.PublishAttemptService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPostDetailRow;
-import com.tongji.llm.rag.RagIndexService;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
@@ -48,7 +47,6 @@ public class ReconciliationScanService {
     private final ObjectMapper objectMapper;
     private final CounterService counterService;
     private final SearchIndexService searchIndexService;
-    private final RagIndexService ragIndexService;
     private final PostTextRepository postTextRepository;
     private final CommentTextRepository commentTextRepository;
     private final PromotionAuctionWindowMapper promotionAuctionWindowMapper;
@@ -68,7 +66,6 @@ public class ReconciliationScanService {
                                      ObjectMapper objectMapper,
                                      CounterService counterService,
                                      SearchIndexService searchIndexService,
-                                     RagIndexService ragIndexService,
                                      PostTextRepository postTextRepository,
                                      CommentTextRepository commentTextRepository,
                                      PromotionAuctionWindowMapper promotionAuctionWindowMapper,
@@ -86,7 +83,6 @@ public class ReconciliationScanService {
                 objectMapper,
                 counterService,
                 searchIndexService,
-                ragIndexService,
                 postTextRepository,
                 commentTextRepository,
                 promotionAuctionWindowMapper,
@@ -107,7 +103,6 @@ public class ReconciliationScanService {
                               ObjectMapper objectMapper,
                               CounterService counterService,
                               SearchIndexService searchIndexService,
-                              RagIndexService ragIndexService,
                               PostTextRepository postTextRepository,
                               CommentTextRepository commentTextRepository,
                               PromotionAuctionWindowMapper promotionAuctionWindowMapper,
@@ -125,7 +120,6 @@ public class ReconciliationScanService {
         this.objectMapper = objectMapper;
         this.counterService = counterService;
         this.searchIndexService = searchIndexService;
-        this.ragIndexService = ragIndexService;
         this.postTextRepository = postTextRepository;
         this.commentTextRepository = commentTextRepository;
         this.promotionAuctionWindowMapper = promotionAuctionWindowMapper;
@@ -140,22 +134,6 @@ public class ReconciliationScanService {
                 ReconciliationScanType.POST_ES,
                 this::postEsMissingOrDrifted,
                 ReconciliationTaskType.ES_INDEX
-        );
-    }
-
-    public void scanPostRagBatch() {
-        scanIds(
-                ReconciliationScanType.POST_RAG,
-                checkpoint -> knowPostMapper.listPublicPublishedPostIdsCursor(checkpoint, BATCH_SIZE),
-                id -> {
-                    if (!ragIndexService.hasIndexForPost(id)) {
-                        reconciliationService.createTaskIfAbsent(
-                                ReconciliationTaskType.RAG_INDEX,
-                                ReconciliationTargetType.POST,
-                                id
-                        );
-                    }
-                }
         );
     }
 

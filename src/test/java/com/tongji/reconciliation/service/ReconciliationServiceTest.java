@@ -94,11 +94,11 @@ class ReconciliationServiceTest {
 
     @Test
     void createTaskIfAbsentCreatesWhenOnlySucceededOrDeadTasksExist() {
-        when(taskMapper.findActiveByDedupeScope("rag_index:post:42")).thenReturn(null);
+        when(taskMapper.findActiveByDedupeScope("es_index:post:42")).thenReturn(null);
         when(idService.nextId(IdNamespace.RECONCILIATION_TASK)).thenReturn(9002L);
 
         ReconciliationTask task = service.createTaskIfAbsent(
-                ReconciliationTaskType.RAG_INDEX,
+                ReconciliationTaskType.ES_INDEX,
                 ReconciliationTargetType.POST,
                 42L
         );
@@ -170,7 +170,6 @@ class ReconciliationServiceTest {
         assertThat(postTasks).extracting(ReconciliationTask::getTaskType)
                 .containsExactly(
                         ReconciliationTaskType.ES_INDEX,
-                        ReconciliationTaskType.RAG_INDEX,
                         ReconciliationTaskType.GORSE_ITEM_UPSERT,
                         ReconciliationTaskType.CASSANDRA_TEXT,
                         ReconciliationTaskType.COMMENT_COUNT,

@@ -1,21 +1,20 @@
 package com.tongji.reconciliation.executor;
 
-import com.tongji.knowpost.mapper.KnowPostMapper;
-import com.tongji.knowpost.model.KnowPostDetailRow;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.mapper.CommentMapper;
 import com.tongji.counter.service.CounterService;
 import com.tongji.counter.service.UserCounterService;
-import com.tongji.llm.rag.RagIndexService;
+import com.tongji.knowpost.mapper.KnowPostMapper;
+import com.tongji.knowpost.model.KnowPostDetailRow;
 import com.tongji.recommendation.feed.TimelineExecutor;
+import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
-import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.relation.mapper.RelationMapper;
 import com.tongji.relation.mapper.RelationMapper.RelationRepairRow;
 import com.tongji.search.index.SearchIndexService;
 import com.tongji.storage.text.TextStorageService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -24,9 +23,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 
 import java.sql.Timestamp;
-
-import java.util.Optional;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
@@ -68,31 +66,12 @@ class ReconcilerTest {
     }
 
     @Test
-    void ragIndexReconcilerEnsuresPostIndexed() {
-        ReconciliationTask task = task(ReconciliationTaskType.RAG_INDEX, ReconciliationTargetType.POST, 102L);
-        RecordingRagIndexService ragIndexService = new RecordingRagIndexService();
-
-        new RagIndexReconciler(ragIndexService).reconcile(task);
-
-        org.assertj.core.api.Assertions.assertThat(ragIndexService.strictIndexedPostId).isEqualTo(102L);
-    }
-
-    @Test
     void esIndexReconcilerPropagatesStrictUpsertFailure() {
         ReconciliationTask task = task(ReconciliationTaskType.ES_INDEX, ReconciliationTargetType.POST, 105L);
 
         assertThatThrownBy(() -> new EsIndexReconciler(counterService, new FailingSearchIndexService()).reconcile(task))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("strict es failure");
-    }
-
-    @Test
-    void ragIndexReconcilerPropagatesStrictIndexFailure() {
-        ReconciliationTask task = task(ReconciliationTaskType.RAG_INDEX, ReconciliationTargetType.POST, 106L);
-
-        assertThatThrownBy(() -> new RagIndexReconciler(new FailingRagIndexService()).reconcile(task))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("strict rag failure");
     }
 
     @Test
@@ -257,24 +236,6 @@ class ReconcilerTest {
         }
     }
 
-    private static final class RecordingRagIndexService extends RagIndexService {
-        private Long strictIndexedPostId;
-
-        private RecordingRagIndexService() {
-            super(null, null, null, null, null);
-        }
-
-        @Override
-        public void ensureIndexed(long postId) {
-            throw new AssertionError("reconciler should use strict RAG ensureIndexed");
-        }
-
-        @Override
-        public void ensureIndexedStrict(long postId) {
-            strictIndexedPostId = postId;
-        }
-    }
-
     private static final class FailingSearchIndexService extends SearchIndexService {
         private FailingSearchIndexService() {
             super(null, null, null, null, null);
@@ -283,17 +244,6 @@ class ReconcilerTest {
         @Override
         public void upsertKnowPostStrict(long id) {
             throw new IllegalStateException("strict es failure");
-        }
-    }
-
-    private static final class FailingRagIndexService extends RagIndexService {
-        private FailingRagIndexService() {
-            super(null, null, null, null, null);
-        }
-
-        @Override
-        public void ensureIndexedStrict(long postId) {
-            throw new IllegalStateException("strict rag failure");
         }
     }
 }

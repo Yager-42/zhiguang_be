@@ -46,27 +46,6 @@ spring:
   elasticsearch:
     uris:
       - http://localhost:9200
-  ai:
-    model:
-      chat: openai
-      embedding: openai
-    openai:
-      api-key: sk-tvldborjnzrlrmngxojevjsxsaijpfuspesvvaqmccroqajt
-      base-url: ${SILICONFLOW_BASE_URL:https://api.siliconflow.com}
-      chat:
-        options:
-          model: ${SILICONFLOW_CHAT_MODEL:Qwen/Qwen3-32B}
-      embedding:
-        options:
-          model: ${SILICONFLOW_EMBEDDING_MODEL:Qwen/Qwen3-Embedding-0.6B}
-          dimensions: ${SILICONFLOW_EMBEDDING_DIMENSIONS:1024}
-    vectorstore:
-      type: elasticsearch
-      elasticsearch:
-        index-name: zhiguang-ai-index
-        dimensions: ${SILICONFLOW_EMBEDDING_DIMENSIONS:1024}
-        initialize-schema: true
-
 rocketmq:
   name-server: localhost:9876
   producer:
