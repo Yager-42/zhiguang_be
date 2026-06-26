@@ -37,4 +37,9 @@ Execute these steps:
 
 7. Understand the coding standards and patterns you need to follow, then proceed with your development plan.
 
+8. If execution later routes into Aegis slice planning, treat the relevant
+   spec outputs loaded here as mandatory authority inputs for each slice plan.
+   Do not treat this step as a fire-and-forget preamble; the later slice plan
+   must explicitly cite the applicable `.trellis/spec/` guidance it relies on.
+
 This step is **mandatory** before writing any code.

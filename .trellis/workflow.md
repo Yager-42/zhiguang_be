@@ -208,7 +208,7 @@ Load `trellis-brainstorm`; stay in planning.
 Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
 Multi-deliverable scope: consider a parent task plus independently verifiable child tasks; dependencies must be written in child artifacts, not implied by tree position.
 Inline mode: skip jsonl curation; Phase 2 reads artifacts/specs via `trellis-before-dev`.
-For zhiguang_be, load `zhiguang-trellis-flow` and apply planning enhancers only when triggered: `grilling` for unclear scope, `domain-modeling` for unclear business language, `codebase-design` for risky module boundaries, and `to-issues` for independently verifiable child tasks.
+For zhiguang_be, load `zhiguang-trellis-flow` and apply planning enhancers only when triggered: `grilling` for unclear scope, `domain-modeling` for unclear business language, and `codebase-design` for risky module boundaries.
 [/workflow-state:planning-inline]
 
 ### Phase 2: Execute
@@ -243,8 +243,9 @@ Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, p
 For zhiguang_be, load `zhiguang-trellis-flow`.
 Ownership: Trellis owns project governance and planning artifacts; Aegis owns task execution method. `implement.md` remains the authoritative top-level execution plan.
 Keep `trellis-before-dev` before execution. If `implement.md` is too vague to execute safely, return to Trellis planning instead of improvising a peer implementation plan.
-Inside Aegis execution, prefer `aegis:systematic-debugging` for bug execution, `aegis:test-driven-development` for strict test-first execution, `ponytail` as an implementation-style enhancer, and `alibaba-java-coding-guidelines-skill` for Java/Spring/MyBatis/Maven/MySQL/SQL/logging/exception/transaction/database work.
-Before returning to Trellis finish stages, run `aegis:verification-before-completion`. During `trellis-check`, apply `code-review-skill` and Alibaba Java review as enhancers, not standalone replacement phases.
+In zhiguang_be, every Aegis slice must first load fixed-order authority context, gather CodeGraph facts, write a durable `docs/aegis/plans/...` slice plan, present it to the user, and pause until explicit user approval. `Planless Slice Lane` is banned.
+Inside Aegis execution, require `alibaba-java-coding-guidelines-skill` for Java/Spring/MyBatis/Maven/MySQL/SQL/logging/exception/transaction/DTO/mapper/database work; use `aegis:systematic-debugging` for bug execution, `aegis:test-driven-development` for strict test-first execution, and `ponytail` as an implementation-style enhancer.
+Before returning to Trellis finish stages, run `aegis:verification-before-completion`. During `trellis-check`, require `code-review-skill` for changed code review and require Alibaba Java review for matching Java/database changes; these are mandatory local gates, not optional enhancers.
 [/workflow-state:in_progress-inline]
 
 ### Phase 3: Finish
