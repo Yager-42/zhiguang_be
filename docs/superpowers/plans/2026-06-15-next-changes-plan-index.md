@@ -21,6 +21,10 @@
 
 `split-to-microservices` remains architecture-only guidance for this batch. Do not create runtime microservice split work unless the user explicitly starts that change.
 
+## Follow-Up Product Roadmaps
+
+- [Community Closure Roadmap 13](./2026-06-25-community-closure-roadmap-134.md)
+
 ## Shared Context
 
 - Repo root for this workspace: `/Volumes/lexar/revive/zhiguang_be`; on other machines, run commands from that machine's repo root.
