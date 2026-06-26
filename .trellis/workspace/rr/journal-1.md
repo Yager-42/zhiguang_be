@@ -104,3 +104,36 @@ Implemented the notification center backend with follow/comment/like notificatio
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Harden Trellis Aegis Execution Governance
+
+**Date**: 2026-06-26
+**Task**: Harden Trellis Aegis Execution Governance
+**Branch**: `plan-rr`
+
+### Summary
+
+Hardened the local Trellis+Aegis execution contract: mandatory per-slice plan, explicit approval gate, CodeGraph-first fact gathering, mandatory review gates, and stronger workflow handoff wording.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a067c6e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
