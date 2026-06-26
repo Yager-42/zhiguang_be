@@ -123,9 +123,10 @@ public class CounterServiceImpl implements CounterService {
         if (ok) {
             int delta = add ? 1 : -1;
             // 产出计数事件（异步聚合），分区按实体维度保证同实体事件顺序
-            eventProducer.publish(CounterEvent.of(etype, eid, metric, idx, uid, delta));
+            CounterEvent event = CounterEvent.of(etype, eid, metric, idx, uid, delta);
+            eventProducer.publish(event);
             // 本地事件：触发缓存失效/旁路更新等快速路径
-            eventPublisher.publishEvent(CounterEvent.of(etype, eid, metric, idx, uid, delta));
+            eventPublisher.publishEvent(event);
         }
         return ok;
     }

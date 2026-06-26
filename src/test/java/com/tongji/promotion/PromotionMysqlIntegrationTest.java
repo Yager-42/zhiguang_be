@@ -249,14 +249,14 @@ class PromotionMysqlIntegrationTest {
 
     private static Instant uniqueOpenWindowStart() {
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
-        long offsetSeconds = uniqueId() % 1_800L;
-        return now.minusSeconds(1_800L + offsetSeconds);
+        long offsetMillis = uniqueId() % 3_599_000L;
+        return now.minusSeconds(3_599L).plusMillis(offsetMillis);
     }
 
     private static Instant uniqueClosableWindowStart() {
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
-        long offsetSeconds = uniqueId() % 1_800L;
-        return now.minusSeconds(7_200L + offsetSeconds);
+        long offsetMillis = uniqueId() % 3_599_000L;
+        return now.minusSeconds(7_199L).plusMillis(offsetMillis);
     }
 
     static boolean mysqlReachable() {
