@@ -213,6 +213,28 @@ CREATE TABLE IF NOT EXISTS follower (
     KEY idx_from (from_user_id, to_user_id, rel_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS notifications (
+    id BIGINT UNSIGNED NOT NULL,
+    recipient_user_id BIGINT UNSIGNED NOT NULL,
+    actor_user_id BIGINT UNSIGNED NOT NULL,
+    type VARCHAR(32) NOT NULL,
+    entity_type VARCHAR(32) NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+    second_entity_type VARCHAR(32) NULL,
+    second_entity_id BIGINT UNSIGNED NULL,
+    event_key VARCHAR(128) NOT NULL,
+    aggregate_count INT NOT NULL DEFAULT 1,
+    window_start DATETIME(3) NULL,
+    window_end DATETIME(3) NULL,
+    is_read TINYINT NOT NULL DEFAULT 0,
+    created_at DATETIME(3) NOT NULL,
+    read_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_notification_event_key (event_key),
+    KEY idx_notification_recipient_created (recipient_user_id, created_at, id),
+    KEY idx_notification_recipient_read (recipient_user_id, is_read, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS leaf_alloc (
     biz_tag VARCHAR(128) NOT NULL,
     max_id BIGINT NOT NULL DEFAULT 1,

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.notification.mapper.NotificationMapper">
+
+    <resultMap id="NotificationResultMap" type="com.tongji.notification.model.Notification">
+        <id property="id" column="id"/>
+        <result property="recipientUserId" column="recipient_user_id"/>
+        <result property="actorUserId" column="actor_user_id"/>
+        <result property="type" column="type"/>
+        <result property="entityType" column="entity_type"/>
+        <result property="entityId" column="entity_id"/>
+        <result property="secondEntityType" column="second_entity_type"/>
+        <result property="secondEntityId" column="second_entity_id"/>
+        <result property="eventKey" column="event_key"/>
+        <result property="aggregateCount" column="aggregate_count"/>
+        <result property="windowStart" column="window_start"/>
+        <result property="windowEnd" column="window_end"/>
+        <result property="isRead" column="is_read"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="readAt" column="read_at"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.notification.model.Notification">
+        INSERT INTO notifications (
+            id,
+            recipient_user_id,
+            actor_user_id,
+            type,
+            entity_type,
+            entity_id,
+            second_entity_type,
+            second_entity_id,
+            event_key,
+            aggregate_count,
+            window_start,
+            window_end,
+            is_read,
+            created_at,
+            read_at
+        ) VALUES (
+            #{id},
+            #{recipientUserId},
+            #{actorUserId},
+            #{type},
+            #{entityType},
+            #{entityId},
+            #{secondEntityType},
+            #{secondEntityId},
+            #{eventKey},
+            #{aggregateCount},
+            #{windowStart},
+            #{windowEnd},
+            #{isRead},
+            #{createdAt},
+            #{readAt}
+        )
+    </insert>
+
+    <select id="listByRecipient" resultMap="NotificationResultMap">
+        SELECT *
+        FROM notifications
+        WHERE recipient_user_id = #{recipientUserId}
+        <if test="cursorCreatedAt != null and cursorId != null">
+            AND (created_at &lt; #{cursorCreatedAt}
+                 OR (created_at = #{cursorCreatedAt} AND id &lt; #{cursorId}))
+        </if>
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countUnread" resultType="int">
+        SELECT COUNT(1)
+        FROM notifications
+        WHERE recipient_user_id = #{recipientUserId}
+          AND is_read = 0
+    </select>
+
+    <select id="findById" resultMap="NotificationResultMap">
+        SELECT *
+        FROM notifications
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
+    <update id="markRead">
+        UPDATE notifications
+        SET is_read = 1,
+            read_at = #{readAt}
+        WHERE id = #{id}
+          AND recipient_user_id = #{recipientUserId}
+          AND is_read = 0
+    </update>
+
+    <update id="markAllRead">
+        UPDATE notifications
+        SET is_read = 1,
+            read_at = #{readAt}
+        WHERE recipient_user_id = #{recipientUserId}
+          AND is_read = 0
+    </update>
+</mapper>
