@@ -71,3 +71,36 @@ Removed AI-facing knowpost APIs, LLM/RAG runtime code, reconciliation and async 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Notification Center
+
+**Date**: 2026-06-26
+**Task**: Notification Center
+**Branch**: `plan-rr`
+
+### Summary
+
+Implemented the notification center backend with follow/comment/like notifications, 5-minute hot-like aggregation, inbox APIs, tests, and backend spec capture.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eb6f032` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
