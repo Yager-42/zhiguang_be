@@ -15,12 +15,16 @@ execution.
 3. Check whether that step is execution-ready under the authority rules.
 4. If it is not execution-ready, stop and return to Trellis planning with the
    smallest concrete reason.
-5. If it is execution-ready, create a lower-layer Aegis slice refinement for
-   the current step only.
-6. Route to the smallest correct Aegis execution skill(s).
-7. Complete task-level verification with
-   `aegis:verification-before-completion`.
-8. Return control to Trellis finish stages.
+5. If it is execution-ready, gather slice code facts with CodeGraph first.
+6. Write a durable lower-layer Aegis slice plan for the current step only.
+7. Present that slice plan to the user and pause.
+8. Continue only after explicit user approval.
+9. Route to the smallest correct Aegis execution skill(s) for that approved
+   slice only.
+10. Append durable execution evidence into task-local `docs/aegis/work/...`.
+11. Complete task-level verification with
+    `aegis:verification-before-completion`.
+12. Return control to Trellis finish stages.
 
 ## Purpose
 
@@ -41,6 +45,8 @@ Read in this order:
 4. `implement.md` if present
 5. relevant `.trellis/spec/` guidance already loaded through
    `trellis-before-dev`
+6. CodeGraph facts for the current slice
+7. only if CodeGraph is insufficient, the minimum necessary file search/read
 
 If `implement.md` contains an `Execution State:` section, treat it as the
 preferred source for current-step selection.
@@ -54,16 +60,27 @@ preferred source for current-step selection.
 - In this integrated workflow, Aegis durable artifact ownership is limited to:
   - `docs/aegis/plans/`
   - `docs/aegis/work/`
-- Aegis `plans/` may be created on Aegis-native timing and thresholds, but any
-  such plan is a derived execution expansion of the active `implement.md`
-  step, not a replacement project plan.
-- Aegis `work/` records may be created on Aegis-native timing and thresholds
-  and should follow native Aegis checkpoint/evidence/drift rules.
+- Every slice must create one durable `docs/aegis/plans/...` file before any
+  implementation begins.
+- Every slice plan is a derived execution expansion of the active
+  `implement.md` step, not a replacement project plan.
+- Every task that enters Aegis execution must keep durable execution evidence
+  under one task-local `docs/aegis/work/YYYY-MM-DD-<slug>/...` directory.
 - Do not create `docs/aegis/specs/`, `docs/aegis/baseline/`, or
   `docs/aegis/adr/` in the default Trellis-integrated execution flow unless a
   project rule explicitly authorizes them.
 - If `implement.md` is too vague to execute safely, stop and return to Trellis
   planning instead of improvising a peer plan.
+- This repo disables `Planless Slice Lane`.
+- Conversation-only `Slice Card` text is not an allowed substitute for a
+  durable slice plan file.
+- Aegis may not execute a slice without:
+  - fixed-order context load
+  - CodeGraph-first fact gathering
+  - durable slice plan
+  - explicit user approval
+- Aegis may not claim execution ownership or successful handoff in closeout
+  without durable plan/work evidence.
 
 Return to Trellis planning when any of these is true:
 
@@ -74,6 +91,20 @@ Return to Trellis planning when any of these is true:
 - the current step forces a new architecture or contract decision not already
   captured by `design.md` or `implement.md`
 - the current step cannot be refined into an executable slice without guessing
+
+If the user rejects a slice plan:
+
+- if the rejection changes only slice-local implementation method:
+  - stay in Aegis slice planning
+  - rewrite the current slice plan
+- if the rejection changes:
+  - scope
+  - acceptance
+  - top-level `implement.md` step structure
+  - design boundary
+  then:
+  - return to Trellis planning
+  - revise `prd.md`, `design.md`, or `implement.md`
 
 ## Route Matrix
 
@@ -112,7 +143,8 @@ Apply them as follows:
   - do not keep as the primary bug-execution owner; prefer
     `aegis:systematic-debugging`
 - `alibaba-java-coding-guidelines-skill`
-  - keep available inside execution for Java/Spring/MyBatis/database work
+  - mandatory for Java, Spring, MyBatis, Maven, MySQL, SQL, DTO, mapper, or
+    database work in this repo
   - also keep available in Trellis finish/check stages
 
 Planning-only and finish-only enhancers stay outside this bridge.
@@ -148,13 +180,16 @@ The lower layer may not redefine:
 - top-level step order
 - final task acceptance boundary
 
-Use this compact lower-layer shape when a slice refinement is needed:
+Every slice plan must be durable, reviewable, and use this lower-layer shape:
 
 ```text
 Aegis Slice Plan:
 - Parent implement step:
 - Slice goal:
 - Slice non-goals:
+- Authority refs:
+- Relevant specs:
+- Code facts / CodeGraph evidence:
 - Files / owners:
 - Edit order:
 - Verification order:
@@ -165,6 +200,10 @@ Aegis Slice Plan:
 
 If the bridge cannot fill this shape without guessing, return to Trellis
 planning instead of executing.
+
+Pause after writing the slice plan. Do not implement until the user gives
+explicit approval semantics such as `允许`, `继续`, or equivalent direct
+approval wording. Silence, soft agreement, or agent inference do not count.
 
 ## Current Step Selection
 
@@ -182,9 +221,11 @@ Do not merge multiple top-level `implement.md` steps into one Aegis slice unless
 
 Before returning control to Trellis finish stages:
 
-1. complete task-level implementation work for the current authorized step
-2. run `aegis:verification-before-completion`
-3. return control to:
+1. confirm the executed slice had a durable plan and explicit user approval
+2. confirm task-local work evidence was appended
+3. complete task-level implementation work for the current authorized step
+4. run `aegis:verification-before-completion`
+5. return control to:
    - `trellis-check`
    - `trellis-update-spec`
    - commit / finish flow
@@ -198,9 +239,12 @@ Aegis Execution Handoff:
 - Current task:
 - Current implement step:
 - Implement authority source:
+- Authority refs loaded:
 - Aegis route selected:
 - Slice plan created:
+- User approval received:
 - Slice boundary:
+- Work evidence path:
 - Verification completed:
 - Return to Trellis stage:
 ```
