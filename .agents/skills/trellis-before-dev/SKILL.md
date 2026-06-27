@@ -35,11 +35,21 @@ Execute these steps:
    cat .trellis/spec/guides/index.md
    ```
 
-7. Understand the coding standards and patterns you need to follow, then proceed with your development plan.
+7. Run a compact **Architecture Drift Check** before editing:
 
-8. If execution later routes into Aegis slice planning, treat the relevant
-   spec outputs loaded here as mandatory authority inputs for each slice plan.
-   Do not treat this step as a fire-and-forget preamble; the later slice plan
-   must explicitly cite the applicable `.trellis/spec/` guidance it relies on.
+   ```text
+   Architecture Drift Check:
+   - Owner: which module/service/file owns the behavior?
+   - Source of truth: where does the authoritative state or contract live?
+   - Boundary: what API/schema/event/cache/module boundary must not drift?
+   - Fallback/old path: is this adding or retaining a fallback, duplicate owner,
+     compatibility branch, or stale path?
+   - Decision: proceed | revise design/implement | ask user
+   ```
+
+   If the owner, source of truth, or boundary cannot be answered from the task
+   artifacts, specs, or code, return to Trellis planning before writing code.
+
+8. Understand the coding standards and patterns you need to follow, then proceed with your development plan.
 
 This step is **mandatory** before writing any code.

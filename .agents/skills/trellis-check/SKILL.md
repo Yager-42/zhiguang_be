@@ -42,6 +42,21 @@ Run the project's lint, type-check, and test commands. Fix any failures before p
 
 ## Step 4: Review Against Checklist
 
+### Implementation Drift
+
+- [ ] Requirement alignment: code matches `prd.md` acceptance criteria?
+- [ ] Design alignment: code matches `design.md` boundaries if present?
+- [ ] Plan alignment: code follows `implement.md` steps if present?
+- [ ] Spec alignment: code follows applicable `.trellis/spec/` rules?
+- [ ] Result: aligned | design/spec defect | implementation drift | needs user decision
+- [ ] Fix path: update design/spec first | fix implementation | ask user
+
+Use `design/spec defect` when the written authority is wrong, missing, or
+stale. Use `implementation drift` when the written authority is still correct
+but the code diverged from it. Fix implementation drift directly. Return to
+Trellis planning when the fix would change scope, acceptance, or design
+boundaries.
+
 ### Code Quality
 
 - [ ] Linter passes?

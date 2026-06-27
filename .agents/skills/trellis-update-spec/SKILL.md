@@ -9,6 +9,10 @@ When you learn something valuable (from debugging, implementing, or discussion),
 
 **Timing**: After completing a task, fixing a bug, or discovering a new pattern
 
+Do not use `.trellis/spec/` as an execution log. Failed attempts, temporary
+reasoning, task-local notes, and one-off implementation details belong in the
+task discussion or task artifacts, not in durable project spec.
+
 ---
 
 ## Code-Spec First Rule (CRITICAL)

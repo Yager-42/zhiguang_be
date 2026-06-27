@@ -1,3 +1,0 @@
-use Anti-Entropy (`anti-entropy-governance`) before deciding whether to retire this old fallback
-
-Some uploaded files are source-of-truth data, so decide the safe path first and do not execute any destructive step.
