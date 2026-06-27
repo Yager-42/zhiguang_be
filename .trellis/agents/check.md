@@ -25,9 +25,10 @@ Before reviewing, read in this order:
 1. **Get the diff** — `git diff` / `git diff --staged` for uncommitted changes
 2. **Review against task artifacts** — does the diff satisfy `prd.md` (and `design.md` / `implement.md` if present)?
 3. **Review against specs** — naming, structure, type safety, error handling, conventions in `.trellis/spec/`
-4. **Self-fix** — when an issue is mechanical and small, fix it directly with the editing tools you have
-5. **Run verification** — project lint and typecheck on the changed scope
-6. **Report** — concrete findings with `file:line` citations and what was fixed vs. what is open
+4. **Run OCR gate** — preview with `ocr review --preview --audience agent`, then run `ocr review --audience agent`
+5. **Self-fix** — when an issue is mechanical and small, fix it directly with the editing tools you have
+6. **Run verification** — project lint and typecheck on the changed scope
+7. **Report** — concrete findings with `file:line` citations and what was fixed vs. what is open
 
 ## Forbidden Operations
 
@@ -41,11 +42,19 @@ The supervising main session owns commits. Report the post-fix state; do not com
 
 1. Run `git diff --name-only` and `git diff` to scope the changes
 2. Read the task artifacts and relevant spec files
-3. For each issue:
+3. Run the OCR gate:
+   - Run `ocr review --preview --audience agent`
+   - If the preview includes unrelated or unexpectedly broad files, stop and report the scope problem
+   - Record files excluded by OCR preview as outside OCR scope; cover them through normal Trellis checks
+   - If OCR previews reviewable files, run `ocr review --audience agent`
+   - Verify material OCR findings against source code, task artifacts, and specs before fixing or reporting them
+   - Treat verified OCR findings as blocking; fix them and rerun the full check loop
+   - Treat OCR execution failure as blocking unless the user explicitly overrides the OCR gate for this task
+4. For each issue:
    - If mechanical (lint nit, missing type, wrong import, dead branch) → fix in-place
    - If a design/judgment issue → record and report, do not silently rewrite
-4. Run the project's lint and typecheck on the changed scope after self-fixes
-5. Report
+5. Run the project's lint and typecheck on the changed scope after self-fixes
+6. Report
 
 ## Report Format
 
@@ -64,6 +73,7 @@ The supervising main session owns commits. Report the post-fix state; do not com
 ### Verification Results
 - TypeCheck: <pass|fail|skipped + reason>
 - Lint: <pass|fail|skipped + reason>
+- OCR: <pass|fail|not applicable|overridden + reason, including preview scope>
 
 ### Summary
 Checked <N> files, found <X> issues, fixed <Y>, <X-Y> open.
