@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
-- **Last Active**: 2026-06-26
+- **Total Sessions**: 5
+- **Last Active**: 2026-06-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~139 | Active |
+| `journal-1.md` | ~172 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-06-27 | Fold Aegis drift discipline into Trellis | `905c6e7` | `plan-rr` |
 | 4 | 2026-06-26 | Harden Trellis Aegis Execution Governance | `a067c6e` | `plan-rr` |
 | 3 | 2026-06-26 | Notification Center | `eb6f032` | `plan-rr` |
 | 2 | 2026-06-25 | Remove AI capability surfaces | `3da5da3` | `plan-rr` |
