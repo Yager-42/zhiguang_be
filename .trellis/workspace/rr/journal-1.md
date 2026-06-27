@@ -137,3 +137,36 @@ Hardened the local Trellis+Aegis execution contract: mandatory per-slice plan, e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Fold Aegis drift discipline into Trellis
+
+**Date**: 2026-06-27
+**Task**: Fold Aegis drift discipline into Trellis
+**Branch**: `plan-rr`
+
+### Summary
+
+Removed active Aegis workflow exposure and folded lightweight architecture/implementation drift checks into native Trellis skills.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `905c6e7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
