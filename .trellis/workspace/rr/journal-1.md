@@ -170,3 +170,36 @@ Removed active Aegis workflow exposure and folded lightweight architecture/imple
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Integrate OCR into Trellis checks
+
+**Date**: 2026-06-27
+**Task**: Integrate OCR into Trellis checks
+**Branch**: `plan-rr`
+
+### Summary
+
+Added Alibaba open-code-review as a hard Trellis check gate for OCR-selected files across shared, Codex, Claude, and channel check entry points; verified OCR preview/review and Maven tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b93f290` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
