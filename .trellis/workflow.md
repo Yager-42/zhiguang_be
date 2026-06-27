@@ -237,15 +237,14 @@ Dispatch prompt starts with `Active task: <task path from task.py current>`. Rea
      instead of dispatching sub-agents. -->
 
 [workflow-state:in_progress-inline]
-Flow: `trellis-before-dev` -> `trellis-aegis-execution` -> Aegis task execution -> `trellis-check` -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
+Flow: `trellis-before-dev` -> direct Trellis execution -> `trellis-check` -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
 Do not dispatch Trellis implement/check sub-agents in inline mode.
 Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, plus relevant spec/research loaded by skills.
 For zhiguang_be, load `zhiguang-trellis-flow`.
-Ownership: Trellis owns project governance and planning artifacts; Aegis owns task execution method. `implement.md` remains the authoritative top-level execution plan.
+Ownership: Trellis owns project governance, planning artifacts, execution flow, check, spec update, commit, and finish stages. `implement.md` remains the authoritative top-level execution plan.
 Keep `trellis-before-dev` before execution. If `implement.md` is too vague to execute safely, return to Trellis planning instead of improvising a peer implementation plan.
-In zhiguang_be, every Aegis slice must first load fixed-order authority context, gather CodeGraph facts, write a durable `docs/aegis/plans/...` slice plan, present it to the user, and pause until explicit user approval. `Planless Slice Lane` is banned.
-Inside Aegis execution, require `alibaba-java-coding-guidelines-skill` for Java/Spring/MyBatis/Maven/MySQL/SQL/logging/exception/transaction/DTO/mapper/database work; use `aegis:systematic-debugging` for bug execution, `aegis:test-driven-development` for strict test-first execution, and `ponytail` as an implementation-style enhancer.
-Before returning to Trellis finish stages, run `aegis:verification-before-completion`. During `trellis-check`, require `code-review-skill` for changed code review and require Alibaba Java review for matching Java/database changes; these are mandatory local gates, not optional enhancers.
+Inline execution must apply the pre-development Architecture Drift Check and the post-development Implementation Drift Check from the Trellis skills. These checks are lightweight decision points, not new artifact families.
+During `trellis-check`, require changed-code review and Java/database compliance review for matching Java/Spring/MyBatis/Maven/MySQL/SQL/logging/exception/transaction/DTO/mapper/database work; these are mandatory local gates, not optional enhancers.
 [/workflow-state:in_progress-inline]
 
 ### Phase 3: Finish

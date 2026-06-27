@@ -1,1 +1,0 @@
-use recording-architecture-decisions to decide whether this durable architecture decision needs an ADR and baseline sync closure
