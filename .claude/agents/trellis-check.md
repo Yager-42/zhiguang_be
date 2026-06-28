@@ -37,9 +37,8 @@ Before checking, read:
 1. **Get code changes** - Use git diff to get uncommitted code
 2. **Review task artifacts** - Check changes against prd.md, design.md if present, and implement.md if present
 3. **Check against specs** - Verify code follows guidelines
-4. **Run OCR gate** - Preview with `ocr review --preview --audience agent`; if OCR selects files, run `ocr review --audience agent`
-5. **Self-fix** - Fix issues yourself, not just report them
-6. **Run verification** - typecheck and lint
+4. **Self-fix** - Fix issues yourself, not just report them
+5. **Run verification** - typecheck and lint
 
 ## Important
 
@@ -70,34 +69,7 @@ Read the task's prd.md, design.md if present, and implement.md if present, then 
 - Are there missing types
 - Are there potential bugs
 
-### Step 3: Run OCR Gate
-
-Run:
-
-```bash
-ocr review --preview --audience agent
-```
-
-OCR decides which changed files are reviewable. If the preview scope is
-unexpectedly large or includes unrelated files, stop and resolve the diff scope
-before spending LLM review calls. Files excluded by OCR preview are outside the
-OCR gate; record them in the report and cover them through the normal Trellis
-checks instead.
-
-If OCR previews reviewable files, run:
-
-```bash
-ocr review --audience agent
-```
-
-Verify material OCR findings against source code, task artifacts, and specs
-before fixing or reporting them. Verified OCR findings are blocking: fix them,
-then rerun the normal checks and OCR gate. OCR execution failure is blocking
-unless the user explicitly overrides the gate for this task. If OCR previews
-no reviewable files, mark OCR as not applicable and continue normal Trellis
-checks.
-
-### Step 4: Self-Fix
+### Step 3: Self-Fix
 
 After finding issues:
 
@@ -105,7 +77,7 @@ After finding issues:
 2. Record what was fixed
 3. Continue checking other issues
 
-### Step 5: Run Verification
+### Step 4: Run Verification
 
 Run project's lint and typecheck commands to verify changes.
 
@@ -136,7 +108,6 @@ If failed, fix issues and re-run.
 
 - TypeCheck: Passed
 - Lint: Passed
-- OCR: Passed
 
 ### Summary
 
