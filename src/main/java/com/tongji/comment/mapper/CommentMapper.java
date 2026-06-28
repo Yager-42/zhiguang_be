@@ -25,6 +25,8 @@ public interface CommentMapper {
 
     int softDelete(@Param("commentId") Long commentId, @Param("creatorId") Long creatorId);
 
+    int softDeleteForModeration(@Param("commentId") Long commentId);
+
     List<Long> listCommentIdsCursor(@Param("cursorCommentId") Long cursorCommentId,
                                     @Param("limit") int limit);
 

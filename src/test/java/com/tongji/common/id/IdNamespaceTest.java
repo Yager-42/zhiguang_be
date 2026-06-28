@@ -20,6 +20,7 @@ class IdNamespaceTest {
                         "RELATION",
                         "OUTBOX_EVENT",
                         "NOTIFICATION",
+                        "MODERATION_REPORT",
                         "RECONCILIATION_TASK",
                         "ADMIN_OPERATION",
                         "AUDIT_LOG"
@@ -35,6 +36,7 @@ class IdNamespaceTest {
         assertThat(IdNamespace.RELATION.getMode()).isEqualTo(IdMode.SNOWFLAKE);
         assertThat(IdNamespace.OUTBOX_EVENT.getMode()).isEqualTo(IdMode.SNOWFLAKE);
         assertThat(IdNamespace.NOTIFICATION.getMode()).isEqualTo(IdMode.SNOWFLAKE);
+        assertThat(IdNamespace.MODERATION_REPORT.getMode()).isEqualTo(IdMode.SNOWFLAKE);
         assertThat(IdNamespace.RECONCILIATION_TASK.getMode()).isEqualTo(IdMode.SEGMENT);
         assertThat(IdNamespace.ADMIN_OPERATION.getMode()).isEqualTo(IdMode.SEGMENT);
         assertThat(IdNamespace.AUDIT_LOG.getMode()).isEqualTo(IdMode.SEGMENT);

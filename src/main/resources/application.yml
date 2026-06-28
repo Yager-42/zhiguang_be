@@ -46,6 +46,12 @@ spring:
   elasticsearch:
     uris:
       - http://localhost:9200
+  ai:
+    dashscope:
+      api-key: ${AI_DASHSCOPE_API_KEY:}
+      chat:
+        options:
+          model: ${AI_DASHSCOPE_MODEL:qwen-plus}
 rocketmq:
   name-server: localhost:9876
   producer:
@@ -130,6 +136,15 @@ recommendation:
     api-key: ${GORSE_API_KEY:}
     timeout-ms: ${GORSE_TIMEOUT_MS:300}
     enabled: ${GORSE_ENABLED:false}
+
+moderation:
+  llm:
+    enabled: ${MODERATION_LLM_ENABLED:false}
+    min-confidence: ${MODERATION_LLM_MIN_CONFIDENCE:0.8000}
+    max-content-chars: ${MODERATION_LLM_MAX_CONTENT_CHARS:4000}
+    max-retries: ${MODERATION_LLM_MAX_RETRIES:3}
+  notification:
+    platform-actor-user-id: ${MODERATION_PLATFORM_ACTOR_USER_ID:0}
 
 feed:
   home:
