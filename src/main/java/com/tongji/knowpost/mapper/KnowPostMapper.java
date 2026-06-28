@@ -59,6 +59,8 @@ public interface KnowPostMapper {
 
     int softDelete(@Param("id") Long id, @Param("creatorId") Long creatorId);
 
+    int rejectPublishedForModeration(@Param("id") Long id);
+
     KnowPostDetailRow findDetailById(@Param("id") Long id);
 
     long countMyPublished(@Param("creatorId") long creatorId);
