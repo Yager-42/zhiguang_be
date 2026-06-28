@@ -68,6 +68,14 @@
           AND status = 0
     </update>
 
+    <update id="softDeleteForModeration">
+        UPDATE comments
+        SET status = 1,
+            update_time = NOW(3)
+        WHERE comment_id = #{commentId}
+          AND status = 0
+    </update>
+
     <select id="listCommentIdsCursor" resultType="long">
         SELECT comment_id
         FROM comments

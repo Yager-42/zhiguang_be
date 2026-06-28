@@ -235,6 +235,37 @@ CREATE TABLE IF NOT EXISTS notifications (
     KEY idx_notification_recipient_read (recipient_user_id, is_read, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS moderation_reports (
+    id BIGINT UNSIGNED NOT NULL,
+    reporter_user_id BIGINT UNSIGNED NOT NULL,
+    target_type VARCHAR(16) NOT NULL,
+    target_id BIGINT UNSIGNED NOT NULL,
+    target_owner_user_id BIGINT UNSIGNED NOT NULL,
+    reason VARCHAR(32) NOT NULL,
+    description VARCHAR(512) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    llm_provider VARCHAR(32) NULL,
+    llm_model VARCHAR(128) NULL,
+    llm_decision VARCHAR(16) NULL,
+    llm_confidence DECIMAL(5,4) NULL,
+    llm_summary VARCHAR(512) NULL,
+    failure_code VARCHAR(64) NULL,
+    failure_reason VARCHAR(512) NULL,
+    retry_count INT NOT NULL DEFAULT 0,
+    next_retry_at DATETIME(3) NULL,
+    content_action_status VARCHAR(16) NULL,
+    content_action_failure VARCHAR(512) NULL,
+    notification_failure VARCHAR(512) NULL,
+    reviewed_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_moderation_report_reporter_target (reporter_user_id, target_type, target_id),
+    KEY idx_moderation_report_status_created (status, created_at, id),
+    KEY idx_moderation_report_retry (status, next_retry_at, id),
+    KEY idx_moderation_report_target (target_type, target_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS leaf_alloc (
     biz_tag VARCHAR(128) NOT NULL,
     max_id BIGINT NOT NULL DEFAULT 1,
