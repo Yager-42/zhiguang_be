@@ -208,7 +208,7 @@ Load `trellis-brainstorm`; stay in planning.
 Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
 Multi-deliverable scope: consider a parent task plus independently verifiable child tasks; dependencies must be written in child artifacts, not implied by tree position.
 Inline mode: skip jsonl curation; Phase 2 reads artifacts/specs via `trellis-before-dev`.
-For zhiguang_be, load `zhiguang-trellis-flow` and apply planning enhancers only when triggered: `grilling` for unclear scope, `domain-modeling` for unclear business language, and `codebase-design` for risky module boundaries.
+For zhiguang_be, load `zhiguang-trellis-flow` and apply planning enhancers only when triggered: `grilling` for unclear scope, `domain-modeling` for unclear business language, `codebase-design` for risky module boundaries, and `to-issues` for independently verifiable child tasks.
 [/workflow-state:planning-inline]
 
 ### Phase 2: Execute
@@ -227,7 +227,6 @@ Sub-agent dispatch protocol applies to all platforms and all sub-agents, includi
 [workflow-state:in_progress]
 Tools: `trellis-implement` / `trellis-research` are sub-agent types only (Task/Agent tool, NOT Skill; there is no skill by these names). `trellis-update-spec` is a skill. `trellis-check` exists as both; prefer the Agent form when verifying after code changes.
 Flow: `trellis-implement` -> `trellis-check` -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
-Quality loop: `trellis-check` includes the OCR diff-review gate for files OCR selects in preview. Verified OCR findings or OCR execution failure block completion; return to implementation/fix work, then rerun Phase 2.2 until the normal checks and OCR gate are green. Files excluded by OCR preview are recorded and covered by normal Trellis checks. Only an explicit per-task user override can bypass a failed OCR gate.
 Main-session default: dispatch implement/check sub-agents. Sub-agent self-exemption: if already running as `trellis-implement`, do NOT spawn another `trellis-implement` or `trellis-check`; if already running as `trellis-check`, do NOT spawn another `trellis-check` or `trellis-implement`. Dispatch is main session only.
 Dispatch prompt starts with `Active task: <task path from task.py current>`. Read context: jsonl entries -> `prd.md` -> `design.md if present` -> `implement.md if present`.
 [/workflow-state:in_progress]
@@ -238,15 +237,10 @@ Dispatch prompt starts with `Active task: <task path from task.py current>`. Rea
      instead of dispatching sub-agents. -->
 
 [workflow-state:in_progress-inline]
-Flow: `trellis-before-dev` -> direct Trellis execution -> `trellis-check` -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
-Do not dispatch Trellis implement/check sub-agents in inline mode.
+Flow: `trellis-before-dev` -> edit -> `trellis-check` -> validation -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
+Do not dispatch implement/check sub-agents in inline mode.
 Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, plus relevant spec/research loaded by skills.
-For zhiguang_be, load `zhiguang-trellis-flow`.
-Ownership: Trellis owns project governance, planning artifacts, execution flow, check, spec update, commit, and finish stages. `implement.md` remains the authoritative top-level execution plan.
-Keep `trellis-before-dev` before execution. If `implement.md` is too vague to execute safely, return to Trellis planning instead of improvising a peer implementation plan.
-Inline execution must apply the pre-development Architecture Drift Check and the post-development Implementation Drift Check from the Trellis skills. These checks are lightweight decision points, not new artifact families.
-During `trellis-check`, require changed-code review and Java/database compliance review for matching Java/Spring/MyBatis/Maven/MySQL/SQL/logging/exception/transaction/DTO/mapper/database work; these are mandatory local gates, not optional enhancers.
-During `trellis-check`, require the OCR diff-review gate: run `ocr review --preview --audience agent`; if OCR selects files, run `ocr review --audience agent`. Verified OCR findings or OCR execution failure block completion; return to implementation/fix work, then repeat Phase 2.2 until the normal checks and OCR gate are green. Files excluded by OCR preview are recorded and covered by normal Trellis checks. Only an explicit per-task user override can bypass a failed OCR gate.
+For zhiguang_be, load `zhiguang-trellis-flow`. Use `alibaba-java-coding-guidelines-skill` for Java/Spring/MyBatis/Maven/MySQL/SQL/logging/exception/transaction/database work. Use `ponytail` during implementation to keep the change small and direct. Use `tdd` only when a clear behavior seam exists. During `trellis-check`, apply `code-review-skill` and Alibaba Java review as enhancers, not standalone replacement phases.
 [/workflow-state:in_progress-inline]
 
 ### Phase 3: Finish
@@ -544,7 +538,6 @@ Spawn the check sub-agent:
 The check agent's job:
 - Review code changes against specs
 - Review code changes against `prd.md`, `design.md` if present, and `implement.md` if present
-- Run the OCR diff-review gate
 - Auto-fix issues it finds
 - Run lint and typecheck to verify
 
@@ -555,11 +548,9 @@ The check agent's job:
 Load the `trellis-check` skill and verify the code per its guidance:
 - Spec compliance
 - lint / type-check / tests
-- OCR diff-review gate
 - Cross-layer consistency (when changes span layers)
 
 If issues are found → fix → re-check, until green.
-Verified OCR findings or OCR execution failure count as check failures unless the user explicitly overrides the OCR gate for that task. Files excluded by OCR preview are recorded and covered by normal Trellis checks.
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
