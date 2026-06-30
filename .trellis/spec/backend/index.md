@@ -1,4 +1,4 @@
-# Backend Development Guidelines
+﻿# Backend Development Guidelines
 
 > Best practices for backend development in this project.
 
@@ -20,6 +20,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 | [Feed Cache Guidelines](./feed-cache-guidelines.md) | KnowPost feed cache contracts and invalidation rules | Active |
+| [Skills Knowledge Workflow](./skills-knowledge-workflow.md) | Skills 业务知识维护、diff-check gate 与 Trellis 接入约束 | Active |
 
 ---
 
@@ -37,3 +38,4 @@ The goal is to help AI assistants and new team members understand how YOUR proje
 ---
 
 **Language**: All documentation should be written in **English**.
+

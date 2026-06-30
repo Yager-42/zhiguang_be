@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "认证与用户"
+  short_description: "处理 zhiguang 登录、令牌、权限和用户资料。"
+  default_prompt: "使用 $zhiguang-auth-user 帮我分析或修改登录、token、权限或 profile 相关逻辑。"
+
+policy:
+  allow_implicit_invocation: true

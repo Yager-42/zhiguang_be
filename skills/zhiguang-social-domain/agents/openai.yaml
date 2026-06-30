@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "社交互动"
+  short_description: "处理关注、评论、点赞收藏、计数和通知。"
+  default_prompt: "使用 $zhiguang-social-domain 帮我分析或修改 follow、comment、like、counter 或 notification 相关逻辑。"
+
+policy:
+  allow_implicit_invocation: true

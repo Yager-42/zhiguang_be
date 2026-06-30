@@ -47,6 +47,16 @@ Then route:
   > "FYI, dirty files outside this task's scope — leaving them for the other window: `<list>`."
 - **Genuinely unsure** — ask the user once: "Are `<list>` this task's work I forgot to commit, or another window's? (commit / ignore)" — then route per their answer.
 
+## Step 2.5: Check pending skills suggestions (`zhiguang_be`)
+
+Before archive / journal in `zhiguang_be`, run:
+
+```bash
+python scripts/skills/skills_guard.py status --task current --fail-on-hard --fail-on-high
+```
+
+If there are hard errors or high-priority pending suggestions, stop finish-work and return to the review/update step. Only already-approved suggestions may be applied to `skills/`.
+
 ## Step 3: Archive task(s)
 
 ```bash

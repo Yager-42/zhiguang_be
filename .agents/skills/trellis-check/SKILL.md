@@ -93,6 +93,20 @@ Skip this step if your change is confined to a single layer.
 
 ---
 
-## Step 6: Report and Fix
+## Step 6: Skills Diff Check (`zhiguang_be`)
+
+In `zhiguang_be`, run the skills drift check in the same review round:
+
+```bash
+python scripts/skills/skills_guard.py diff-check --task current
+python scripts/skills/skills_guard.py status --task current --fail-on-hard
+```
+
+Rules:
+- hard errors block the check gate
+- semantic updates must stop at suggestion text
+- do not write back `skills/` semantics until the human explicitly approves
+
+## Step 7: Report and Fix
 
 Report violations found and fix them directly. Re-run project checks after fixes.

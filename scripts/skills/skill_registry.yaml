@@ -1,0 +1,122 @@
+skills:
+  zhiguang-repo-map:
+    package_prefixes: []
+    config_prefixes: []
+    manual_targets:
+      controller: skills/zhiguang-repo-map/references/common-entrypoints.md
+      routing: skills/zhiguang-repo-map/references/request-to-module-map.md
+    generated_assets:
+      - repo-map.api-index
+      - repo-map.skill-routing-map
+  zhiguang-business-dictionary:
+    package_prefixes: []
+    config_prefixes: []
+    manual_targets:
+      enum: skills/zhiguang-business-dictionary/references/object-dictionary.md
+      glossary: skills/zhiguang-business-dictionary/references/object-dictionary.md
+    generated_assets: []
+  zhiguang-auth-user:
+    package_prefixes: [auth, user, profile]
+    config_prefixes: [auth]
+    manual_targets:
+      controller: skills/zhiguang-auth-user/references/identity-and-profile.md
+      enum: skills/zhiguang-auth-user/references/identity-and-profile.md
+      config: skills/zhiguang-auth-user/references/identity-and-profile.md
+    generated_assets: []
+  zhiguang-content-domain:
+    package_prefixes: [knowpost, storage, search, recommendation, cache]
+    config_prefixes: [storage, recommendation, feed, cache]
+    manual_targets:
+      controller: skills/zhiguang-content-domain/references/content-lifecycle.md
+      enum: skills/zhiguang-content-domain/references/content-lifecycle.md
+      config: skills/zhiguang-content-domain/references/storage-and-distribution.md
+    generated_assets: []
+  zhiguang-social-domain:
+    package_prefixes: [relation, comment, counter, notification]
+    config_prefixes: [comment, counter]
+    manual_targets:
+      controller: skills/zhiguang-social-domain/references/interaction-flows.md
+      enum: skills/zhiguang-social-domain/references/interaction-flows.md
+      config: skills/zhiguang-social-domain/references/interaction-flows.md
+    generated_assets: []
+  zhiguang-platform-domain:
+    package_prefixes: [promotion, wallet, moderation, reconciliation]
+    config_prefixes: [promotion, wallet, moderation, rocketmq]
+    manual_targets:
+      controller: skills/zhiguang-platform-domain/references/platform-flows.md
+      enum: skills/zhiguang-platform-domain/references/platform-flows.md
+      config: skills/zhiguang-platform-domain/references/platform-flows.md
+    generated_assets:
+      - platform-domain.enum-index
+  zhiguang-common-runtime:
+    package_prefixes: [common, config, id, llm]
+    config_prefixes: [server, spring, id, management, canal]
+    manual_targets:
+      controller: skills/zhiguang-common-runtime/references/shared-runtime.md
+      enum: skills/zhiguang-common-runtime/references/shared-runtime.md
+      config: skills/zhiguang-common-runtime/references/shared-runtime.md
+    generated_assets:
+      - common-runtime.config-index
+  zhiguang-change-playbook:
+    package_prefixes: []
+    config_prefixes: []
+    manual_targets:
+      review: skills/zhiguang-change-playbook/references/cross-domain-checklist.md
+    generated_assets: []
+  zhiguang-debug-playbook:
+    package_prefixes: []
+    config_prefixes: []
+    manual_targets:
+      review: skills/zhiguang-debug-playbook/references/failure-routing.md
+    generated_assets: []
+
+generated_assets:
+  repo-map.api-index:
+    skill: zhiguang-repo-map
+    kind: api_index
+    script: skills/zhiguang-repo-map/scripts/extract_api_index.py
+    output: skills/zhiguang-repo-map/references/generated-api-index.md
+    source_inputs:
+      - src/main/java/com/tongji/**/*Controller.java
+    refresh_trigger:
+      - controller file change
+      - route annotation change
+    manual_boundary: only controller, route, and explicit authentication facts
+  repo-map.skill-routing-map:
+    skill: zhiguang-repo-map
+    kind: routing_map
+    script: skills/zhiguang-repo-map/scripts/extract_skill_routing_map.py
+    output: skills/zhiguang-repo-map/references/generated-skill-routing-map.md
+    source_inputs:
+      - scripts/skills/skill_registry.yaml
+      - skills/*/SKILL.md
+    refresh_trigger:
+      - skill boundary change
+      - skill trigger description change
+    manual_boundary: only routing ownership and generated asset ownership facts
+  common-runtime.config-index:
+    skill: zhiguang-common-runtime
+    kind: config_index
+    script: skills/zhiguang-common-runtime/scripts/extract_config_index.py
+    output: skills/zhiguang-common-runtime/references/generated-config-index.md
+    source_inputs:
+      - src/main/resources/application.yml
+      - src/main/java/com/tongji/**/*Properties.java
+    refresh_trigger:
+      - application.yml change
+      - "@ConfigurationProperties class change"
+    manual_boundary: only config keys, defaults, owners, and binding classes
+  platform-domain.enum-index:
+    skill: zhiguang-platform-domain
+    kind: enum_index
+    script: skills/zhiguang-platform-domain/scripts/extract_enum_index.py
+    output: skills/zhiguang-platform-domain/references/generated-enum-index.md
+    source_inputs:
+      - src/main/java/com/tongji/promotion/**/*.java
+      - src/main/java/com/tongji/wallet/**/*.java
+      - src/main/java/com/tongji/moderation/**/*.java
+      - src/main/java/com/tongji/reconciliation/**/*.java
+    refresh_trigger:
+      - enum file change
+      - state or status constant change
+    manual_boundary: only enum names, constant literals, and owning files

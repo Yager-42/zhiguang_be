@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-06-30T06:04:20Z",
+  "base_ref": "HEAD",
+  "scan_hash": "d778d12572440a3850b68947dc44f506f97bcb5e130ba7e90e6b0f3e95b9b8a1",
+  "impacted_skills": [
+    "README-zh.md",
+    "zhiguang-common-runtime"
+  ],
+  "refreshed_assets": [
+    "skills/zhiguang-common-runtime/references/generated-config-index.md"
+  ],
+  "hard_errors": [
+    "README-zh.md: missing SKILL.md"
+  ],
+  "pending_suggestion_ids": [
+    "SUG-zhiguang-common-runtime-config-7bc26be01d"
+  ],
+  "high_priority_pending": [],
+  "applied_suggestion_ids": []
+}

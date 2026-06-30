@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "跨域变更剧本"
+  short_description: "为跨多个业务域的改动提供影响面和检查清单。"
+  default_prompt: "使用 $zhiguang-change-playbook 帮我梳理这次跨模块改动的影响面、顺序和回滚点。"
+
+policy:
+  allow_implicit_invocation: true

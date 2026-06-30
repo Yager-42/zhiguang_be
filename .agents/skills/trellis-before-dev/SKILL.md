@@ -35,6 +35,11 @@ Execute these steps:
    cat .trellis/spec/guides/index.md
    ```
 
-7. Understand the coding standards and patterns you need to follow, then proceed with your development plan.
+7. In `zhiguang_be`, after reading `.trellis/spec/`, also route and read the relevant `skills/` business knowledge before implementation:
+   - start from `skills/README-zh.md`
+   - route via `skills/zhiguang-repo-map/` and `skills/zhiguang-business-dictionary/`
+   - then read the concrete domain skill plus any generated references it explicitly points to
+
+8. Understand the coding standards and patterns you need to follow, then proceed with your development plan.
 
 This step is **mandatory** before writing any code.

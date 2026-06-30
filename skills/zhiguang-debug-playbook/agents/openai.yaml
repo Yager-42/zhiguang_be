@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "排障剧本"
+  short_description: "为状态不一致、重试、恢复和补偿问题提供排障入口。"
+  default_prompt: "使用 $zhiguang-debug-playbook 帮我按现象分流这个异常，判断先看哪条链路。"
+
+policy:
+  allow_implicit_invocation: true
