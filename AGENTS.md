@@ -1,21 +1,18 @@
-<!-- TRELLIS:START -->
-# Trellis Instructions
+# Project Agent Rules
 
-These instructions are for AI assistants working in this project.
+## Code Fact Gathering
 
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
+Use CodeGraph first for code understanding in this repository. Before making claims
+about code paths, symbols, ownership, call chains, or impact, run the relevant
+CodeGraph command and treat its output as the primary code fact source:
 
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
+- `codegraph status` to verify the index is usable.
+- `codegraph explore <query>` for a feature/module investigation.
+- `codegraph node <symbol-or-file>` for one symbol or file with related context.
+- `codegraph callers <symbol>` and `codegraph callees <symbol>` for call chains.
+- `codegraph impact <symbol>` for change impact.
 
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
+Use `rg` only as a supplement for exact text, configuration, tests, docs, or when
+CodeGraph cannot answer the question. Do not replace CodeGraph-backed fact
+gathering with plain text search for source-code structure questions.
 
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
-
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
-
-<!-- TRELLIS:END -->

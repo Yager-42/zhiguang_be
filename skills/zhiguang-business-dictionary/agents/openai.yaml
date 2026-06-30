@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "业务词典"
-  short_description: "统一 zhiguang 跨域名词、对象层级和真相源。"
-  default_prompt: "使用 $zhiguang-business-dictionary 帮我先对齐这次改动里的业务对象、状态和真相源。"
-
-policy:
-  allow_implicit_invocation: true

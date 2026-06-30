@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "平台治理与商业化"
-  short_description: "处理 promotion、wallet、moderation 和 reconciliation。"
-  default_prompt: "使用 $zhiguang-platform-domain 帮我分析或修改竞价、钱包、审核或修复任务相关逻辑。"
-
-policy:
-  allow_implicit_invocation: true

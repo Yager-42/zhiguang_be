@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "共享运行时"
-  short_description: "处理全局异常、ID、配置和共享基础设施契约。"
-  default_prompt: "使用 $zhiguang-common-runtime 帮我分析或修改公共异常、ID、配置或共享 infra 相关逻辑。"
-
-policy:
-  allow_implicit_invocation: true

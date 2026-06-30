@@ -39,3 +39,7 @@ build/
 .DS_Store
 
 jdk-21
+zhiguang_fe
+.codegraph
+.claude
+.mcp.json
