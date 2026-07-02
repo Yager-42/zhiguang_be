@@ -8,6 +8,7 @@ import com.tongji.promotion.bprime.service.PromotionDecisionProjectionService;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -17,6 +18,7 @@ public class PromotionDecisionProjectionReconciler implements Reconciler {
     private final ObjectMapper objectMapper;
     private final PromotionDecisionKafkaSupport support;
 
+    @Autowired
     public PromotionDecisionProjectionReconciler(PromotionDecisionProjectionService projectionService,
                                                  ObjectMapper objectMapper) {
         this(projectionService, objectMapper, new PromotionDecisionKafkaSupport());
