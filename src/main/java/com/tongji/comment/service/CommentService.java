@@ -12,7 +12,7 @@ public interface CommentService {
 
     CommentStatusResponse status(long pendingCommentId);
 
-    CommentPageResponse pageComments(long postId, LocalDateTime cursorCreateTime, Long cursorCommentId, int limit);
+    CommentPageResponse pageComments(long postId, LocalDateTime cursorCreateTime, Long cursorCommentId, int limit, long currentUserId);
 
     CommentPageResponse pageReplies(long rootId, LocalDateTime cursorCreateTime, Long cursorCommentId, int limit);
 
