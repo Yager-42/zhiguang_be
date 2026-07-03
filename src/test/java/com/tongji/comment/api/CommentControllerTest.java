@@ -99,7 +99,7 @@ class CommentControllerTest {
     @Test
     void submitReturnsAcceptedWithClientRequestIdAndPendingCommentId() throws Exception {
         when(commentService.submit(eq(USER_ID), eq(POST_ID), any(CommentSubmitRequest.class)))
-                .thenReturn(new CommentSubmitResponse("client-1", COMMENT_ID, "pending"));
+                .thenReturn(new CommentSubmitResponse("client-1", String.valueOf(COMMENT_ID), "pending"));
 
         mockMvc.perform(post("/api/v1/posts/{postId}/comments", POST_ID)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -118,7 +118,7 @@ class CommentControllerTest {
     @Test
     void statusReturnsServiceResult() throws Exception {
         when(commentService.status(COMMENT_ID))
-                .thenReturn(new CommentStatusResponse(COMMENT_ID, "client-1", "succeeded"));
+                .thenReturn(new CommentStatusResponse(String.valueOf(COMMENT_ID), "client-1", "succeeded"));
 
         mockMvc.perform(get("/api/v1/comments/{pendingCommentId}/status", COMMENT_ID))
                 .andExpect(status().isOk())
@@ -133,12 +133,12 @@ class CommentControllerTest {
     void topLevelPageReturnsServiceResult() throws Exception {
         LocalDateTime createTime = LocalDateTime.of(2026, 6, 17, 9, 30);
         CommentPageResponse response = new CommentPageResponse(
-                List.of(new CommentItemResponse(COMMENT_ID, POST_ID, 0L, 0L, USER_ID, "hello", 0, false, 2, 1, createTime, createTime)),
+                List.of(new CommentItemResponse(String.valueOf(COMMENT_ID), String.valueOf(POST_ID), null, null, String.valueOf(USER_ID), "hello", 0, false, 2, 1, createTime, createTime, false)),
                 createTime,
-                COMMENT_ID,
+                String.valueOf(COMMENT_ID),
                 true
         );
-        when(commentService.pageComments(POST_ID, createTime, COMMENT_ID, 20)).thenReturn(response);
+        when(commentService.pageComments(POST_ID, createTime, COMMENT_ID, 20, USER_ID)).thenReturn(response);
 
         mockMvc.perform(get("/api/v1/posts/{postId}/comments", POST_ID)
                         .queryParam("cursorCreateTime", createTime.toString())
@@ -149,13 +149,13 @@ class CommentControllerTest {
                 .andExpect(jsonPath("$.items[0].body").value("hello"))
                 .andExpect(jsonPath("$.hasMore").value(true));
 
-        verify(commentService).pageComments(POST_ID, createTime, COMMENT_ID, 20);
+        verify(commentService).pageComments(POST_ID, createTime, COMMENT_ID, 20, USER_ID);
     }
 
     @Test
     void repliesPageReturnsServiceResult() throws Exception {
         CommentPageResponse response = new CommentPageResponse(
-                List.of(new CommentItemResponse(REPLY_ID, POST_ID, COMMENT_ID, COMMENT_ID, USER_ID, "reply", 0, false, 0, 0, null, null)),
+                List.of(new CommentItemResponse(String.valueOf(REPLY_ID), String.valueOf(POST_ID), String.valueOf(COMMENT_ID), String.valueOf(COMMENT_ID), String.valueOf(USER_ID), "reply", 0, false, 0, 0, null, null, false)),
                 null,
                 null,
                 false
