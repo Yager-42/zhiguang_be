@@ -161,10 +161,22 @@ public class CommentServiceImpl implements CommentService {
 
     private CommentItemResponse item(Comment row, Map<Long, String> texts, long currentUserId) {
         boolean deleted = Integer.valueOf(1).equals(row.getStatus());
+        String commentIdStr = String.valueOf(row.getCommentId());
         boolean liked = currentUserId > 0
-                && counterService.isLiked("comment", String.valueOf(row.getCommentId()), currentUserId);
+                && counterService.isLiked("comment", commentIdStr, currentUserId);
+        // likeCount 读 counter SDS（与写入路径对齐），不读 MySQL like_count（该字段无人更新）。
+        // SDS 段是无符号 32 位，DTO 是 Integer：钳制到 Integer.MAX_VALUE 防 (int) 截断成负数。
+        long likeCount = 0L;
+        try {
+            Map<String, Long> counts = counterService.getCounts("comment", commentIdStr, List.of("like"));
+            Long v = counts.get("like");
+            if (v != null) likeCount = v;
+        } catch (RuntimeException ignore) {
+            // counter 不可用时回退 0
+        }
+        if (likeCount > Integer.MAX_VALUE) likeCount = Integer.MAX_VALUE;
         return new CommentItemResponse(
-                String.valueOf(row.getCommentId()),
+                commentIdStr,
                 String.valueOf(row.getPostId()),
                 row.getRootId() == null ? null : String.valueOf(row.getRootId()),
                 row.getParentId() == null ? null : String.valueOf(row.getParentId()),
@@ -172,7 +184,7 @@ public class CommentServiceImpl implements CommentService {
                 deleted ? DELETED_BODY : texts.get(row.getCommentId()),
                 row.getStatus(),
                 deleted,
-                row.getLikeCount(),
+                (int) likeCount,
                 row.getReplyCount(),
                 row.getCreateTime(),
                 row.getUpdateTime(),
