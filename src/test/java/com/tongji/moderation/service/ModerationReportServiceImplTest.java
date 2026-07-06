@@ -70,7 +70,7 @@ class ModerationReportServiceImplTest {
         ModerationReportResponse response = service.submitReport(7L,
                 new ModerationReportRequest("post", 101L, "spam", null));
 
-        assertThat(response.reportId()).isEqualTo(11L);
+        assertThat(response.reportId()).isEqualTo("11");
         assertThat(response.status()).isEqualTo("pending");
         verify(reportMapper, never()).insert(org.mockito.Mockito.any());
         verify(outboxMapper, never()).insert(org.mockito.Mockito.any(), org.mockito.Mockito.any(), org.mockito.Mockito.any(), org.mockito.Mockito.any(), org.mockito.Mockito.any());
@@ -90,7 +90,7 @@ class ModerationReportServiceImplTest {
         ModerationReportResponse response = service.submitReport(7L,
                 new ModerationReportRequest("post", 101L, "spam", "bad links"));
 
-        assertThat(response.reportId()).isEqualTo(21L);
+        assertThat(response.reportId()).isEqualTo("21");
         assertThat(response.status()).isEqualTo("pending");
 
         ArgumentCaptor<ModerationReport> reportCaptor = ArgumentCaptor.forClass(ModerationReport.class);
@@ -166,7 +166,7 @@ class ModerationReportServiceImplTest {
             ModerationReportResponse response = service.submitReport(7L,
                     new ModerationReportRequest("POST", 101L, "ILLEGAL", null));
 
-            assertThat(response.reportId()).isEqualTo(21L);
+            assertThat(response.reportId()).isEqualTo("21");
             verify(reportMapper).insert(org.mockito.Mockito.any());
         } finally {
             Locale.setDefault(previous);
