@@ -76,10 +76,10 @@ class NotificationControllerTest {
         LocalDateTime createdAt = LocalDateTime.of(2026, 6, 26, 12, 0);
         when(notificationService.page(USER_ID, createdAt, 11L, 20))
                 .thenReturn(new NotificationPageResponse(
-                        List.of(new NotificationItemResponse(11L, "like", false, createdAt, 8L,
-                                "knowpost", 100L, null, null, 3, createdAt.minusMinutes(5), createdAt)),
+                        List.of(new NotificationItemResponse("11", "like", false, createdAt, "8",
+                                "knowpost", "100", null, null, 3, createdAt.minusMinutes(5), createdAt)),
                         createdAt,
-                        11L,
+                        "11",
                         true
                 ));
 
@@ -88,7 +88,7 @@ class NotificationControllerTest {
                         .queryParam("cursorId", "11")
                         .queryParam("limit", "20"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].id").value(11))
+                .andExpect(jsonPath("$.items[0].id").value("11"))
                 .andExpect(jsonPath("$.items[0].type").value("like"))
                 .andExpect(jsonPath("$.items[0].aggregateCount").value(3))
                 .andExpect(jsonPath("$.hasMore").value(true));
