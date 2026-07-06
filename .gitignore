@@ -40,3 +40,4 @@ build/
 
 jdk-21
 .agents
+.codegraph
