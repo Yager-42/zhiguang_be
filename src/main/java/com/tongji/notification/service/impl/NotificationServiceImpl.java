@@ -59,11 +59,11 @@ public class NotificationServiceImpl implements NotificationService {
         boolean hasMore = rows.size() > safeLimit;
         List<Notification> pageRows = hasMore ? rows.subList(0, safeLimit) : rows;
         LocalDateTime nextCursorCreatedAt = null;
-        Long nextCursorId = null;
+        String nextCursorId = null;
         if (hasMore && !pageRows.isEmpty()) {
             Notification last = pageRows.get(pageRows.size() - 1);
             nextCursorCreatedAt = last.getCreatedAt();
-            nextCursorId = last.getId();
+            nextCursorId = String.valueOf(last.getId());
         }
         return new NotificationPageResponse(
                 pageRows.stream().map(this::toItem).toList(),
@@ -101,15 +101,15 @@ public class NotificationServiceImpl implements NotificationService {
 
     private NotificationItemResponse toItem(Notification notification) {
         return new NotificationItemResponse(
-                notification.getId(),
+                String.valueOf(notification.getId()),
                 notification.getType(),
                 notification.getIsRead() != null && notification.getIsRead() == 1,
                 notification.getCreatedAt(),
-                notification.getActorUserId(),
+                String.valueOf(notification.getActorUserId()),
                 notification.getEntityType(),
-                notification.getEntityId(),
+                notification.getEntityId() == null ? null : String.valueOf(notification.getEntityId()),
                 notification.getSecondEntityType(),
-                notification.getSecondEntityId(),
+                notification.getSecondEntityId() == null ? null : String.valueOf(notification.getSecondEntityId()),
                 notification.getAggregateCount(),
                 notification.getWindowStart(),
                 notification.getWindowEnd()
