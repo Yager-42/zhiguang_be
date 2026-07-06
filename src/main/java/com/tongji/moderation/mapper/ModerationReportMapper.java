@@ -37,6 +37,7 @@ public interface ModerationReportMapper {
                     @Param("reviewedAt") LocalDateTime reviewedAt);
 
     int scheduleRetry(@Param("id") long id,
+                      @Param("sourceRetryCount") int sourceRetryCount,
                       @Param("retryCount") int retryCount,
                       @Param("nextRetryAt") LocalDateTime nextRetryAt,
                       @Param("failureCode") String failureCode,

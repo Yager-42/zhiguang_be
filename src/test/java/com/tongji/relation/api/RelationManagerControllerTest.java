@@ -54,8 +54,9 @@ class RelationManagerControllerTest {
                 relationService,
                 jwtService,
                 new org.springframework.data.redis.core.StringRedisTemplate(),
-                Mockito.mock(com.tongji.counter.service.UserCounterService.class),
-                Mockito.mock(com.tongji.relation.mapper.RelationMapper.class)
+                Mockito.mock(com.tongji.counter.service.UserCounterRebuildAdapter.class),
+                Mockito.mock(com.tongji.relation.mapper.RelationMapper.class),
+                Mockito.mock(com.tongji.common.singleflight.DistributedSingleFlightService.class)
         );
 
         HandlerMethodArgumentResolver jwtArgumentResolver = new HandlerMethodArgumentResolver() {

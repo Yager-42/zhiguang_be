@@ -5,11 +5,10 @@ import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.Row;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.common.singleflight.DistributedSingleFlightService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPost;
 import com.tongji.relation.service.RelationService;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -22,7 +21,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 @Service
 public class FollowFeedServiceImpl implements FollowFeedService {
@@ -44,7 +42,7 @@ public class FollowFeedServiceImpl implements FollowFeedService {
     private final KnowPostMapper knowPostMapper;
     private final RelationService relationService;
     private final StringRedisTemplate redisTemplate;
-    private final RedissonClient redissonClient;
+    private final DistributedSingleFlightService singleFlightService;
     private final ObjectMapper objectMapper;
     private final PreparedStatement inboxRead;
     private final PreparedStatement inboxCursorRead;
@@ -55,12 +53,12 @@ public class FollowFeedServiceImpl implements FollowFeedService {
                                  KnowPostMapper knowPostMapper,
                                  RelationService relationService,
                                  StringRedisTemplate redisTemplate,
-                                 RedissonClient redissonClient) {
+                                 DistributedSingleFlightService singleFlightService) {
         this.cqlSession = cqlSession;
         this.knowPostMapper = knowPostMapper;
         this.relationService = relationService;
         this.redisTemplate = redisTemplate;
-        this.redissonClient = redissonClient;
+        this.singleFlightService = singleFlightService;
         this.objectMapper = new ObjectMapper().findAndRegisterModules();
         this.inboxRead = cqlSession.prepare("SELECT publish_ts, content_id, author_id FROM zhiguang.feed_inbox WHERE user_id = ? LIMIT ?");
         this.inboxCursorRead = cqlSession.prepare("SELECT publish_ts, content_id, author_id FROM zhiguang.feed_inbox WHERE user_id = ? AND (publish_ts, content_id) < (?, ?) LIMIT ?");
@@ -151,7 +149,10 @@ public class FollowFeedServiceImpl implements FollowFeedService {
 
     private List<TimelineItem> readAuthorHead(long authorId, Cursor cursor, int safeLimit) {
         String key = "feed:author:" + authorId + ":head";
-        String cached = cursor == null ? redisTemplate.opsForValue().get(key) : null;
+        if (cursor != null) {
+            return loadAuthorFeed(authorId, cursor, safeLimit);
+        }
+        String cached = redisTemplate.opsForValue().get(key);
         if (cached != null && !cached.isBlank()) {
             List<TimelineItem> items = parseItems(cached);
             if (items != null) {
@@ -159,32 +160,27 @@ public class FollowFeedServiceImpl implements FollowFeedService {
             }
         }
 
-        RLock lock = redissonClient.getLock(key + ":lock");
-        boolean locked = false;
-        try {
-            locked = lock.tryLock(0, 5, TimeUnit.SECONDS);
-            if (locked) {
-                String again = redisTemplate.opsForValue().get(key);
-                if (again != null && !again.isBlank()) {
-                    List<TimelineItem> items = parseItems(again);
-                    if (items != null) {
-                        return items;
-                    }
-                }
+        return singleFlightService.execute(
+                "feed-author-head",
+                authorId + ":" + safeLimit,
+                new TypeReference<List<TimelineItem>>() {},
+                () -> rebuildAuthorHead(key, authorId, safeLimit)
+        );
+    }
 
-                List<TimelineItem> headItems = loadAuthorFeed(authorId, null, safeLimit);
-                redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(headItems), Duration.ofSeconds(authorHeadCacheTtlSeconds));
-                if (cursor == null) {
-                    return headItems;
-                }
-                return loadAuthorFeed(authorId, cursor, safeLimit);
-            }
-        } catch (Exception ignored) {} finally {
-            if (locked) {
-                lock.unlock();
+    private List<TimelineItem> rebuildAuthorHead(String key, long authorId, int safeLimit) {
+        String again = redisTemplate.opsForValue().get(key);
+        if (again != null && !again.isBlank()) {
+            List<TimelineItem> items = parseItems(again);
+            if (items != null) {
+                return items;
             }
         }
-        return loadAuthorFeed(authorId, cursor, safeLimit);
+        List<TimelineItem> headItems = loadAuthorFeed(authorId, null, safeLimit);
+        try {
+            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(headItems), Duration.ofSeconds(authorHeadCacheTtlSeconds));
+        } catch (Exception ignored) {}
+        return headItems;
     }
 
     private List<TimelineItem> loadAuthorFeed(long authorId, Cursor cursor, int safeLimit) {

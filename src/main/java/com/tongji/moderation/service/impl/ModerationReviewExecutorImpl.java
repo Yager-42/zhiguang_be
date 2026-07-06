@@ -1,5 +1,7 @@
 package com.tongji.moderation.service.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.tongji.common.singleflight.DistributedSingleFlightService;
 import com.tongji.moderation.config.ModerationProperties;
 import com.tongji.moderation.mapper.ModerationReportMapper;
 import com.tongji.moderation.model.ModerationLlmResult;
@@ -10,62 +12,41 @@ import com.tongji.moderation.service.ModerationLlmClient;
 import com.tongji.moderation.service.ModerationNotificationService;
 import com.tongji.moderation.service.ModerationReviewExecutor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
 public class ModerationReviewExecutorImpl implements ModerationReviewExecutor {
-    private static final String LOCK_KEY_PREFIX = "moderation:review:lock:";
+    private static final String SINGLE_FLIGHT_STAGE = "moderation-llm";
+    private static final TypeReference<ModerationLlmResult> LLM_RESULT_TYPE = new TypeReference<>() {
+    };
 
     private final ModerationReportMapper reportMapper;
     private final ModerationLlmClient llmClient;
     private final ModerationContentActionService contentActionService;
     private final ModerationNotificationService notificationService;
     private final ModerationProperties properties;
-    private final RedissonClient redissonClient;
+    private final DistributedSingleFlightService singleFlightService;
 
     public ModerationReviewExecutorImpl(ModerationReportMapper reportMapper,
                                         ModerationLlmClient llmClient,
                                         ModerationContentActionService contentActionService,
                                         ModerationNotificationService notificationService,
                                         ModerationProperties properties,
-                                        RedissonClient redissonClient) {
+                                        DistributedSingleFlightService singleFlightService) {
         this.reportMapper = reportMapper;
         this.llmClient = llmClient;
         this.contentActionService = contentActionService;
         this.notificationService = notificationService;
         this.properties = properties;
-        this.redissonClient = redissonClient;
+        this.singleFlightService = singleFlightService;
     }
 
     @Override
     public void review(long reportId) {
-        RLock lock = redissonClient.getLock(LOCK_KEY_PREFIX + reportId);
-        boolean locked = false;
-        try {
-            locked = lock.tryLock(0L, TimeUnit.MILLISECONDS);
-            if (!locked) {
-                return;
-            }
-            doReview(reportId);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            log.warn("moderation review lock interrupted, reportId={}: {}", reportId, exception.getMessage(), exception);
-            throw new IllegalStateException("moderation review lock interrupted", exception);
-        } finally {
-            if (locked) {
-                try {
-                    lock.unlock();
-                } catch (RuntimeException exception) {
-                    log.warn("moderation review lock release failed, reportId={}: {}", reportId, exception.getMessage(), exception);
-                }
-            }
-        }
+        doReview(reportId);
     }
 
     private void doReview(long reportId) {
@@ -74,7 +55,13 @@ public class ModerationReviewExecutorImpl implements ModerationReviewExecutor {
             return;
         }
 
-        ModerationLlmResult result = llmClient.review(report);
+        int currentRetryCount = report.getRetryCount() == null ? 0 : report.getRetryCount();
+        ModerationLlmResult result = singleFlightService.execute(
+                SINGLE_FLIGHT_STAGE,
+                "report:" + reportId + ":retry:" + currentRetryCount,
+                LLM_RESULT_TYPE,
+                () -> llmClient.review(report)
+        );
         if (result.retryableFailure()) {
             handleRetryableFailure(report, result);
             return;
@@ -133,6 +120,7 @@ public class ModerationReviewExecutorImpl implements ModerationReviewExecutor {
         LocalDateTime nextRetryAt = LocalDateTime.now().plusMinutes(Math.max(1, nextRetryCount));
         reportMapper.scheduleRetry(
                 report.getId(),
+                currentRetryCount,
                 nextRetryCount,
                 nextRetryAt,
                 result.failureCode(),
