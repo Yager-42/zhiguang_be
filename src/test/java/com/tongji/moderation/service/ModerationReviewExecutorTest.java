@@ -61,8 +61,8 @@ class ModerationReviewExecutorTest {
         ModerationReport report = pendingReport();
         when(reportMapper.findById(21L)).thenReturn(report);
         when(llmClient.review(report)).thenReturn(ModerationLlmResult.decision(
-                "dashscope",
-                "qwen-plus",
+                "opencode",
+                "deepseek-v4-flash-free",
                 "approved",
                 new BigDecimal("0.9300"),
                 "policy violation"
@@ -81,19 +81,19 @@ class ModerationReviewExecutorTest {
         ModerationReport report = pendingReport();
         when(reportMapper.findById(21L)).thenReturn(report);
         when(llmClient.review(report)).thenReturn(ModerationLlmResult.decision(
-                "dashscope",
-                "qwen-plus",
+                "opencode",
+                "deepseek-v4-flash-free",
                 "approved",
                 new BigDecimal("0.4000"),
                 "uncertain"
         ));
-        when(reportMapper.markIgnored(eq(21L), eq("dashscope"), eq("qwen-plus"), eq("approved"),
+        when(reportMapper.markIgnored(eq(21L), eq("opencode"), eq("deepseek-v4-flash-free"), eq("approved"),
                 eq(new BigDecimal("0.4000")), eq("uncertain"), eq("LOW_CONFIDENCE"), any(), any()))
                 .thenReturn(1);
 
         executor.review(21L);
 
-        verify(reportMapper).markIgnored(eq(21L), eq("dashscope"), eq("qwen-plus"), eq("approved"),
+        verify(reportMapper).markIgnored(eq(21L), eq("opencode"), eq("deepseek-v4-flash-free"), eq("approved"),
                 eq(new BigDecimal("0.4000")), eq("uncertain"), eq("LOW_CONFIDENCE"), any(), any());
         verify(contentActionService, never()).applyApprovedAction(any());
         verify(notificationService).notifyReportProcessed(report, false);
@@ -147,8 +147,8 @@ class ModerationReviewExecutorTest {
         ModerationReport report = pendingReport();
         when(reportMapper.findById(21L)).thenReturn(report);
         when(llmClient.review(report)).thenReturn(ModerationLlmResult.decision(
-                "dashscope",
-                "qwen-plus",
+                "opencode",
+                "deepseek-v4-flash-free",
                 "rejected",
                 new BigDecimal("0.9300"),
                 "no violation"

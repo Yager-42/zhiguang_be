@@ -47,11 +47,12 @@ spring:
     uris:
       - http://localhost:9200
   ai:
-    dashscope:
-      api-key: ${AI_DASHSCOPE_API_KEY:}
+    openai:
+      api-key: ${AI_OPENAI_API_KEY:sk-hxnJLcA9wTB1S8DjrZOVEeWQOgHNnViPRe0jtyYw7kPsJEwGAmllaCdx2cQF4PpX}
+      base-url: ${AI_OPENAI_BASE_URL:https://opencode.ai/zen}
       chat:
         options:
-          model: ${AI_DASHSCOPE_MODEL:qwen-plus}
+          model: ${AI_OPENAI_MODEL:deepseek-v4-flash-free}
 rocketmq:
   name-server: localhost:9876
   producer:

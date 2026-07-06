@@ -26,8 +26,8 @@ import java.util.Map;
 
 @Service
 @ConditionalOnProperty(prefix = "moderation.llm", name = "enabled", havingValue = "true")
-public class SpringAiAlibabaModerationLlmClient implements ModerationLlmClient {
-    private static final String PROVIDER = "dashscope";
+public class SpringAiModerationLlmClient implements ModerationLlmClient {
+    private static final String PROVIDER = "opencode";
     private static final ObjectMapper PROMPT_OBJECT_MAPPER = new ObjectMapper();
 
     private final ChatClient chatClient;
@@ -37,12 +37,12 @@ public class SpringAiAlibabaModerationLlmClient implements ModerationLlmClient {
     private final CommentMapper commentMapper;
     private final TextStorageService textStorageService;
 
-    public SpringAiAlibabaModerationLlmClient(ChatClient.Builder chatClientBuilder,
-                                             ModerationProperties properties,
-                                             @Value("${spring.ai.dashscope.chat.options.model:qwen-plus}") String modelName,
-                                             KnowPostMapper knowPostMapper,
-                                             CommentMapper commentMapper,
-                                             TextStorageService textStorageService) {
+    public SpringAiModerationLlmClient(ChatClient.Builder chatClientBuilder,
+                                       ModerationProperties properties,
+                                       @Value("${spring.ai.openai.chat.options.model:deepseek-v4-flash-free}") String modelName,
+                                       KnowPostMapper knowPostMapper,
+                                       CommentMapper commentMapper,
+                                       TextStorageService textStorageService) {
         this.properties = properties;
         this.modelName = modelName;
         this.knowPostMapper = knowPostMapper;
