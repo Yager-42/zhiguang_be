@@ -5,7 +5,7 @@ import com.tongji.knowpost.model.KnowPost;
 import com.tongji.moderation.config.ModerationProperties;
 import com.tongji.moderation.model.ModerationLlmResult;
 import com.tongji.moderation.model.ModerationReport;
-import com.tongji.moderation.service.impl.SpringAiAlibabaModerationLlmClient;
+import com.tongji.moderation.service.impl.SpringAiModerationLlmClient;
 import com.tongji.storage.text.TextReadException;
 import com.tongji.storage.text.TextStorageService;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class SpringAiAlibabaModerationLlmClientTest {
+class SpringAiModerationLlmClientTest {
 
     @Test
     void enabledClientLoadsPostTextBeforeCallingModel() {
@@ -40,10 +40,10 @@ class SpringAiAlibabaModerationLlmClientTest {
         when(builder.defaultSystem(org.mockito.Mockito.anyString())).thenReturn(builder);
         when(builder.build()).thenReturn(mock(ChatClient.class));
 
-        SpringAiAlibabaModerationLlmClient client = new SpringAiAlibabaModerationLlmClient(
+        SpringAiModerationLlmClient client = new SpringAiModerationLlmClient(
                 builder,
                 properties,
-                "qwen-plus",
+                "deepseek-v4-flash-free",
                 knowPostMapper,
                 commentMapper,
                 textStorageService
@@ -72,10 +72,10 @@ class SpringAiAlibabaModerationLlmClientTest {
         when(builder.defaultSystem(org.mockito.Mockito.anyString())).thenReturn(builder);
         when(builder.build()).thenReturn(mock(ChatClient.class));
 
-        SpringAiAlibabaModerationLlmClient client = new SpringAiAlibabaModerationLlmClient(
+        SpringAiModerationLlmClient client = new SpringAiModerationLlmClient(
                 builder,
                 properties,
-                "qwen-plus",
+                "deepseek-v4-flash-free",
                 knowPostMapper,
                 commentMapper,
                 textStorageService
@@ -85,8 +85,8 @@ class SpringAiAlibabaModerationLlmClientTest {
 
         assertThat(result.retryableFailure()).isTrue();
         assertThat(result.failureCode()).isEqualTo("INPUT_UNAVAILABLE");
-        assertThat(result.provider()).isEqualTo("dashscope");
-        assertThat(result.model()).isEqualTo("qwen-plus");
+        assertThat(result.provider()).isEqualTo("opencode");
+        assertThat(result.model()).isEqualTo("deepseek-v4-flash-free");
     }
 
     @Test
@@ -101,10 +101,10 @@ class SpringAiAlibabaModerationLlmClientTest {
         when(builder.defaultSystem(org.mockito.Mockito.anyString())).thenReturn(builder);
         when(builder.build()).thenReturn(mock(ChatClient.class));
 
-        SpringAiAlibabaModerationLlmClient client = new SpringAiAlibabaModerationLlmClient(
+        SpringAiModerationLlmClient client = new SpringAiModerationLlmClient(
                 builder,
                 properties,
-                "qwen-plus",
+                "deepseek-v4-flash-free",
                 knowPostMapper,
                 commentMapper,
                 textStorageService
@@ -141,10 +141,10 @@ class SpringAiAlibabaModerationLlmClientTest {
                         "too large"
                 ));
 
-        SpringAiAlibabaModerationLlmClient client = new SpringAiAlibabaModerationLlmClient(
+        SpringAiModerationLlmClient client = new SpringAiModerationLlmClient(
                 builder,
                 properties,
-                "qwen-plus",
+                "deepseek-v4-flash-free",
                 knowPostMapper,
                 commentMapper,
                 textStorageService
@@ -182,10 +182,10 @@ class SpringAiAlibabaModerationLlmClientTest {
                 ));
         org.mockito.Mockito.clearInvocations(chatClient.prompt());
 
-        SpringAiAlibabaModerationLlmClient client = new SpringAiAlibabaModerationLlmClient(
+        SpringAiModerationLlmClient client = new SpringAiModerationLlmClient(
                 builder,
                 properties,
-                "qwen-plus",
+                "deepseek-v4-flash-free",
                 knowPostMapper,
                 commentMapper,
                 textStorageService
@@ -217,10 +217,10 @@ class SpringAiAlibabaModerationLlmClientTest {
         when(builder.defaultSystem(org.mockito.Mockito.anyString())).thenReturn(builder);
         when(builder.build()).thenReturn(mock(ChatClient.class));
 
-        SpringAiAlibabaModerationLlmClient client = new SpringAiAlibabaModerationLlmClient(
+        SpringAiModerationLlmClient client = new SpringAiModerationLlmClient(
                 builder,
                 properties,
-                "qwen-plus",
+                "deepseek-v4-flash-free",
                 knowPostMapper,
                 commentMapper,
                 textStorageService
@@ -249,10 +249,10 @@ class SpringAiAlibabaModerationLlmClientTest {
         when(builder.defaultSystem(org.mockito.Mockito.anyString())).thenReturn(builder);
         when(builder.build()).thenReturn(mock(ChatClient.class));
 
-        SpringAiAlibabaModerationLlmClient client = new SpringAiAlibabaModerationLlmClient(
+        SpringAiModerationLlmClient client = new SpringAiModerationLlmClient(
                 builder,
                 properties,
-                "qwen-plus",
+                "deepseek-v4-flash-free",
                 knowPostMapper,
                 commentMapper,
                 textStorageService
