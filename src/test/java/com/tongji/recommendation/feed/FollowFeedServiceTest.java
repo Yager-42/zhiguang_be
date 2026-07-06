@@ -5,6 +5,7 @@ import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
+import com.tongji.common.singleflight.DistributedSingleFlightService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPost;
 import com.tongji.recommendation.feed.FollowedAuthorRow;
@@ -14,8 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -25,7 +24,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,9 +52,7 @@ class FollowFeedServiceTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
     @Mock
-    private RedissonClient redissonClient;
-    @Mock
-    private RLock authorHeadLock;
+    private DistributedSingleFlightService singleFlightService;
     @Mock
     private PreparedStatement inboxRead;
     @Mock
@@ -99,13 +96,13 @@ class FollowFeedServiceTest {
         lenient().when(cqlSession.prepare("SELECT publish_ts, content_id FROM zhiguang.feed_author_feed WHERE author_id = ? AND (publish_ts, content_id) < (?, ?) LIMIT ?"))
                 .thenReturn(authorCursorRead);
         lenient().when(inboxRead.bind(anyLong(), anyInt())).thenReturn(inboxReadBound);
-        service = new FollowFeedServiceImpl(cqlSession, knowPostMapper, relationService, redisTemplate, redissonClient);
+        lenient().when(singleFlightService.execute(any(String.class), any(String.class), any(), any(Supplier.class)))
+                .thenAnswer(invocation -> invocation.getArgument(3, Supplier.class).get());
+        service = new FollowFeedServiceImpl(cqlSession, knowPostMapper, relationService, redisTemplate, singleFlightService);
     }
 
     @Test
     void largeAuthorOnlyFollowReturnsAuthorHeadEvenWhenInboxIsEmpty() throws Exception {
-        when(redissonClient.getLock("feed:author:7:head:lock")).thenReturn(authorHeadLock);
-        when(authorHeadLock.tryLock(0, 5, TimeUnit.SECONDS)).thenReturn(true);
         when(authorRead.bind(anyLong(), eq(20))).thenReturn(authorReadBound);
         when(valueOperations.get("feed:timeline:42")).thenReturn(null);
         when(valueOperations.get("feed:author:7:head")).thenReturn(null);
@@ -122,12 +119,11 @@ class FollowFeedServiceTest {
 
         assertThat(page.items()).extracting(TimelineItem::contentId).containsExactly(101L);
         assertThat(page.nextCursor()).isNull();
+        verify(singleFlightService).execute(eq("feed-author-head"), eq("7:20"), any(), any(Supplier.class));
     }
 
     @Test
     void readTimeRepairFiltersDeletedPrivateAndSchoolPosts() throws Exception {
-        when(redissonClient.getLock("feed:author:7:head:lock")).thenReturn(authorHeadLock);
-        when(authorHeadLock.tryLock(0, 5, TimeUnit.SECONDS)).thenReturn(true);
         when(authorRead.bind(anyLong(), eq(20))).thenReturn(authorReadBound);
         when(valueOperations.get("feed:timeline:42")).thenReturn(null);
         when(valueOperations.get("feed:author:7:head")).thenReturn(null);
@@ -191,6 +187,7 @@ class FollowFeedServiceTest {
         assertThat(secondPage.items()).extracting(TimelineItem::contentId).containsExactly(100L);
         verify(inboxCursorRead).bind(42L, sameTs, 101L, 2);
         verify(authorCursorRead).bind(7L, sameTs, 101L, 2);
+        verify(singleFlightService, times(1)).execute(eq("feed-author-head"), eq("7:2"), any(), any(Supplier.class));
     }
 
     @Test
@@ -250,8 +247,6 @@ class FollowFeedServiceTest {
     void usesConfiguredTimelineAndAuthorHeadTtls() throws Exception {
         ReflectionTestUtils.setField(service, "timelineCacheTtlSeconds", 11L);
         ReflectionTestUtils.setField(service, "authorHeadCacheTtlSeconds", 22L);
-        when(redissonClient.getLock("feed:author:7:head:lock")).thenReturn(authorHeadLock);
-        when(authorHeadLock.tryLock(0, 5, TimeUnit.SECONDS)).thenReturn(true);
         when(authorRead.bind(anyLong(), eq(20))).thenReturn(authorReadBound);
         when(valueOperations.get("feed:timeline:42")).thenReturn(null);
         when(valueOperations.get("feed:author:7:head")).thenReturn(null);

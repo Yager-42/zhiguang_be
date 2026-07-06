@@ -95,6 +95,7 @@
             updated_at = #{updatedAt}
         WHERE id = #{id}
           AND status = 'pending'
+          AND retry_count = #{sourceRetryCount}
     </update>
 
     <update id="updateContentAction">

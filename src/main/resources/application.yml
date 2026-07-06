@@ -131,6 +131,35 @@ counter:
   rebuild:
     enabled: false
 
+singleflight:
+  enabled: ${SINGLEFLIGHT_ENABLED:true}
+  mode: ${SINGLEFLIGHT_MODE:distributed}
+  defaults:
+    running-ttl-millis: ${SINGLEFLIGHT_RUNNING_TTL_MILLIS:15000}
+    result-ttl-millis: ${SINGLEFLIGHT_RESULT_TTL_MILLIS:600000}
+    failed-result-ttl-millis: ${SINGLEFLIGHT_FAILED_RESULT_TTL_MILLIS:60000}
+    follower-max-wait-millis: ${SINGLEFLIGHT_FOLLOWER_MAX_WAIT_MILLIS:20000}
+    stream-block-timeout-millis: ${SINGLEFLIGHT_STREAM_BLOCK_TIMEOUT_MILLIS:3000}
+    poll-fallback-interval-millis: ${SINGLEFLIGHT_POLL_FALLBACK_INTERVAL_MILLIS:2000}
+    takeover-detect-millis: ${SINGLEFLIGHT_TAKEOVER_DETECT_MILLIS:10000}
+    heartbeat-interval-millis: ${SINGLEFLIGHT_HEARTBEAT_INTERVAL_MILLIS:1000}
+    l1-cache-enabled: ${SINGLEFLIGHT_L1_CACHE_ENABLED:true}
+    l1-cache-ttl-millis: ${SINGLEFLIGHT_L1_CACHE_TTL_MILLIS:30000}
+    l1-cache-max-size: ${SINGLEFLIGHT_L1_CACHE_MAX_SIZE:1000}
+  stages:
+    counter-sds:
+      enabled: ${SINGLEFLIGHT_COUNTER_SDS_ENABLED:true}
+      mode: ${SINGLEFLIGHT_COUNTER_SDS_MODE:}
+    user-counter:
+      enabled: ${SINGLEFLIGHT_USER_COUNTER_ENABLED:true}
+      mode: ${SINGLEFLIGHT_USER_COUNTER_MODE:}
+    feed-author-head:
+      enabled: ${SINGLEFLIGHT_FEED_AUTHOR_HEAD_ENABLED:true}
+      mode: ${SINGLEFLIGHT_FEED_AUTHOR_HEAD_MODE:}
+    moderation-llm:
+      enabled: ${SINGLEFLIGHT_MODERATION_LLM_ENABLED:true}
+      mode: ${SINGLEFLIGHT_MODERATION_LLM_MODE:}
+
 recommendation:
   gorse:
     endpoint: ${GORSE_ENDPOINT:http://localhost:8087}
