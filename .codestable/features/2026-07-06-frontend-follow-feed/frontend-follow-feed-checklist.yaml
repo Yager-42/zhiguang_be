@@ -1,0 +1,68 @@
+doc_type: checklist
+feature: 2026-07-06-frontend-follow-feed
+status: pending
+summary: 前端关注 Feed 实现步骤与检查项
+steps:
+  - id: 1
+    name: service + types（FeedResponse 补 nextCursor + followFeed 方法）
+    description: types/knowpost.ts 的 FeedResponse 补 nextCursor?: string 字段；knowpostService 加 followFeed(cursor, accessToken) 方法，GET /feed/follow?cursor=，用 URLSearchParams 构建 query（仓库惯例），需 token
+    exit_signal: cd zhiguang_fe && npm run lint 通过；curl GET /knowposts/feed/follow -H "Authorization: Bearer <token>" 返回 200 + items（验证接口契约）
+    verification: command
+    deliverables: [services/knowpostService.ts, types/knowpost.ts]
+    status: done
+    checks:
+      - id: 1.1
+        description: tsc --noEmit 无错误
+        status: passed
+      - id: 1.2
+        description: FeedResponse 补 nextCursor?: string 字段（后端已返回，前端类型对齐）；注明 followFeed 的 page/size 是后端占位，关注 tab 只用 items/hasMore/nextCursor
+        status: passed
+      - id: 1.3
+        description: followFeed(cursor: string|null, accessToken: string) 签名；cursor 为 null 时无 query；cursor 非空时 URLSearchParams set cursor；显式传 accessToken；不用 encodeURIComponent（URLSearchParams 惯例，: 不需编码）
+        status: passed
+  - id: 2
+    name: HomePage tab 切换 + 关注 tab 首屏 + 空态 + 未登录隐藏
+    description: HomePage 引入 useAuth() 取 tokens；加顶部 tab（推荐/关注）；关注 tab 调 followFeed 首屏加载（state 在 HomePage 顶层 useState 持有，切 tab 不 unmount）；空态显示"去发现内容"引导（不区分两种空态）；未登录只显示推荐 tab
+    exit_signal: npm run lint 通过；浏览器登录后切关注 tab 看到关注作者帖子或空态引导；未登录无关注 tab
+    verification: browser
+    deliverables: [pages/HomePage.tsx 修改]
+    status: done
+    checks:
+      - id: 2.1
+        description: tsc --noEmit 无错误
+        status: passed
+      - id: 2.2
+        description: HomePage 引入 useAuth() 取 tokens（新增依赖）；顶部 tab（推荐/关注）切换；默认推荐 tab；关注 tab state（items/nextCursor/loading/hasMore/error）在 HomePage 顶层 useState 持有，tab 切换只切渲染分支不 unmount
+        status: passed
+      - id: 2.3
+        description: 关注 tab 首屏调 followFeed(null, token) 加载；items 空（hasMore=false 且 items=[]）显示"去发现内容"引导（不区分没关注人 vs 关注了没发帖，跳搜索/推荐）
+        status: passed
+      - id: 2.4
+        description: 未登录（tokens?.accessToken falsy）不渲染关注 tab，只显示推荐 tab（D4）
+        status: passed
+      - id: 2.5
+        description: 推荐 tab 保持现状 feed(1,20) 无翻页（S5，grep 确认推荐路径无 cursor/loadMore 逻辑）
+        status: passed
+  - id: 3
+    name: 加载更多按钮 + harden + 清洁度
+    description: 关注 tab hasMore=true 时显示"加载更多"按钮（复用 CommentSection:277 loadMore 模式，不引入无限滚动）；点击 followFeed(nextCursor) 追加 items；防重复（loading 标志）；tab 切换不 unmount（state 隔离）；错误态保留已加载；清洁度 grep
+    exit_signal: 浏览器点加载更多追加（有 hasMore 时）+ tab 切换不残留（S4）+ cursor 正确回传（S7 Network）+ grep 无 console.log/TODO/FIXME + 无 IntersectionObserver/scroll 监听 + npm run lint 通过 + 反向核对（推荐 tab 无翻页 / 无新路由 / zhiguang_be 仓库后端 git diff 为空）
+    verification: browser
+    deliverables: [pages/HomePage.tsx 加载更多逻辑]
+    status: done
+    checks:
+      - id: 3.1
+        description: 关注 tab hasMore=true 且非 loading 时显示"加载更多"按钮；点击调 followFeed(nextCursor) 追加 items；hasMore=false 按钮消失；不引入 IntersectionObserver/scroll 监听（用按钮，复用 CommentSection 模式）
+        status: passed
+      - id: 3.2
+        description: 防重复加载：loading 标志守卫，按钮 disabled 且点击时 loading=true 直接 return
+        status: passed
+      - id: 3.3
+        description: tab 切换不 unmount：关注 tab state 在 HomePage 顶层持有，切推荐 tab 再切回关注 tab 数据仍在（S4）；错误态保留已加载 items + 显示 error 提示（不清空）
+        status: passed
+      - id: 3.4
+        description: cursor 正确回传：点加载更多时 Network 请求 cursor 参数值 = 上次响应 nextCursor（原样回传，S7）
+        status: passed
+      - id: 3.5
+        description: grep 无 console.log / TODO / FIXME / 注释代码 / 死 import；反向核对：推荐 tab 无 cursor/loadMore 逻辑、无 IntersectionObserver/scroll、无新路由；在 zhiguang_be 仓库 git diff --stat src/main/java/com/tongji/knowpost/ 为空
+        status: passed
