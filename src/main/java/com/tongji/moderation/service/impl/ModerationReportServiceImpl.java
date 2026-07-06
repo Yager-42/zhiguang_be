@@ -66,7 +66,7 @@ public class ModerationReportServiceImpl implements ModerationReportService {
         }
         ModerationReport existing = reportMapper.findByReporterAndTarget(reporterUserId, targetType, request.targetId());
         if (existing != null) {
-            return new ModerationReportResponse(existing.getId(), existing.getStatus());
+            return new ModerationReportResponse(String.valueOf(existing.getId()), existing.getStatus());
         }
 
         long ownerUserId = resolveOwner(targetType, request.targetId());
@@ -90,12 +90,12 @@ public class ModerationReportServiceImpl implements ModerationReportService {
         } catch (DuplicateKeyException exception) {
             ModerationReport raced = reportMapper.findByReporterAndTarget(reporterUserId, targetType, request.targetId());
             if (raced != null) {
-                return new ModerationReportResponse(raced.getId(), raced.getStatus());
+                return new ModerationReportResponse(String.valueOf(raced.getId()), raced.getStatus());
             }
             throw exception;
         }
         writeReviewRequestedOutbox(report);
-        return new ModerationReportResponse(reportId, ModerationStatus.PENDING);
+        return new ModerationReportResponse(String.valueOf(reportId), ModerationStatus.PENDING);
     }
 
     private long resolveOwner(String targetType, long targetId) {

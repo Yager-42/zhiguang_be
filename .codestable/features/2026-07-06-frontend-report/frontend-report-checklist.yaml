@@ -1,0 +1,48 @@
+doc_type: checklist
+feature: 2026-07-06-frontend-report
+status: pending
+summary: 前端举报模块实现步骤与检查项
+steps:
+  - id: 1
+    name: service + types + 后端 DTO string 化
+    description: ✅ types/moderation.ts 定义 ModerationTargetType/ModerationReason（6 枚举）/ModerationReportRequest（targetId string）/ModerationReportResponse（reportId string）；services/moderationService.ts 加 report 方法 POST /api/v1/moderation/reports；后端 ModerationReportResponse reportId Long→String + 3 处构造处 String.valueOf（:69/:93/:98）+ 测试适配（ControllerTest 构造+jsonPath、ServiceImplTest 3 处 isEqualTo("21")；outbox payload reportId 仍是 Long 不改）
+    exit_signal: cd zhiguang_fe && npm run lint 通过；curl POST 'http://localhost:8080/api/v1/moderation/reports' -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"targetType":"post","targetId":<id>,"reason":"spam"}' 返回 2xx（202 ACCEPTED）+ reportId（string 带引号）；后端 mvn test 通知/举报相关测试通过
+    verification: command
+    deliverables: [services/moderationService.ts, types/moderation.ts, 后端 ModerationReportResponse.java + ServiceImpl 3 处构造 + 2 测试文件]
+    status: done
+    checks:
+      - id: 1.1
+        description: tsc --noEmit 无错误；后端 mvn compile 通过
+        status: passed
+      - id: 1.2
+        description: ModerationReason 枚举含 spam/harassment/violence/pornography/illegal/other；targetId/reportId 全 string（snowflake 精度防御）；后端 ModerationReportResponse reportId 改 String + 3 处构造 String.valueOf（:69 existing.getId() / :93 raced.getId() / :98 reportId）+ 测试适配（ControllerTest:79 构造 String + :87 jsonPath value("21")；ServiceImplTest:73/93/169 isEqualTo("11"/"21")；outbox payload :113 "reportId":21 不改）
+        status: passed
+      - id: 1.3
+        description: report(payload, accessToken) 签名；POST /api/v1/moderation/reports（含 /api/v1 前缀）；body 含 targetType/targetId/reason/description(可选)；显式传 accessToken
+        status: passed
+  - id: 2
+    name: ReportDialog + 详情页接入 + harden + 清洁度
+    description: 新建 components/common/ReportDialog.tsx（单选原因 6 选 1 + 可选备注 ≤512 + 提交/disabled + 成功态 1.5s 自动关+重置表单 + 错误态不关）；CourseDetailPage 加举报按钮（derivedId && !isSelf && !!tokens?.accessToken 显示，与 FollowButton 同条件）+ 点击开弹窗 + 防重复提交；清洁度 grep
+    exit_signal: 浏览器登录非作者看帖子详情页有举报按钮 + 点开弹窗 + 选原因提交弹窗内"举报已提交"1.5s 自动关 + 重复举报不报错 + 作者/未登录无按钮 + grep 无 console.log/TODO/FIXME + npm run lint 通过 + 反向核对（CommentSection 无 ReportDialog / 无状态查询 / 后端 moderation 只改了 DTO reportId）
+    verification: browser
+    deliverables: [components/common/ReportDialog.tsx, components/common/ReportDialog.module.css, pages/CourseDetailPage.tsx 修改]
+    status: done
+    checks:
+      - id: 2.1
+        description: tsc --noEmit 无错误
+        status: passed
+      - id: 2.2
+        description: ReportDialog 单选原因（6 种 spam/harassment/violence/pornography/illegal/other）+ 可选备注 textarea（maxlength=512）；提交按钮 disabled 当 loading 或未选原因
+        status: passed
+      - id: 2.3
+        description: CourseDetailPage 举报按钮：derivedId && !isSelf && !!tokens?.accessToken 时显示（与 FollowButton 同条件，!!tokens?.accessToken 不是 isLoggedIn）；点击开 ReportDialog；detail.id 作 targetId 传 string
+        status: passed
+      - id: 2.4
+        description: 提交成功（202）弹窗内显示"举报已提交，我们会尽快处理"成功态 1.5s 自动关 + 重置表单（不引入 toast 组件）；重复举报（后端返 existing）当成功态不报错；失败显示错误态不关弹窗；防重复提交（loading disabled）
+        status: passed
+      - id: 2.5
+        description: 作者看自己帖无举报按钮（isSelf，后端无 self-report 校验前端隐藏是唯一防线）；未登录（!tokens?.accessToken）无举报按钮；Network 请求 targetId string + 响应 reportId string
+        status: passed
+      - id: 2.6
+        description: grep 无 console.log / TODO / FIXME / 注释代码 / 死 import；反向核对：CommentSection 无 ReportDialog 引用、无状态查询逻辑、后端 moderation 只改了 ModerationReportResponse reportId Long→String（无其它改动）
+        status: passed
