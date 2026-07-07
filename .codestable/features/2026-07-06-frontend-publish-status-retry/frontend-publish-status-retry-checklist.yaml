@@ -1,0 +1,91 @@
+doc_type: checklist
+feature: 2026-07-06-frontend-publish-status-retry
+status: pending
+summary: 前端发布状态轮询 + 失败 UI + 重试实现步骤与检查项
+steps:
+  - id: 1
+    name: service 与 types（修 publish 双 bug + 加 status/retry）
+    description: 修 knowpostService.publish（加 idempotentKey + body + token 参数 + 返回 PublishAcceptedResponse，修漏 token + 漏 body 双 bug）；加 publishStatus / retryPublish；types 加 PublishAcceptedResponse / PublishStatusResponse
+    exit_signal: cd zhiguang_fe && npm run lint 通过；curl POST /knowposts/{id}/publish -H "Authorization: Bearer <token>" -d '{"idempotentKey":"..."}' 返回 202 + publishAttemptId（验证 R1 双 bug 修复，不再 401/400）
+    verification: command
+    deliverables: [services/knowpostService.ts, types（发布类型）]
+    status: done
+    checks:
+      - id: 1.1
+        description: tsc --noEmit 无错误
+        status: passed
+      - id: 1.2
+        description: publish 签名 (id, idempotentKey, accessToken) 返回 PublishAcceptedResponse；请求体含 { idempotentKey }；显式传 accessToken（与 setTop/setVisibility/remove 一致）；不再 void / 不再漏 body / 不再漏 token
+        status: passed
+      - id: 1.3
+        description: publishStatus (id, attemptId, token) GET /{id}/publish/status?attemptId= 返回 PublishStatusResponse；retryPublish (id, attemptId, token) POST /{id}/publish/{attemptId}/retry 返回 PublishAcceptedResponse（均显式传 token；retry 无 body，path variable + token only）
+        status: passed
+      - id: 1.4
+        description: PublishStatusResponse 类型字段 attemptStatus/postStatus/failedStep/retryable 与后端 DTO 对齐；attemptId 全 string；retry 复用同一 attemptId（非新 id）
+        status: passed
+  - id: 2
+    name: usePublishStatus hook
+    description: 新建 src/hooks/usePublishStatus.ts；轮询 publishStatus（每 2s，30 次上限）+ 状态映射（publishing/succeeded/failed+retryable/failed+!retryable/timeout）+ useEffect cleanup（含新轮询前清旧）+ start/retry/reset；返回字段名 phase（与后端 attemptStatus 区分）
+    exit_signal: npm run lint 通过；dev 联调 publishing → succeeded 走通（curl 触发真实发布，hook 轮询到 succeeded）——联调合入 step3 浏览器验证
+    verification: command
+    deliverables: [src/hooks/usePublishStatus.ts]
+    status: done
+    checks:
+      - id: 2.1
+        description: tsc --noEmit 无错误
+        status: passed
+      - id: 2.2
+        description: 状态映射四态正确：publishing→继续轮询；succeeded→停 + phase=succeeded；failed+retryable→停 + phase=failed + retryable=true；failed+!retryable→停 + retryable=false；30 次未决→phase=timeout
+        status: passed
+      - id: 2.3
+        description: useEffect cleanup 清 interval（unmount / reset / 新轮询启动前都清，retry 重启轮询先清旧防双轮询），无泄漏
+        status: passed
+      - id: 2.4
+        description: start(postId) 调 publish 拿 attemptId 后开轮询；retry() 调 retryPublish（同一 attemptId 回 publishing）后重开轮询；reset() 回 idle 清 interval
+        status: passed
+  - id: 3
+    name: CreatePage 接入 + 四态 UI
+    description: CreatePage handlePublish 改用 hook.start（publish 传 token）；渲染 publishing/succeeded/failed/timeout 四态 UI（按 phase）；失败可重试显示重试按钮；timeout 显示出口（重试/我的知文）；成功显示详情链接；发布中禁用发布按钮
+    exit_signal: 浏览器逐场景验证 S1 成功 / S2 失败可重试 / S4 超时 / S5 不假成功 / S9 禁用，任一不过该场景标 failed 不阻塞其它
+    verification: browser
+    deliverables: [pages/CreatePage.tsx 修改]
+    status: done
+    checks:
+      - id: 3.1
+        description: 发布后先显示"发布中…"，不再立即"发布成功 ✅"（S5）
+        status: passed
+      - id: 3.2
+        description: succeeded 显示"发布成功" + 跳详情(/post/{postId}) / 我的知文链接；failed+retryable 显示 failedStep + 重试按钮；timeout 显示"发布时间较长"+ 重试/我的知文出口
+        status: passed
+      - id: 3.3
+        description: 点重试 → 同一 attemptId 重新进入轮询（按钮在重试中 disabled）
+        status: passed
+      - id: 3.4
+        description: 发布中发布按钮 disabled（submitting = 前置链路进行中 OR phase===publishing）
+        status: passed
+      - id: 3.5
+        description: idempotentKey 用 crypto.randomUUID() 生成；publish 调用传 tokens.accessToken
+        status: passed
+  - id: 4
+    name: harden 与清洁度 + 联调 + S3 代码审查
+    description: unmount 清理 / idempotentKey 去重验证 / S3 失败不可重试代码审查 / 清理 console.log/TODO/死 import；反向核对明确不做项
+    exit_signal: S7 去重 curl 通过 + S8 unmount console 无泄漏警告 + S3 代码审查通过（retryable===false 分支不渲染按钮）+ grep 无 console.log/TODO/FIXME + npm run lint 通过 + 反向核对（无 localStorage publishAttemptId / 无 navigate 到详情 / 后端 git diff 为空）
+    verification: command
+    deliverables: [全量清洁度]
+    status: done
+    checks:
+      - id: 4.1
+        description: 同 idempotentKey 两次 publish 返回同 attemptId 且不重复触发发布（S7，单 post 内去重）
+        status: passed
+      - id: 4.2
+        description: 发布中离开页面 console 无 setState on unmounted 警告（S8）
+        status: passed
+      - id: 4.3
+        description: S3 代码审查：retryable===false 分支不渲染重试按钮（当前后端不可达此态，以代码审查为准）
+        status: passed
+      - id: 4.4
+        description: grep 无 console.log / TODO / FIXME / 注释代码 / 死 import
+        status: passed
+      - id: 4.5
+        description: 反向核对：无 localStorage 存 publishAttemptId（不做刷新恢复）；无 navigate 到详情；后端 git diff 为空
+        status: passed

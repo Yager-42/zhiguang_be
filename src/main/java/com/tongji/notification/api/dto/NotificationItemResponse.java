@@ -2,16 +2,19 @@ package com.tongji.notification.api.dto;
 
 import java.time.LocalDateTime;
 
+/**
+ * 通知列表项响应。id/actorUserId/entityId/secondEntityId 用 String 序列化（snowflake 64 位 >2^53，防 JS 精度丢失）。
+ */
 public record NotificationItemResponse(
-        Long id,
+        String id,
         String type,
         boolean isRead,
         LocalDateTime createdAt,
-        Long actorUserId,
+        String actorUserId,
         String entityType,
-        Long entityId,
+        String entityId,
         String secondEntityType,
-        Long secondEntityId,
+        String secondEntityId,
         Integer aggregateCount,
         LocalDateTime windowStart,
         LocalDateTime windowEnd

@@ -64,8 +64,10 @@ public class CommentController {
                                         @RequestParam(value = "cursorCreateTime", required = false)
                                         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime cursorCreateTime,
                                         @RequestParam(value = "cursorCommentId", required = false) Long cursorCommentId,
-                                        @RequestParam(value = "limit", defaultValue = "20") int limit) {
-        return commentService.pageComments(postId, cursorCreateTime, cursorCommentId, limit);
+                                        @RequestParam(value = "limit", defaultValue = "20") int limit,
+                                        @AuthenticationPrincipal Jwt jwt) {
+        long userId = jwtService.extractUserId(jwt);
+        return commentService.pageComments(postId, cursorCreateTime, cursorCommentId, limit, userId);
     }
 
     @GetMapping("/comments/{commentId}/replies")
