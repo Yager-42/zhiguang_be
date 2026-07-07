@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import org.springframework.ai.model.openai.autoconfigure.OpenAiChatProperties;
 import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
 import org.springframework.core.io.ClassPathResource;
 
@@ -21,6 +20,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ModerationLlmOpenAiCompatibleIntegrationTest {
 
+    private static final String DEFAULT_COMPLETIONS_PATH = "/chat/completions";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
@@ -30,7 +31,7 @@ class ModerationLlmOpenAiCompatibleIntegrationTest {
         String baseUrl = placeholderDefault(properties.getProperty("spring.ai.openai.base-url"));
         String apiKey = placeholderDefault(properties.getProperty("spring.ai.openai.api-key"));
         String model = placeholderDefault(properties.getProperty("spring.ai.openai.chat.options.model"));
-        String endpoint = baseUrl + OpenAiChatProperties.DEFAULT_COMPLETIONS_PATH;
+        String endpoint = baseUrl + DEFAULT_COMPLETIONS_PATH;
 
         Map<String, Object> payload = Map.of(
                 "model", model,
