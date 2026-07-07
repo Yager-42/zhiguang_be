@@ -6,6 +6,6 @@ import java.util.List;
 public record CommentPageResponse(
         List<CommentItemResponse> items,
         LocalDateTime nextCursorCreateTime,
-        Long nextCursorCommentId,
+        String nextCursorCommentId,
         boolean hasMore
 ) {}

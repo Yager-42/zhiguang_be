@@ -8,6 +8,7 @@ import com.tongji.comment.event.CommentFeedbackProducer;
 import com.tongji.comment.event.CommentWriteEvent;
 import com.tongji.comment.event.CommentWriteProducer;
 import com.tongji.comment.mapper.CommentMapper;
+import com.tongji.counter.service.CounterService;
 import com.tongji.comment.mapper.PendingCommentMapper;
 import com.tongji.comment.model.Comment;
 import com.tongji.comment.model.PendingComment;
@@ -58,6 +59,8 @@ class CommentServiceImplTest {
     private CommentWriteProducer commentWriteProducer;
     @Mock
     private CommentFeedbackProducer commentFeedbackProducer;
+    @Mock
+    private CounterService counterService;
 
     private CommentService commentService;
 
@@ -69,7 +72,8 @@ class CommentServiceImplTest {
                 pendingCommentMapper,
                 textStorageService,
                 idService,
-                commentWriteProducer
+                commentWriteProducer,
+                counterService
         );
     }
 
@@ -90,7 +94,7 @@ class CommentServiceImplTest {
         CommentSubmitResponse response = commentService.submit(7L, 9L, request);
 
         assertThat(response.clientRequestId()).isEqualTo("client-1");
-        assertThat(response.pendingCommentId()).isEqualTo(101L);
+        assertThat(response.pendingCommentId()).isEqualTo("101");
         assertThat(response.status()).isEqualTo("pending");
         ArgumentCaptor<PendingComment> pendingCaptor = ArgumentCaptor.forClass(PendingComment.class);
         verify(pendingCommentMapper).insert(pendingCaptor.capture());
@@ -133,7 +137,7 @@ class CommentServiceImplTest {
         CommentSubmitResponse response = commentService.submit(7L, 9L,
                 new CommentSubmitRequest(9L, null, null, "client-1", "hello"));
 
-        assertThat(response.pendingCommentId()).isEqualTo(101L);
+        assertThat(response.pendingCommentId()).isEqualTo("101");
         assertThat(response.status()).isEqualTo("pending");
         verifyNoInteractions(idService, commentWriteProducer, commentFeedbackProducer);
         verify(pendingCommentMapper, never()).insert(any());
@@ -156,7 +160,7 @@ class CommentServiceImplTest {
                 new CommentSubmitRequest(9L, null, null, "client-race", "hello"));
 
         assertThat(response.clientRequestId()).isEqualTo("client-race");
-        assertThat(response.pendingCommentId()).isEqualTo(101L);
+        assertThat(response.pendingCommentId()).isEqualTo("101");
         assertThat(response.status()).isEqualTo("pending");
         verify(commentWriteProducer, never()).publish(any());
         verify(commentFeedbackProducer, never()).publish(any());
@@ -220,7 +224,7 @@ class CommentServiceImplTest {
 
         CommentStatusResponse response = commentService.status(101L);
 
-        assertThat(response.pendingCommentId()).isEqualTo(101L);
+        assertThat(response.pendingCommentId()).isEqualTo("101");
         assertThat(response.clientRequestId()).isEqualTo("client-1");
         assertThat(response.status()).isEqualTo("accepted");
     }
@@ -237,11 +241,12 @@ class CommentServiceImplTest {
                 101L, "first",
                 99L, "third"
         ));
+        when(counterService.isLiked(anyString(), anyString(), anyLong())).thenReturn(false);
 
-        CommentPageResponse response = commentService.pageComments(9L, null, null, 2);
+        CommentPageResponse response = commentService.pageComments(9L, null, null, 2, 7L);
 
         assertThat(response.hasMore()).isTrue();
-        assertThat(response.nextCursorCommentId()).isEqualTo(100L);
+        assertThat(response.nextCursorCommentId()).isEqualTo("100");
         assertThat(response.items()).hasSize(2);
         assertThat(response.items().get(0).body()).isEqualTo("first");
         assertThat(response.items().get(1).deleted()).isTrue();
@@ -251,7 +256,7 @@ class CommentServiceImplTest {
 
     @Test
     void pageCommentsRejectsNonPositiveLimit() {
-        assertThatThrownBy(() -> commentService.pageComments(9L, null, null, 0))
+        assertThatThrownBy(() -> commentService.pageComments(9L, null, null, 0, 7L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.BAD_REQUEST);
@@ -271,7 +276,7 @@ class CommentServiceImplTest {
 
     @Test
     void pageCommentsRejectsLimitAboveMaxPageSize() {
-        assertThatThrownBy(() -> commentService.pageComments(9L, null, null, 101))
+        assertThatThrownBy(() -> commentService.pageComments(9L, null, null, 101, 7L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.BAD_REQUEST);

@@ -76,7 +76,7 @@ class ModerationReportControllerTest {
     @Test
     void reportEndpointReturnsAcceptedPendingStatus() throws Exception {
         when(reportService.submitReport(Mockito.eq(7L), any(ModerationReportRequest.class)))
-                .thenReturn(new ModerationReportResponse(21L, "pending"));
+                .thenReturn(new ModerationReportResponse("21", "pending"));
 
         mockMvc.perform(post("/api/v1/moderation/reports")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -84,7 +84,7 @@ class ModerationReportControllerTest {
                                 {"targetType":"post","targetId":101,"reason":"spam","description":"bad links"}
                                 """))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.reportId").value(21L))
+                .andExpect(jsonPath("$.reportId").value("21"))
                 .andExpect(jsonPath("$.status").value("pending"));
 
         verify(jwtService).extractUserId(jwt);

@@ -16,6 +16,7 @@ import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.counter.service.CounterService;
 import com.tongji.storage.text.TextStorageService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -36,17 +37,20 @@ public class CommentServiceImpl implements CommentService {
     private final TextStorageService textStorageService;
     private final IdService idService;
     private final CommentWriteProducer commentWriteProducer;
+    private final CounterService counterService;
 
     public CommentServiceImpl(CommentMapper commentMapper,
                               PendingCommentMapper pendingCommentMapper,
                               TextStorageService textStorageService,
                               IdService idService,
-                              CommentWriteProducer commentWriteProducer) {
+                              CommentWriteProducer commentWriteProducer,
+                              CounterService counterService) {
         this.commentMapper = commentMapper;
         this.pendingCommentMapper = pendingCommentMapper;
         this.textStorageService = textStorageService;
         this.idService = idService;
         this.commentWriteProducer = commentWriteProducer;
+        this.counterService = counterService;
     }
 
     @Override
@@ -60,7 +64,7 @@ public class CommentServiceImpl implements CommentService {
         }
         PendingComment existing = pendingCommentMapper.findByCreatorAndClientRequestId(creatorId, request.clientRequestId());
         if (existing != null) {
-            return new CommentSubmitResponse(existing.getClientRequestId(), existing.getPendingCommentId(), existing.getStatus());
+            return new CommentSubmitResponse(existing.getClientRequestId(), String.valueOf(existing.getPendingCommentId()), existing.getStatus());
         }
 
         long rootId = 0L;
@@ -93,13 +97,13 @@ public class CommentServiceImpl implements CommentService {
         } catch (DuplicateKeyException exception) {
             PendingComment raced = pendingCommentMapper.findByCreatorAndClientRequestId(creatorId, request.clientRequestId());
             if (raced != null) {
-                return new CommentSubmitResponse(raced.getClientRequestId(), raced.getPendingCommentId(), raced.getStatus());
+                return new CommentSubmitResponse(raced.getClientRequestId(), String.valueOf(raced.getPendingCommentId()), raced.getStatus());
             }
             throw exception;
         }
         commentWriteProducer.publish(new CommentWriteEvent(commentId, postId, rootId, parentId, creatorId,
                 request.clientRequestId(), request.body()));
-        return new CommentSubmitResponse(request.clientRequestId(), commentId, PENDING);
+        return new CommentSubmitResponse(request.clientRequestId(), String.valueOf(commentId), PENDING);
     }
 
     @Override
@@ -108,19 +112,20 @@ public class CommentServiceImpl implements CommentService {
         if (pending == null) {
             throw badRequest("pending comment not found");
         }
-        return new CommentStatusResponse(pending.getPendingCommentId(), pending.getClientRequestId(), pending.getStatus());
+        return new CommentStatusResponse(String.valueOf(pending.getPendingCommentId()), pending.getClientRequestId(), pending.getStatus());
     }
 
     @Override
-    public CommentPageResponse pageComments(long postId, LocalDateTime cursorCreateTime, Long cursorCommentId, int limit) {
+    public CommentPageResponse pageComments(long postId, LocalDateTime cursorCreateTime, Long cursorCommentId, int limit, long currentUserId) {
         requirePositiveLimit(limit);
-        return page(commentMapper.listTopLevelByPost(postId, cursorCreateTime, cursorCommentId, limit + 1), limit);
+        return page(commentMapper.listTopLevelByPost(postId, cursorCreateTime, cursorCommentId, limit + 1), limit, currentUserId);
     }
 
     @Override
     public CommentPageResponse pageReplies(long rootId, LocalDateTime cursorCreateTime, Long cursorCommentId, int limit) {
         requirePositiveLimit(limit);
-        return page(commentMapper.listRepliesByRoot(rootId, cursorCreateTime, cursorCommentId, limit + 1), limit);
+        // replies 路径不做 liked（userId=0，位图查不到点赞态，liked 恒 false）。后续楼中楼 feature 再补。
+        return page(commentMapper.listRepliesByRoot(rootId, cursorCreateTime, cursorCommentId, limit + 1), limit, 0L);
     }
 
     @Override
@@ -137,7 +142,7 @@ public class CommentServiceImpl implements CommentService {
         }
     }
 
-    private CommentPageResponse page(List<Comment> rows, int limit) {
+    private CommentPageResponse page(List<Comment> rows, int limit, long currentUserId) {
         boolean hasMore = rows.size() > limit;
         List<Comment> pageRows = hasMore ? rows.subList(0, limit) : rows;
         Map<Long, String> texts = textStorageService.getCommentTexts(pageRows.stream()
@@ -145,30 +150,45 @@ public class CommentServiceImpl implements CommentService {
                 .map(Comment::getCommentId)
                 .toList());
         List<CommentItemResponse> items = pageRows.stream()
-                .map(row -> item(row, texts))
+                .map(row -> item(row, texts, currentUserId))
                 .toList();
         Comment last = items.isEmpty() ? null : pageRows.get(pageRows.size() - 1);
         return new CommentPageResponse(items,
                 last == null ? null : last.getCreateTime(),
-                last == null ? null : last.getCommentId(),
+                last == null ? null : String.valueOf(last.getCommentId()),
                 hasMore);
     }
 
-    private CommentItemResponse item(Comment row, Map<Long, String> texts) {
+    private CommentItemResponse item(Comment row, Map<Long, String> texts, long currentUserId) {
         boolean deleted = Integer.valueOf(1).equals(row.getStatus());
+        String commentIdStr = String.valueOf(row.getCommentId());
+        boolean liked = currentUserId > 0
+                && counterService.isLiked("comment", commentIdStr, currentUserId);
+        // likeCount 读 counter SDS（与写入路径对齐），不读 MySQL like_count（该字段无人更新）。
+        // SDS 段是无符号 32 位，DTO 是 Integer：钳制到 Integer.MAX_VALUE 防 (int) 截断成负数。
+        long likeCount = 0L;
+        try {
+            Map<String, Long> counts = counterService.getCounts("comment", commentIdStr, List.of("like"));
+            Long v = counts.get("like");
+            if (v != null) likeCount = v;
+        } catch (RuntimeException ignore) {
+            // counter 不可用时回退 0
+        }
+        if (likeCount > Integer.MAX_VALUE) likeCount = Integer.MAX_VALUE;
         return new CommentItemResponse(
-                row.getCommentId(),
-                row.getPostId(),
-                row.getRootId(),
-                row.getParentId(),
-                row.getCreatorId(),
+                commentIdStr,
+                String.valueOf(row.getPostId()),
+                row.getRootId() == null ? null : String.valueOf(row.getRootId()),
+                row.getParentId() == null ? null : String.valueOf(row.getParentId()),
+                String.valueOf(row.getCreatorId()),
                 deleted ? DELETED_BODY : texts.get(row.getCommentId()),
                 row.getStatus(),
                 deleted,
-                row.getLikeCount(),
+                (int) likeCount,
                 row.getReplyCount(),
                 row.getCreateTime(),
-                row.getUpdateTime()
+                row.getUpdateTime(),
+                liked
         );
     }
 

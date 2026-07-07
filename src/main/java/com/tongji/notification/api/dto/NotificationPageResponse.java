@@ -6,7 +6,7 @@ import java.util.List;
 public record NotificationPageResponse(
         List<NotificationItemResponse> items,
         LocalDateTime nextCursorCreatedAt,
-        Long nextCursorId,
+        String nextCursorId,
         boolean hasMore
 ) {
 }

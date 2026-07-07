@@ -23,6 +23,7 @@ import com.tongji.storage.text.PostTextRepository;
 import com.tongji.counter.service.CounterService;
 import com.tongji.user.mapper.UserMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -60,7 +61,7 @@ public class ReconciliationScanService {
                                      KnowPostMapper knowPostMapper,
                                      CommentMapper commentMapper,
                                      UserMapper userMapper,
-                                     ReconciliationService reconciliationService,
+                                     @Lazy ReconciliationService reconciliationService,
                                      GorseClient gorseClient,
                                      GorseProperties gorseProperties,
                                      ObjectMapper objectMapper,
