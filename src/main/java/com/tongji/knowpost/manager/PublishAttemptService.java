@@ -13,6 +13,7 @@ import com.tongji.knowpost.publish.ContentPublishedEvent;
 import com.tongji.knowpost.publish.ContentPublishedPublisher;
 import com.tongji.knowpost.publish.PublishAttempt;
 import com.tongji.knowpost.publish.PublishAttemptMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +37,7 @@ public class PublishAttemptService {
     private final ResilienceGuard resilienceGuard;
     private final Clock clock;
 
+    @Autowired
     public PublishAttemptService(KnowPostMapper knowPostMapper,
                                  PublishAttemptMapper publishAttemptMapper,
                                  PublishValidationHelper publishValidationHelper,
