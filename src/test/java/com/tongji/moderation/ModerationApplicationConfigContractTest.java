@@ -1,4 +1,4 @@
-﻿package com.tongji.moderation;
+package com.tongji.moderation;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
