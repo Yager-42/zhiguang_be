@@ -1,6 +1,7 @@
 package com.tongji.common.id.segment;
 
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -17,6 +18,7 @@ public class SegmentIdGenerator {
     private final boolean ownsExecutor;
     private final ConcurrentHashMap<String, SegmentBuffer> buffers = new ConcurrentHashMap<>();
 
+    @Autowired
     public SegmentIdGenerator(SegmentAllocator allocator, SegmentIdProperties properties) {
         this(allocator, properties,
                 Executors.newFixedThreadPool(Math.max(1, properties.getPreloadThreads())),
