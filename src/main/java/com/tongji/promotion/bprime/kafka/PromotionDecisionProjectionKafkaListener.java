@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecisionLogEnvelope;
 import com.tongji.promotion.bprime.service.PromotionDecisionProjectionService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
@@ -22,6 +23,7 @@ public class PromotionDecisionProjectionKafkaListener {
         this(objectMapper, projectionService, new PromotionDecisionKafkaSupport());
     }
 
+    @Autowired
     public PromotionDecisionProjectionKafkaListener(ObjectMapper objectMapper,
                                                     PromotionDecisionProjectionService projectionService,
                                                     PromotionDecisionKafkaSupport support) {

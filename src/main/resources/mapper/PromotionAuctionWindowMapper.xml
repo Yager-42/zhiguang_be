@@ -37,8 +37,8 @@
         FROM promotion_auction_window
         WHERE resource_type = #{resourceType}
           AND status = 'OPEN'
-          AND window_start_at &lt;= #{now}
-          AND window_end_at &gt; #{now}
+          AND window_start_at &lt;= NOW()
+          AND window_end_at &gt; NOW()
         LIMIT 1
     </select>
 
