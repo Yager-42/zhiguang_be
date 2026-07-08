@@ -67,7 +67,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         adapter.commit(adapter.decide(command("cmd-1", "hash-1", 42L, 120L), 100L, "OPEN", now));
         PromotionAuctionDecision decision = adapter.decide(command("cmd-2", "hash-2", 43L, 130L), 100L, "OPEN", now.plusMillis(1));
 
-        assertThat(decision.ranking()).extracting("bidderUserId").containsExactly(43L, 42L);
+        assertThat(decision.ranking()).extracting("bidderUserId").containsExactly("43", "42");
     }
 
     @Test

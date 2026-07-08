@@ -33,17 +33,19 @@ public class PromotionSnapshotService {
     public PromotionAuctionSnapshot snapshot(long auctionWindowId) {
         PromotionAuctionWindow window = windowMapper.findById(auctionWindowId);
         String status = window == null || window.getStatus() == null ? "UNKNOWN" : window.getStatus().name();
+        String windowIdStr = String.valueOf(auctionWindowId);
+        Instant windowEndAt = window != null ? window.getWindowEndAt() : null;
         if (window != null && window.getStatus() == PromotionAuctionWindowStatus.SETTLED) {
-            return new PromotionAuctionSnapshot(auctionWindowId, status, allocationRanking(auctionWindowId),
-                    Instant.now(), redisDecisionVersion(auctionWindowId));
+            return new PromotionAuctionSnapshot(windowIdStr, status, allocationRanking(auctionWindowId),
+                    Instant.now(), redisDecisionVersion(auctionWindowId), windowEndAt);
         }
         List<PromotionRankingItem> hotRanking = hotRanking(auctionWindowId);
         if (!hotRanking.isEmpty()) {
-            return new PromotionAuctionSnapshot(auctionWindowId, status, hotRanking, Instant.now(),
-                    redisDecisionVersion(auctionWindowId));
+            return new PromotionAuctionSnapshot(windowIdStr, status, hotRanking, Instant.now(),
+                    redisDecisionVersion(auctionWindowId), windowEndAt);
         }
-        return new PromotionAuctionSnapshot(auctionWindowId, status, List.of(), Instant.now(),
-                redisDecisionVersion(auctionWindowId));
+        return new PromotionAuctionSnapshot(windowIdStr, status, List.of(), Instant.now(),
+                redisDecisionVersion(auctionWindowId), windowEndAt);
     }
 
     private List<PromotionRankingItem> hotRanking(long auctionWindowId) {
@@ -60,8 +62,8 @@ public class PromotionSnapshotService {
             String bidder = (String) redisTemplate.opsForHash().get(campaignKey, "bidderUserId");
             String post = (String) redisTemplate.opsForHash().get(campaignKey, "postId");
             if (amount != null && bidder != null && post != null) {
-                items.add(new PromotionRankingItem(Long.parseLong(campaign), Long.parseLong(bidder),
-                        Long.parseLong(post), Long.parseLong(amount), rank));
+                items.add(new PromotionRankingItem(campaign, bidder,
+                        post, Long.parseLong(amount), rank));
                 rank++;
             }
         }
@@ -80,7 +82,7 @@ public class PromotionSnapshotService {
     }
 
     private PromotionRankingItem toRankingItem(PromotionSlotAllocation allocation) {
-        return new PromotionRankingItem(allocation.getCampaignId(), allocation.getBidderUserId(),
-                allocation.getPostId(), allocation.getClearingPrice(), allocation.getSlotIndex() + 1);
+        return new PromotionRankingItem(String.valueOf(allocation.getCampaignId()), String.valueOf(allocation.getBidderUserId()),
+                String.valueOf(allocation.getPostId()), allocation.getClearingPrice(), allocation.getSlotIndex() + 1);
     }
 }

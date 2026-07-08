@@ -29,7 +29,7 @@ class PromotionAuctionRealtimeContractTest {
                 2L,
                 2L,
                 "OPEN",
-                List.of(new PromotionRankingItem(201L, 42L, 1001L, 120L, 1)),
+                List.of(new PromotionRankingItem("201", "42", "1001", 120L, 1)),
                 Instant.parse("2026-06-20T10:05:00Z"));
 
         assertThat(event.decisionVersion()).isEqualTo(2L);

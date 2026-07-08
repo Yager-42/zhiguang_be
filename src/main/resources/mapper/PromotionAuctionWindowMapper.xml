@@ -55,7 +55,7 @@
         SELECT *
         FROM promotion_auction_window
         WHERE status = 'OPEN'
-          AND window_end_at &lt;= #{now}
+          AND window_end_at &lt;= NOW()
         ORDER BY window_end_at ASC
         LIMIT #{batchSize}
     </select>
