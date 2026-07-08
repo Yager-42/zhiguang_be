@@ -82,7 +82,7 @@ class PromotionDecisionFanoutServiceTest {
     void windowClosedPublishesTerminalPublicEvent() {
         service.publishDecision(new PromotionAuctionDecision("d-close", "close-cmd", "hash", 301L, 3L, 2L,
                 0L, 0L, 0L, "FEED_TOP_SLOT", "WINDOW_CLOSED", false, null, 0L,
-                List.of(new PromotionRankingItem(201L, 42L, 1001L, 120L, 1)), List.of(),
+                List.of(new PromotionRankingItem("201", "42", "1001", 120L, 1)), List.of(),
                 Map.of("finalWindowStatus", "SETTLED"), Instant.parse("2026-06-20T11:00:00Z")));
 
         verify(publisher).publishPublic(argThat(event ->
@@ -118,7 +118,7 @@ class PromotionDecisionFanoutServiceTest {
     private PromotionAuctionDecision acceptedDecision() {
         return new PromotionAuctionDecision("d-1", "cmd-1", "hash", 301L, 2L, 1L, 201L, 42L, 1001L,
                 "FEED_TOP_SLOT", "BID_ACCEPTED", true, null, 120L,
-                List.of(new PromotionRankingItem(201L, 42L, 1001L, 120L, 1)), List.of(), Map.of(),
+                List.of(new PromotionRankingItem("201", "42", "1001", 120L, 1)), List.of(), Map.of(),
                 Instant.parse("2026-06-20T10:05:00Z"));
     }
 }

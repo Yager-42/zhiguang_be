@@ -95,8 +95,8 @@ public class PromotionAuctionWindowCloser {
     private List<com.tongji.promotion.bprime.model.PromotionRankingItem> finalRanking(List<PromotionBid> ranked) {
         return java.util.stream.IntStream.range(0, ranked.size())
                 .mapToObj(i -> new com.tongji.promotion.bprime.model.PromotionRankingItem(
-                        ranked.get(i).getCampaignId(), ranked.get(i).getBidderUserId(),
-                        ranked.get(i).getPostId(), ranked.get(i).getBidAmount(), i + 1))
+                        String.valueOf(ranked.get(i).getCampaignId()), String.valueOf(ranked.get(i).getBidderUserId()),
+                        String.valueOf(ranked.get(i).getPostId()), ranked.get(i).getBidAmount(), i + 1))
                 .toList();
     }
 

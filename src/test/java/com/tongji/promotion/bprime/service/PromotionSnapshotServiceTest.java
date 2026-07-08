@@ -53,7 +53,7 @@ class PromotionSnapshotServiceTest {
         assertThat(snapshot.status()).isEqualTo("OPEN");
         assertThat(snapshot.decisionVersion()).isEqualTo(7L);
         assertThat(snapshot.ranking()).hasSize(1);
-        assertThat(snapshot.ranking().get(0).campaignId()).isEqualTo(201L);
+        assertThat(snapshot.ranking().get(0).campaignId()).isEqualTo("201");
         assertThat(snapshot.ranking().get(0).bidAmount()).isEqualTo(120L);
         assertThat(snapshot.serverTime()).isBeforeOrEqualTo(Instant.now());
     }
