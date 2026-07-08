@@ -1,5 +1,7 @@
 package com.tongji.counter.service.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.tongji.common.singleflight.DistributedSingleFlightService;
 import com.tongji.counter.schema.CounterKeys;
 import com.tongji.counter.schema.CounterSchema;
 import com.tongji.counter.schema.BitmapShard;
@@ -13,7 +15,6 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.context.ApplicationEventPublisher;
 import org.redisson.api.RedissonClient;
-import org.redisson.api.RLock;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RateType;
 import org.redisson.api.RBucket;
@@ -22,7 +23,8 @@ import org.springframework.beans.factory.annotation.Value;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 内容实体计数服务实现（位图事实 + 事件聚合 + SDS 汇总）。
@@ -41,22 +43,26 @@ public class CounterServiceImpl implements CounterService {
     private final CounterEventProducer eventProducer;
     private final ApplicationEventPublisher eventPublisher;
     private final RedissonClient redisson;
-    @Value("${counter.rebuild.lock.ttl-ms:5000}")
-    private long lockTtlMs;
+    private final DistributedSingleFlightService singleFlightService;
     @Value("${counter.rebuild.rate.permits:3}")
-    private int ratePermits;
+    private int ratePermits = 3;
     @Value("${counter.rebuild.rate.window-seconds:10}")
-    private int rateWindowSeconds;
+    private int rateWindowSeconds = 10;
     @Value("${counter.rebuild.backoff.base-ms:500}")
-    private long backoffBaseMs;
+    private long backoffBaseMs = 500L;
     @Value("${counter.rebuild.backoff.max-ms:30000}")
-    private long backoffMaxMs;
+    private long backoffMaxMs = 30000L;
 
-    public CounterServiceImpl(StringRedisTemplate redis, CounterEventProducer eventProducer, ApplicationEventPublisher eventPublisher, RedissonClient redisson) {
+    public CounterServiceImpl(StringRedisTemplate redis,
+                              CounterEventProducer eventProducer,
+                              ApplicationEventPublisher eventPublisher,
+                              RedissonClient redisson,
+                              DistributedSingleFlightService singleFlightService) {
         this.redis = redis;
         this.eventProducer = eventProducer;
         this.eventPublisher = eventPublisher;
         this.redisson = redisson;
+        this.singleFlightService = singleFlightService;
         this.toggleScript = new DefaultRedisScript<>();
         this.toggleScript.setResultType(Long.class);
         // 位图状态原子切换，仅在状态变化时返回 1
@@ -148,69 +154,18 @@ public class CounterServiceImpl implements CounterService {
         if (needRebuild) {
             log.info("计数结构不存在，需要重建");
             // 限流与指数退避：避免在热点实体上触发重建风暴
-            if (inBackoff(entityType, entityId)) {
-                for (String m : metrics) {
-                    result.put(m, 0L);
-                }
-                return result;
-            }
-
-            if (!allowedByRateLimiter(entityType, entityId)) {
-                escalateBackoff(entityType, entityId);
-                for (String m : metrics) {
-                    result.put(m, 0L);
-                }
-                return result;
-            }
-
-            String lockKey = String.format("lock:sds-rebuild:%s:%s", entityType, entityId);
-
-            RLock lock = redisson.getLock(lockKey);
-            boolean locked = false;
-
             try {
-                // 使用 Redisson 看门狗机制：不指定租期，自动续约（由 Redisson 的 lockWatchdogTimeout 控制）
-                locked = lock.tryLock(0L, TimeUnit.MILLISECONDS);
-                if (!locked) {
-                    escalateBackoff(entityType, entityId);
-                    for (String m : metrics) {
-                        result.put(m, 0L);
-                    }
-                    return result;
+                return singleFlightService.execute(
+                        "counter-sds",
+                        counterSdsFlightKey(entityType, entityId, metrics),
+                        new TypeReference<Map<String, Long>>() {},
+                        () -> rebuildCountsForSingleFlight(entityType, entityId, metrics)
+                );
+            } catch (RuntimeException exception) {
+                if (isCounterRebuildOverloaded(exception)) {
+                    return zeroCounts(metrics);
                 }
-                // 依据位图分片统计真实计数（仅由持锁者执行重建）
-                byte[] newSds = new byte[expectedLen];
-                List<String> rebuildFields = new ArrayList<>();
-                for (String m : metrics) {
-                    Integer idx = CounterSchema.NAME_TO_IDX.get(m);
-                    if (idx == null) {
-                        continue;
-                    }
-                    long sum = bitCountShardsPipelined(m, entityType, entityId);
-                    writeInt32BE(newSds, idx * CounterSchema.FIELD_SIZE, sum);
-                    result.put(m, sum);
-                    rebuildFields.add(String.valueOf(idx));
-                }
-                // 回写SDS并清理聚合桶，避免重复加算
-                setRaw(sdsKey, newSds);
-                if (!rebuildFields.isEmpty()) {
-                    String aggKey = CounterKeys.aggKey(entityType, entityId);
-                    redis.opsForHash().delete(aggKey, rebuildFields.toArray());
-                }
-                resetBackoff(entityType, entityId);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                escalateBackoff(entityType, entityId);
-                for (String m : metrics) {
-                    result.put(m, 0L);
-                }
-                return result;
-            } finally {
-                if (locked) {
-                    try {
-                        lock.unlock();
-                    } catch (Exception ignore) {}
-                }
+                throw exception;
             }
         } else {
             for (String m : metrics) {
@@ -223,6 +178,38 @@ public class CounterServiceImpl implements CounterService {
                 long val = readInt32BE(raw, off); // 大端读取单段 32 位值
                 result.put(m, val);
             }
+        }
+        return result;
+    }
+
+    private String counterSdsFlightKey(String entityType, String entityId, List<String> metrics) {
+        List<String> normalizedMetrics = metrics.stream().distinct().sorted().toList();
+        return entityType + ":" + entityId + ":" + String.join(",", normalizedMetrics);
+    }
+
+    private Map<String, Long> rebuildCountsForSingleFlight(String entityType, String entityId, List<String> metrics) {
+        if (inBackoff(entityType, entityId)) {
+            throw new CounterSdsRebuildOverloadedException("counter sds rebuild is in backoff");
+        }
+        if (!allowedByRateLimiter(entityType, entityId)) {
+            escalateBackoff(entityType, entityId);
+            throw new CounterSdsRebuildOverloadedException("counter sds rebuild is rate limited");
+        }
+        return rebuildCountsFromFacts(entityType, entityId, metrics);
+    }
+
+    private boolean isCounterRebuildOverloaded(RuntimeException exception) {
+        Throwable current = exception;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current instanceof RejectedExecutionException;
+    }
+
+    private Map<String, Long> zeroCounts(List<String> metrics) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        for (String metric : metrics) {
+            result.put(metric, 0L);
         }
         return result;
     }
@@ -508,4 +495,10 @@ public class CounterServiceImpl implements CounterService {
             end
             return -1
             """;
+
+    private static final class CounterSdsRebuildOverloadedException extends RejectedExecutionException {
+        private CounterSdsRebuildOverloadedException(String message) {
+            super(message);
+        }
+    }
 }

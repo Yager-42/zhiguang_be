@@ -19,7 +19,7 @@ class ModerationApplicationConfigContractTest {
 
         assertThat(properties).isNotNull();
         assertThat(properties.getProperty("spring.ai.dashscope.api-key"))
-                .isEqualTo("${AI_DASHSCOPE_API_KEY:}");
+                .isEqualTo("${AI_DASHSCOPE_API_KEY:placeholder-not-used-unless-moderation-enabled}");
         assertThat(properties.getProperty("spring.ai.dashscope.chat.options.model"))
                 .isEqualTo("${AI_DASHSCOPE_MODEL:qwen-plus}");
         assertThat(properties.getProperty("moderation.llm.enabled"))
@@ -32,5 +32,7 @@ class ModerationApplicationConfigContractTest {
                 .isEqualTo("${MODERATION_LLM_MAX_RETRIES:3}");
         assertThat(properties.getProperty("moderation.notification.platform-actor-user-id"))
                 .isEqualTo("${MODERATION_PLATFORM_ACTOR_USER_ID:0}");
+        assertThat(properties.getProperty("singleflight.enabled"))
+                .isEqualTo("${SINGLEFLIGHT_ENABLED:true}");
     }
 }
