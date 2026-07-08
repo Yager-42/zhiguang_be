@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 8080
 
 spring:
@@ -48,14 +48,12 @@ spring:
       - http://localhost:9200
   ai:
     dashscope:
-      # spring-ai-alibaba 的多个自动配置（agent/audio-speech/image/video/...）在启动时
-      # 无条件强校验 api-key 非空。moderation.llm.enabled=false 时项目不注册
-      # SpringAiAlibabaModerationLlmClient，不会真正调用 dashscope，故给一个占位 key 让启动通过；
-      # 启用内容审核时通过 AI_DASHSCOPE_API_KEY 覆盖为真实 key。
+      # Keep startup passing when moderation is disabled. Production should override this.
       api-key: ${AI_DASHSCOPE_API_KEY:placeholder-not-used-unless-moderation-enabled}
       chat:
         options:
           model: ${AI_DASHSCOPE_MODEL:qwen-plus}
+
 rocketmq:
   name-server: localhost:9876
   producer:
@@ -133,6 +131,35 @@ canal:
 counter:
   rebuild:
     enabled: false
+
+singleflight:
+  enabled: ${SINGLEFLIGHT_ENABLED:true}
+  mode: ${SINGLEFLIGHT_MODE:distributed}
+  defaults:
+    running-ttl-millis: ${SINGLEFLIGHT_RUNNING_TTL_MILLIS:15000}
+    result-ttl-millis: ${SINGLEFLIGHT_RESULT_TTL_MILLIS:600000}
+    failed-result-ttl-millis: ${SINGLEFLIGHT_FAILED_RESULT_TTL_MILLIS:60000}
+    follower-max-wait-millis: ${SINGLEFLIGHT_FOLLOWER_MAX_WAIT_MILLIS:20000}
+    stream-block-timeout-millis: ${SINGLEFLIGHT_STREAM_BLOCK_TIMEOUT_MILLIS:3000}
+    poll-fallback-interval-millis: ${SINGLEFLIGHT_POLL_FALLBACK_INTERVAL_MILLIS:2000}
+    takeover-detect-millis: ${SINGLEFLIGHT_TAKEOVER_DETECT_MILLIS:10000}
+    heartbeat-interval-millis: ${SINGLEFLIGHT_HEARTBEAT_INTERVAL_MILLIS:1000}
+    l1-cache-enabled: ${SINGLEFLIGHT_L1_CACHE_ENABLED:true}
+    l1-cache-ttl-millis: ${SINGLEFLIGHT_L1_CACHE_TTL_MILLIS:30000}
+    l1-cache-max-size: ${SINGLEFLIGHT_L1_CACHE_MAX_SIZE:1000}
+  stages:
+    counter-sds:
+      enabled: ${SINGLEFLIGHT_COUNTER_SDS_ENABLED:true}
+      mode: ${SINGLEFLIGHT_COUNTER_SDS_MODE:}
+    user-counter:
+      enabled: ${SINGLEFLIGHT_USER_COUNTER_ENABLED:true}
+      mode: ${SINGLEFLIGHT_USER_COUNTER_MODE:}
+    feed-author-head:
+      enabled: ${SINGLEFLIGHT_FEED_AUTHOR_HEAD_ENABLED:true}
+      mode: ${SINGLEFLIGHT_FEED_AUTHOR_HEAD_MODE:}
+    moderation-llm:
+      enabled: ${SINGLEFLIGHT_MODERATION_LLM_ENABLED:true}
+      mode: ${SINGLEFLIGHT_MODERATION_LLM_MODE:}
 
 recommendation:
   gorse:

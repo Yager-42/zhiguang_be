@@ -1,6 +1,9 @@
 package com.tongji.relation.api;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.tongji.auth.token.JwtService;
+import com.tongji.common.singleflight.DistributedSingleFlightService;
+import com.tongji.counter.service.UserCounterRebuildAdapter;
 import com.tongji.profile.api.dto.ProfileResponse;
 import com.tongji.relation.manager.RelationManager;
 import com.tongji.relation.service.RelationService;
@@ -28,16 +31,24 @@ public class RelationController {
     private final RelationService relationService;
     private final JwtService jwtService;
     private final StringRedisTemplate redis;
-    private final com.tongji.counter.service.UserCounterService userCounterService;
+    private final UserCounterRebuildAdapter userCounterRebuildAdapter;
     private final com.tongji.relation.mapper.RelationMapper relationMapper;
+    private final DistributedSingleFlightService singleFlightService;
 
-    public RelationController(RelationManager relationManager, RelationService relationService, JwtService jwtService, StringRedisTemplate redis, com.tongji.counter.service.UserCounterService userCounterService, com.tongji.relation.mapper.RelationMapper relationMapper) {
+    public RelationController(RelationManager relationManager,
+                              RelationService relationService,
+                              JwtService jwtService,
+                              StringRedisTemplate redis,
+                              UserCounterRebuildAdapter userCounterRebuildAdapter,
+                              com.tongji.relation.mapper.RelationMapper relationMapper,
+                              DistributedSingleFlightService singleFlightService) {
         this.relationManager = relationManager;
         this.relationService = relationService;
         this.jwtService = jwtService;
         this.redis = redis;
-        this.userCounterService = userCounterService;
+        this.userCounterRebuildAdapter = userCounterRebuildAdapter;
         this.relationMapper = relationMapper;
+        this.singleFlightService = singleFlightService;
     }
 
     /**
@@ -127,23 +138,7 @@ public class RelationController {
 
         // 缺失或结构异常（少于 5 段 × 每段 4 字节）时尝试重建
         if (raw == null || raw.length < 20) {
-            try {
-                userCounterService.rebuildAllCounters(userId);
-            } catch (Exception ignored) {}
-
-            // 重建后二次读取
-            raw = redis.execute((RedisCallback<byte[]>)
-                    c -> c.stringCommands().get(("ucnt:" + userId).getBytes(StandardCharsets.UTF_8)));
-
-            // 仍失败则返回 0，保证接口可用性
-            if (raw == null || raw.length < 20) {
-                m.put("followings", 0L);
-                m.put("followers", 0L);
-                m.put("posts", 0L);
-                m.put("likedPosts", 0L);
-                m.put("favedPosts", 0L);
-                return m;
-            }
+            return rebuildUserCounters(userId);
         }
 
         final byte[] buf = raw;
@@ -182,31 +177,7 @@ public class RelationController {
 
             // 段数异常或值不一致则触发全量重建
             if ((seg != 5) || sdsFollowings != (long) dbFollowings || sdsFollowers != (long) dbFollowers) {
-                try {
-                    userCounterService.rebuildAllCounters(userId);
-                } catch (Exception ignored) {}
-
-                // 重建后读取并直接返回最新值
-                byte[] raw2 = redis.execute((RedisCallback<byte[]>)
-                        c -> c.stringCommands().get(("ucnt:" + userId).getBytes(StandardCharsets.UTF_8)));
-                if (raw2 != null && raw2.length >= 20) {
-                    final byte[] buf2 = raw2;
-                    // 二次读取函数：同样按大端 32 位读取
-                    IntFunction<Long> r2 = idx -> {
-                        int off = (idx - 1) * 4;
-                        long n = 0;
-                        for (int i = 0; i < 4; i++) {
-                            n = (n << 8) | (buf2[off + i] & 0xFFL);
-                        }
-                        return n;
-                    };
-                    m.put("followings", r2.apply(1));
-                    m.put("followers", r2.apply(2));
-                    m.put("posts", r2.apply(3));
-                    m.put("likedPosts", r2.apply(4));
-                    m.put("favedPosts", r2.apply(5));
-                    return m;
-                }
+                return rebuildUserCounters(userId);
             }
         }
 
@@ -217,5 +188,14 @@ public class RelationController {
         m.put("likedPosts", read.apply(4));
         m.put("favedPosts", read.apply(5));
         return m;
+    }
+
+    private Map<String, Long> rebuildUserCounters(long userId) {
+        return singleFlightService.execute(
+                "user-counter",
+                String.valueOf(userId),
+                new TypeReference<Map<String, Long>>() {},
+                () -> userCounterRebuildAdapter.rebuildAndRead(userId)
+        );
     }
 }

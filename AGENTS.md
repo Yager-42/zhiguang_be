@@ -1,21 +1,23 @@
-<!-- TRELLIS:START -->
-# Trellis Instructions
+﻿# CodeGraph
 
-These instructions are for AI assistants working in this project.
+Local code intelligence for this repository.
 
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
+## Top tools
 
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
+- `codegraph_get_callers`: who calls a function
+- `codegraph_analyze_impact`: what breaks if a symbol changes
+- `codegraph_get_edit_context`: local edit context for a file
+- `codegraph_symbol_search`: symbol lookup
+- `codegraph_get_module_summary`: module structure overview
 
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
+## Decision rule
 
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
+1. Structural question: use CodeGraph.
+2. Text question: use `rg` and direct reads.
+3. Unknown symbol: try `codegraph_symbol_search` first.
 
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
+## Notes
 
-<!-- TRELLIS:END -->
+- Reindex once with `codegraph_reindex_workspace` if CodeGraph returns empty unexpectedly.
+- Use `file:///absolute/path` URIs from CodeGraph results directly.
+- Do not use CodeGraph for file editing, Git operations, or test execution.
