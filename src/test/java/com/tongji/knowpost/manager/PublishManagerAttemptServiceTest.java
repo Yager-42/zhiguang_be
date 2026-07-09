@@ -12,6 +12,7 @@ import com.tongji.knowpost.publish.ContentPublishedEvent;
 import com.tongji.knowpost.publish.ContentPublishedPublisher;
 import com.tongji.knowpost.publish.PublishAttempt;
 import com.tongji.knowpost.publish.PublishAttemptMapper;
+import com.tongji.wallet.service.ContentRewardService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -28,6 +29,7 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -43,6 +45,8 @@ class PublishManagerAttemptServiceTest {
     private PublishAttemptMapper publishAttemptMapper;
     @Mock
     private IdService idService;
+    @Mock
+    private ContentRewardService contentRewardService;
 
     private PublishValidationHelper publishValidationHelper;
     private RecordingContentPublishedPublisher contentPublishedPublisher;
@@ -62,7 +66,8 @@ class PublishManagerAttemptServiceTest {
                 idService,
                 contentPublishedPublisher,
                 resilienceGuard,
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                contentRewardService
         );
     }
 
@@ -172,6 +177,8 @@ class PublishManagerAttemptServiceTest {
         });
         verify(knowPostMapper).completePublish(9L, 7L, 88L);
         verify(publishAttemptMapper).markSucceeded(88L);
+        // 发布成功后发积分奖励（挂载点：markSucceeded 后）
+        verify(contentRewardService).rewardPostCreation(7L, 9L);
     }
 
     @Test
@@ -188,6 +195,8 @@ class PublishManagerAttemptServiceTest {
 
         verify(knowPostMapper, never()).completePublish(any(), any(), any());
         verify(publishAttemptMapper, never()).markSucceeded(any());
+        // 发布失败不发奖励（AC9 反向核对）
+        verify(contentRewardService, never()).rewardPostCreation(anyLong(), anyLong());
     }
 
     @Test
@@ -204,6 +213,8 @@ class PublishManagerAttemptServiceTest {
 
         verify(knowPostMapper, never()).completePublish(any(), any(), any());
         verify(publishAttemptMapper, never()).markSucceeded(any());
+        // 发布失败不发奖励（AC9 反向核对）
+        verify(contentRewardService, never()).rewardPostCreation(anyLong(), anyLong());
     }
 
     @Test
