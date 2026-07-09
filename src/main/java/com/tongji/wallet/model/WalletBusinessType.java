@@ -7,5 +7,6 @@ public enum WalletBusinessType {
     REGISTRATION,
     PROMOTION,
     BOUNTY,
+    CONTENT,
     SYSTEM
 }

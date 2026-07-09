@@ -6,6 +6,7 @@ package com.tongji.wallet.model;
 public enum WalletLedgerReason {
     REGISTRATION_GRANT,
     PLATFORM_SUBSIDY,
+    CONTENT_CREATION_REWARD,
     HOLD_RESERVE,
     HOLD_RELEASE,
     HOLD_TO_ESCROW,

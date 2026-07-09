@@ -288,7 +288,8 @@ class PublishManagerTextStorageTest {
                     org.mockito.Mockito.mock(com.tongji.common.id.IdService.class),
                     new NoOpContentPublishedPublisher(),
                     org.mockito.Mockito.mock(ResilienceGuard.class),
-                    Clock.systemUTC()
+                    Clock.systemUTC(),
+                    org.mockito.Mockito.mock(com.tongji.wallet.service.ContentRewardService.class)
             );
         }
 

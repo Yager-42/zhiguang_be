@@ -341,7 +341,8 @@ class PublishManagerImplTest {
                     org.mockito.Mockito.mock(com.tongji.common.id.IdService.class),
                     contentPublishedPublisher,
                     org.mockito.Mockito.mock(com.tongji.common.resilience.ResilienceGuard.class),
-                    Clock.systemUTC()
+                    Clock.systemUTC(),
+                    org.mockito.Mockito.mock(com.tongji.wallet.service.ContentRewardService.class)
             );
         }
 

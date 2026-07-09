@@ -13,6 +13,7 @@ import com.tongji.knowpost.publish.ContentPublishedEvent;
 import com.tongji.knowpost.publish.ContentPublishedPublisher;
 import com.tongji.knowpost.publish.PublishAttempt;
 import com.tongji.knowpost.publish.PublishAttemptMapper;
+import com.tongji.wallet.service.ContentRewardService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,7 @@ public class PublishAttemptService {
     private final ContentPublishedPublisher contentPublishedPublisher;
     private final ResilienceGuard resilienceGuard;
     private final Clock clock;
+    private final ContentRewardService contentRewardService;
 
     @Autowired
     public PublishAttemptService(KnowPostMapper knowPostMapper,
@@ -43,8 +45,9 @@ public class PublishAttemptService {
                                  PublishValidationHelper publishValidationHelper,
                                  IdService idService,
                                  ContentPublishedPublisher contentPublishedPublisher,
-                                 ResilienceGuard resilienceGuard) {
-        this(knowPostMapper, publishAttemptMapper, publishValidationHelper, idService, contentPublishedPublisher, resilienceGuard, Clock.systemUTC());
+                                 ResilienceGuard resilienceGuard,
+                                 ContentRewardService contentRewardService) {
+        this(knowPostMapper, publishAttemptMapper, publishValidationHelper, idService, contentPublishedPublisher, resilienceGuard, Clock.systemUTC(), contentRewardService);
     }
 
     PublishAttemptService(KnowPostMapper knowPostMapper,
@@ -53,7 +56,8 @@ public class PublishAttemptService {
                           IdService idService,
                           ContentPublishedPublisher contentPublishedPublisher,
                           ResilienceGuard resilienceGuard,
-                          Clock clock) {
+                          Clock clock,
+                          ContentRewardService contentRewardService) {
         this.knowPostMapper = knowPostMapper;
         this.publishAttemptMapper = publishAttemptMapper;
         this.publishValidationHelper = publishValidationHelper;
@@ -61,6 +65,7 @@ public class PublishAttemptService {
         this.contentPublishedPublisher = contentPublishedPublisher;
         this.resilienceGuard = resilienceGuard;
         this.clock = clock;
+        this.contentRewardService = contentRewardService;
     }
 
     @Transactional
@@ -171,6 +176,8 @@ public class PublishAttemptService {
         if (publishAttemptMapper.markSucceeded(attemptId) == 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "发布尝试状态已变更");
         }
+        // 发布成功后发积分奖励。REQUIRES_NEW 独立事务 + catch 在 service 内，失败不阻塞发布主流程。
+        contentRewardService.rewardPostCreation(authorId, postId);
     }
 
     @Transactional

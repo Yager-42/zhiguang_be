@@ -12,6 +12,7 @@ import com.tongji.comment.model.PendingComment;
 import com.tongji.counter.event.CounterEvent;
 import com.tongji.counter.event.CounterEventProducer;
 import com.tongji.storage.text.TextStorageService;
+import com.tongji.wallet.service.ContentRewardService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -31,19 +32,22 @@ public class CommentWriteConsumer {
     private final TextStorageService textStorageService;
     private final CounterEventProducer counterEventProducer;
     private final CommentFeedbackProducer commentFeedbackProducer;
+    private final ContentRewardService contentRewardService;
 
     public CommentWriteConsumer(ObjectMapper objectMapper,
                                 CommentMapper commentMapper,
                                 PendingCommentMapper pendingCommentMapper,
                                 TextStorageService textStorageService,
                                 CounterEventProducer counterEventProducer,
-                                CommentFeedbackProducer commentFeedbackProducer) {
+                                CommentFeedbackProducer commentFeedbackProducer,
+                                ContentRewardService contentRewardService) {
         this.objectMapper = objectMapper;
         this.commentMapper = commentMapper;
         this.pendingCommentMapper = pendingCommentMapper;
         this.textStorageService = textStorageService;
         this.counterEventProducer = counterEventProducer;
         this.commentFeedbackProducer = commentFeedbackProducer;
+        this.contentRewardService = contentRewardService;
     }
 
     @RetryableTopic
@@ -80,6 +84,8 @@ public class CommentWriteConsumer {
         pendingCommentMapper.updateStatus(commentId, "succeeded");
         counterEventProducer.publish(counter(event));
         commentFeedbackProducer.publish(feedback(event));
+        // 评论正式写入成功后发积分奖励。REQUIRES_NEW 独立事务 + catch 在 service 内，失败不阻塞评论主流程。
+        contentRewardService.rewardCommentCreation(event.creatorId(), commentId);
     }
 
     @DltHandler

@@ -83,6 +83,11 @@ wallet:
   platform-user-id: ${WALLET_PLATFORM_USER_ID:0}
   registration-grant-amount: ${WALLET_REGISTRATION_GRANT_AMOUNT:100}
 
+content-reward:
+  enabled: ${CONTENT_REWARD_ENABLED:true}
+  post-amount: ${CONTENT_REWARD_POST_AMOUNT:10}
+  comment-amount: ${CONTENT_REWARD_COMMENT_AMOUNT:2}
+
 promotion:
   slot-auction:
     feed-top-slot-count: ${PROMOTION_FEED_TOP_SLOT_COUNT:1}

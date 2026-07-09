@@ -48,6 +48,8 @@ class CommentWriteConsumerTest {
     private CounterEventProducer counterEventProducer;
     @Mock
     private CommentFeedbackProducer commentFeedbackProducer;
+    @Mock
+    private com.tongji.wallet.service.ContentRewardService contentRewardService;
 
     private CommentWriteConsumer consumer;
 
@@ -60,7 +62,8 @@ class CommentWriteConsumerTest {
                 pendingCommentMapper,
                 textStorageService,
                 counterEventProducer,
-                commentFeedbackProducer
+                commentFeedbackProducer,
+                contentRewardService
         );
         when(pendingCommentMapper.findByCreatorAndClientRequestId(7L, "client-1"))
                 .thenReturn(pending(101L, "client-1", "pending"));
@@ -156,7 +159,7 @@ class CommentWriteConsumerTest {
         consumer.handle(event);
 
         InOrder order = inOrder(textStorageService, commentMapper, pendingCommentMapper,
-                counterEventProducer, commentFeedbackProducer);
+                counterEventProducer, commentFeedbackProducer, contentRewardService);
         ArgumentCaptor<Comment> commentCaptor = ArgumentCaptor.forClass(Comment.class);
         order.verify(textStorageService).saveCommentText(101L, "hello");
         order.verify(commentMapper).insert(commentCaptor.capture());
@@ -165,6 +168,8 @@ class CommentWriteConsumerTest {
         order.verify(counterEventProducer).publish(counterCaptor.capture());
         ArgumentCaptor<CommentFeedbackEvent> feedbackCaptor = ArgumentCaptor.forClass(CommentFeedbackEvent.class);
         order.verify(commentFeedbackProducer).publish(feedbackCaptor.capture());
+        // 评论写入成功后发积分奖励（挂载点：updateStatus succeeded 后）
+        order.verify(contentRewardService).rewardCommentCreation(7L, 101L);
 
         Comment comment = commentCaptor.getValue();
         assertThat(comment.getCommentId()).isEqualTo(101L);
@@ -223,6 +228,8 @@ class CommentWriteConsumerTest {
         verify(textStorageService, never()).saveCommentText(202L, "hello");
         verifyNoInteractions(counterEventProducer);
         verifyNoInteractions(commentFeedbackProducer);
+        // DuplicateKey 幂等恢复路径不调 reward（评论之前已写入，businessRef 幂等由 grant 兜底，此处短路更省一次调用）
+        verifyNoInteractions(contentRewardService);
     }
 
     @Test
