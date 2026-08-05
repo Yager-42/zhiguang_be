@@ -1,0 +1,16 @@
+# 构建上下文排除（加速 + 避免把大目录/敏感文件打进 context）
+.git
+.idea
+.codex
+.codestable
+.codegraph
+openspec
+docs
+loadtest
+infra
+db
+*.md
+docker-compose.yml
+target
+*.iml
+.vscode

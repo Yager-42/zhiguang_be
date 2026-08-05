@@ -45,14 +45,15 @@ services:
     restart: unless-stopped
     ports:
       - "9092:9092"
+      - "9094:9094"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # 双 listener：PLAINTEXT(kafka:9092) 供容器内 app 使用；EXTERNAL(localhost:9094) 供宿主机工具直连
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://:9093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,CONTROLLER://localhost:9093,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -197,6 +198,63 @@ services:
       interval: 15s
       timeout: 10s
       retries: 20
+
+  # 应用服务：一键部署入口（docker compose up -d 自动构建并等待全栈健康）
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zhiguang-app:latest
+    container_name: zhiguang-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rocketmq-namesrv:
+        condition: service_healthy
+      rocketmq-broker:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+      cassandra-init:
+        condition: service_completed_successfully
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      # 容器内通过服务名访问中间件（application.yml 的 localhost 仅宿主机直跑时有效）
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/zhiguang?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: zhiguang
+      SPRING_DATASOURCE_PASSWORD: zhiguang123456
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_DATA_CASSANDRA_CONTACT_POINTS: cassandra
+      SPRING_DATA_CASSANDRA_LOCAL_DATACENTER: datacenter1
+      SPRING_DATA_CASSANDRA_KEYSPACE_NAME: zhiguang
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      STORAGE_ENDPOINT: http://minio:9000
+      RECOMMENDATION_GORSE_ENDPOINT: http://gorse:8088
+      # 场景开关（可用 .env 或 export 覆盖）
+      PROMOTION_BPRIME_ENABLED: ${PROMOTION_BPRIME_ENABLED:-false}
+      GORSE_ENABLED: ${GORSE_ENABLED:-false}
+      SINGLEFLIGHT_MODE: ${SINGLEFLIGHT_MODE:-distributed}
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 10
 
 volumes:
   mysql-data:
