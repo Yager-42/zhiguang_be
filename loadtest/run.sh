@@ -71,6 +71,15 @@ log() { echo "[run.sh] $*"; }
 
 mysql_exec() { docker exec -i zhiguang-mysql mysql -uzhiguang -pzhiguang123456 zhiguang; }
 
+node_run() {
+  if command -v node >/dev/null 2>&1; then
+    node "$@"
+  else
+    log "node not found; using node:20-alpine container" >&2
+    docker run --rm -i -v "$PWD:/loadtest" -w /loadtest node:20-alpine node "$@"
+  fi
+}
+
 render() { # 渲染 SQL 占位符
   sed -e "s|__USER_N__|$USER_N|g" \
       -e "s|__POST_N__|$POST_N|g" \
@@ -92,6 +101,7 @@ if [ -n "${K6_DOCKER:-}" ]; then
   k6_run() {
     docker run --rm \
       --cpus="$K6_CPUS" --memory="$K6_MEM" \
+      --add-host=host.docker.internal:host-gateway \
       -v "$PWD:/loadtest" -w /loadtest \
       "$K6_IMAGE" "$@"
   }
@@ -100,9 +110,9 @@ else
 fi
 
 start_samplers() { # tag —— 同时采 SUT 侧与压测机侧，判定瓶颈归属
-  ./collect_metrics.sh "$METRICS_DIR/sut-$1.tsv" &
+  ./collect_metrics.sh > "$METRICS_DIR/sut-$1.tsv" &
   SUT_SAMPLER=$!
-  ./loadgen_metrics.sh "$METRICS_DIR/loadgen-$1.tsv" &
+  ./loadgen_metrics.sh > "$METRICS_DIR/loadgen-$1.tsv" &
   LOADGEN_SAMPLER=$!
 }
 
@@ -156,8 +166,8 @@ case "$cmd" in
     log "seed promotion campaign + window"
     render seed/seed_promotion.sql | mysql_exec
     log "seed cassandra (post text + feed_inbox)"
-    node seed/gen_seed_cassandra.mjs "$USER_N" "$USER_ID_BASE" "$POST_N" "$POST_ID_BASE" \
-        "$FOLLOW_PER_USER" "$LARGE_AUTHOR_ID" "$LARGE_FOLLOWER_N" | docker exec -i zhiguang-cassandra cqlsh
+    node_run seed/gen_seed_cassandra.mjs "$USER_N" "$USER_ID_BASE" "$POST_N" "$POST_ID_BASE" \
+        "$FOLLOW_PER_USER" "$LARGE_AUTHOR_ID" "$LARGE_FOLLOWER_N" | docker exec -i zhiguang-cassandra cqlsh --request-timeout="${CQLSH_REQUEST_TIMEOUT:-120}"
     log "warm redis SDS counters (skip 以压重建风暴: warm_sds.sh 单独控制)"
     REDIS_CLI="docker exec -i zhiguang-redis redis-cli" bash seed/warm_sds.sh || log "warm_sds skipped/failed"
     log "seed done. 记得重启应用一次触发 ES 索引自回填；随后冒烟: k6_run run -e VUS=1 -e HOLD=1m scripts/mixed.js （单机容器模式: K6_DOCKER=1 时同样可用）"

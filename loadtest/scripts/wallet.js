@@ -22,7 +22,7 @@ function me() {
   const res = api('GET', '/api/v1/wallet/me', null, { name: 'wallet.me' });
   check(res, {
     'wallet.me 200': (r) => r.status === 200,
-    'wallet.me account': (r) => r.json().account !== undefined || r.json().balance !== undefined,
+    'wallet.me balance fields': (r) => r.status === 200 && r.json().availableBalance !== undefined && r.json().heldBalance !== undefined && r.json().escrowedBalance !== undefined,
   });
 }
 

@@ -209,9 +209,9 @@ checks:           99.88%
 |---|---|---|
 | 日志出现 `login failed` | 种子用户没灌 | `./run.sh seed` 后重试；确认 BASE_URL 正确 |
 | 全部 401 | access token 过期/种子密码不符 | 脚本会自动重登；确认 PASSWORD 与 seed 一致（默认 Loadtest@123） |
-| `relation.follow accepted` 检查失败、body=false | 令牌桶限流（100/1s/用户） | 正常现象，脚本已节流；看 `relation.rate_limited` 计数 |
-| 竞价 500 / commandId 空 | `PROMOTION_BPRIME_ENABLED` 未开或窗口过期 | 开启后重启应用；`./run.sh seed --force` 重灌窗口（窗口有效期 50 分钟） |
-| 搜索返回空 | ES 未回填 | 灌数后重启应用；`curl :9200/zhiguang_content_index/_count` 验证 |
+| `relation.follow accepted` 检查失败、body=false | 令牌桶限流（100/1s/用户） | 正常现象，脚本已节流；看 `relation_rate_limited` 计数 |
+| 竞价 500 / commandId 空 | `PROMOTION_BPRIME_ENABLED` 未开、窗口过期或 broker 广播地址不可达 | 开启后重启应用；执行 `./run.sh seed` 刷新窗口（有效期 50 分钟）；确认 broker 广播 `rocketmq-broker:10911` |
+| 搜索返回空 | ES 未回填或 IK 镜像未构建 | `docker compose up -d --build elasticsearch` 后重启应用；用 `curl :9200/zhiguang_content_index/_count` 验证 |
 | 详情 P99 异常高 | Cassandra 正文没灌 → 回源 content_url 外网 | 确保 `./run.sh seed` 的 cassandra 步骤执行成功 |
 | 计数读全为 0 且慢 | SDS 缺失触发重建（限速+单飞） | 正常路径；想压重建风暴就保持这样，想压稳态读先跑 `seed/warm_sds.sh` |
 | `./run.sh` 报 command not found | Windows 下 exec 位丢失 | 用 `bash run.sh ...` 执行 |

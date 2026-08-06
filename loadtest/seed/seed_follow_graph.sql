@@ -11,12 +11,12 @@ SET @large_author := __LARGE_AUTHOR_ID__;
 SET @large_followers := __LARGE_FOLLOWER_N__;
 
 -- 普通关注（following 表）
+INSERT IGNORE INTO following (id, from_user_id, to_user_id, rel_status, created_at, updated_at)
 WITH RECURSIVE seq AS (
   SELECT 1 AS i UNION ALL SELECT i + 1 FROM seq WHERE i < @user_n
 ), seq2 AS (
   SELECT 1 AS j UNION ALL SELECT j + 1 FROM seq2 WHERE j < @follow_per
 )
-INSERT IGNORE INTO following (id, from_user_id, to_user_id, rel_status, created_at, updated_at)
 SELECT
   @id_base + (seq.i - 1) * @follow_per + seq2.j,
   @id_base + seq.i,
@@ -27,12 +27,12 @@ SELECT
 FROM seq JOIN seq2 ON 1 = 1;
 
 -- 普通关注镜像（follower 表）
+INSERT IGNORE INTO follower (id, to_user_id, from_user_id, rel_status, created_at, updated_at)
 WITH RECURSIVE seq AS (
   SELECT 1 AS i UNION ALL SELECT i + 1 FROM seq WHERE i < @user_n
 ), seq2 AS (
   SELECT 1 AS j UNION ALL SELECT j + 1 FROM seq2 WHERE j < @follow_per
 )
-INSERT IGNORE INTO follower (id, to_user_id, from_user_id, rel_status, created_at, updated_at)
 SELECT
   @id_base + (seq.i - 1) * @follow_per + seq2.j,
   @id_base + ((seq.i + seq2.j - 1) % @user_n) + 1,
@@ -46,10 +46,10 @@ FROM seq JOIN seq2 ON 1 = 1;
 -- 合规约束：
 --   a) 排除 @large_author 自己（业务层 follow 不拦截自关注，种子数据必须自守）
 --   b) from 必须落在种子用户池内（需 LARGE_FOLLOWER_N <= USER_N - 1，run.sh seed 已前置校验）
+INSERT IGNORE INTO following (id, from_user_id, to_user_id, rel_status, created_at, updated_at)
 WITH RECURSIVE seq AS (
   SELECT 1 AS i UNION ALL SELECT i + 1 FROM seq WHERE i < @large_followers
 )
-INSERT IGNORE INTO following (id, from_user_id, to_user_id, rel_status, created_at, updated_at)
 SELECT
   9000000 + i,
   @id_base + i,
@@ -61,10 +61,10 @@ FROM seq
 WHERE @large_followers > 0
   AND @id_base + i <> @large_author;
 
+INSERT IGNORE INTO follower (id, to_user_id, from_user_id, rel_status, created_at, updated_at)
 WITH RECURSIVE seq AS (
   SELECT 1 AS i UNION ALL SELECT i + 1 FROM seq WHERE i < @large_followers
 )
-INSERT IGNORE INTO follower (id, to_user_id, from_user_id, rel_status, created_at, updated_at)
 SELECT
   9000000 + i,
   @large_author,

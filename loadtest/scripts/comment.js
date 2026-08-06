@@ -22,7 +22,7 @@ function submit(postId) {
     body: 'loadtest comment ' + uuid(),
   }, { name: 'comment.submit' });
   check(res, {
-    'comment.submit 200': (r) => r.status === 200,
+    'comment.submit 202': (r) => r.status === 202,
     'comment.submit object': (r) => typeof r.json() === 'object',
   });
 }
