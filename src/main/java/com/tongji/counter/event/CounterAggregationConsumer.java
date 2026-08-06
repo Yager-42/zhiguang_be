@@ -29,6 +29,8 @@ public class CounterAggregationConsumer {
     private final StringRedisTemplate redis;
     private final DefaultRedisScript<Long> incrScript;
     private final DefaultRedisScript<Long> decrScript;
+    private final DefaultRedisScript<Long> aggregateScript;
+    private final DefaultRedisScript<Long> cleanupScript;
 
     // 使用 Redis Hash 作为持久化聚合桶：agg:{schema}:{etype}:{eid} ，field=idx ，value=delta
     public CounterAggregationConsumer(ObjectMapper objectMapper, StringRedisTemplate redis) {
@@ -41,6 +43,13 @@ public class CounterAggregationConsumer {
         this.decrScript = new DefaultRedisScript<>();
         this.decrScript.setResultType(Long.class);
         this.decrScript.setScriptText(DECR_FIELD_LUA);
+        this.aggregateScript = new DefaultRedisScript<>();
+        this.aggregateScript.setResultType(Long.class);
+        this.aggregateScript.setScriptText(AGGREGATE_LUA);
+
+        this.cleanupScript = new DefaultRedisScript<>();
+        this.cleanupScript.setResultType(Long.class);
+        this.cleanupScript.setScriptText(CLEANUP_EMPTY_LUA);
     }
 
     /**
@@ -54,9 +63,10 @@ public class CounterAggregationConsumer {
         String aggKey = CounterKeys.aggKey(evt.getEntityType(), evt.getEntityId());
         String field = String.valueOf(evt.getIdx());
         try {
-            // 将增量持久化到 Redis Hash
-            redis.opsForHash().increment(aggKey, field, evt.getDelta());
-            // 成功后提交位点，绑定“已持久化”语义
+            // 增量与 dirty 索引在同一个 Lua 中提交，避免崩溃窗口丢失待刷实体。
+            redis.execute(aggregateScript,
+                    List.of(aggKey, CounterKeys.aggregateDirtySetKey()),
+                    field, String.valueOf(evt.getDelta()));
             ack.acknowledge();
         } catch (Exception ex) {
             // 不提交位点以便重试
@@ -69,15 +79,16 @@ public class CounterAggregationConsumer {
      */
     @Scheduled(fixedDelay = 1000L)
     public void flush() {
-        // 简化实现：扫描所有聚合桶键（生产建议使用索引集合替代 KEYS）
-        Set<String> keys = redis.keys("agg:" + CounterSchema.SCHEMA_ID + ":*");
-        if (keys.isEmpty()) {
+        String dirtySetKey = CounterKeys.aggregateDirtySetKey();
+        Set<String> keys = redis.opsForSet().members(dirtySetKey);
+        if (keys == null || keys.isEmpty()) {
             return;
         }
 
         for (String aggKey : keys) {
             Map<Object, Object> entries = redis.opsForHash().entries(aggKey);
             if (entries.isEmpty()) {
+                redis.execute(cleanupScript, List.of(aggKey, dirtySetKey), aggKey);
                 continue;
             }
             // 解析 etype/eid 以定位 SDS key
@@ -119,14 +130,25 @@ public class CounterAggregationConsumer {
                     // 留存字段，下一轮重试
                 }
             }
-            // 如 Hash 已为空，删除聚合桶Key
-            // 目的：降低键空间噪音，避免后续无效扫描
-            Long size = redis.opsForHash().size(aggKey);
-            if (size == 0L) {
-                redis.delete(aggKey);
-            }
+            // 仅当 Hash 仍为空时，原子移除聚合桶与 dirty 标记；并发新事件不会丢失。
+            redis.execute(cleanupScript, List.of(aggKey, dirtySetKey), aggKey);
         }
     }
+
+    private static final String AGGREGATE_LUA = """
+            redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2])
+            redis.call('SADD', KEYS[2], KEYS[1])
+            return 1
+            """;
+
+    private static final String CLEANUP_EMPTY_LUA = """
+            if redis.call('HLEN', KEYS[1]) == 0 then
+              redis.call('DEL', KEYS[1])
+              redis.call('SREM', KEYS[2], ARGV[1])
+              return 1
+            end
+            return 0
+            """;
 
     private static final String INCR_FIELD_LUA = """
             

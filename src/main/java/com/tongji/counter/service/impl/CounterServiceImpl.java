@@ -122,8 +122,9 @@ public class CounterServiceImpl implements CounterService {
         // 分片内位偏移
         long bit = BitmapShard.bitOf(uid);
         String bmKey = CounterKeys.bitmapKey(metric, etype, eid, chunk);
-        List<String> keys = List.of(bmKey);
-        List<String> args = List.of(String.valueOf(bit), add ? "add" : "remove");
+        String shardIndexKey = CounterKeys.bitmapShardIndexKey(metric, etype, eid);
+        List<String> keys = List.of(bmKey, shardIndexKey);
+        List<String> args = List.of(String.valueOf(bit), add ? "add" : "remove", String.valueOf(chunk));
         Long changed = redis.execute(toggleScript, keys, args.toArray());
         boolean ok = changed == 1L;
         if (ok) {
@@ -265,6 +266,14 @@ public class CounterServiceImpl implements CounterService {
         redis.opsForHash().delete(aggKey, String.valueOf(idx));
     }
 
+    @Override
+    public void initializeCounts(String entityType, String entityId) {
+        String key = CounterKeys.sdsKey(entityType, entityId);
+        byte[] empty = new byte[CounterSchema.SCHEMA_LEN * CounterSchema.FIELD_SIZE];
+        redis.execute((RedisCallback<Boolean>) connection ->
+                connection.stringCommands().setNX(key.getBytes(StandardCharsets.UTF_8), empty));
+    }
+
     /**
      * 批量获取实体计数（管道批量 GET 降低 RTT）。
      * 缺失或结构异常（长度不符）时按零返回，保证接口稳定。
@@ -327,6 +336,28 @@ public class CounterServiceImpl implements CounterService {
         long chunk = BitmapShard.chunkOf(userId);
         long bit = BitmapShard.bitOf(userId);
         return getBit(CounterKeys.bitmapKey("like", entityType, entityId, chunk), bit);
+    }
+
+    @Override
+    public Map<String, Boolean> isLikedBatch(String entityType, List<String> entityIds, long userId) {
+        Map<String, Boolean> result = new LinkedHashMap<>();
+        if (entityIds == null || entityIds.isEmpty()) {
+            return result;
+        }
+        long chunk = BitmapShard.chunkOf(userId);
+        long bit = BitmapShard.bitOf(userId);
+        List<Object> values = redis.executePipelined((RedisCallback<Object>) connection -> {
+            for (String entityId : entityIds) {
+                String key = CounterKeys.bitmapKey("like", entityType, entityId, chunk);
+                connection.stringCommands().getBit(key.getBytes(StandardCharsets.UTF_8), bit);
+            }
+            return null;
+        });
+        for (int i = 0; i < entityIds.size(); i++) {
+            Object value = i < values.size() ? values.get(i) : null;
+            result.put(entityIds.get(i), Boolean.TRUE.equals(value));
+        }
+        return result;
     }
 
     /**
@@ -452,14 +483,15 @@ public class CounterServiceImpl implements CounterService {
     }
 
     /**
-     * 基于位图分片进行管道化 BITCOUNT 汇总，用于按事实重建计数。
-     * 说明：当前使用 KEYS 枚举分片（生产建议维护索引集合），结果按分片 BITCOUNT 求和。
+     * 基于维护好的分片索引进行管道化 BITCOUNT 汇总，不扫描 Redis 全量 keyspace。
      */
     private long bitCountShardsPipelined(String metric, String etype, String eid) {
-        String pattern = String.format("bm:%s:%s:%s:*", metric, etype, eid);
-        // 生产环境建议以索引集合替代 KEYS
-        Set<String> keys = redis.keys(pattern); 
-        if (keys.isEmpty()) return 0L;
+        String indexKey = CounterKeys.bitmapShardIndexKey(metric, etype, eid);
+        Set<String> chunks = redis.opsForSet().members(indexKey);
+        if (chunks == null || chunks.isEmpty()) return 0L;
+        List<String> keys = chunks.stream()
+                .map(chunk -> CounterKeys.bitmapKey(metric, etype, eid, Long.parseLong(chunk)))
+                .toList();
 
         // 管道批量 BITCOUNT 汇总
         List<Object> res = redis.executePipelined((RedisCallback<Object>) connection -> {
@@ -478,19 +510,26 @@ public class CounterServiceImpl implements CounterService {
         return sum;
     }
 
-    // Redis 内嵌 Lua（Redis 5/6 的 Lua 5.1），位图原子切换（分片内偏移）
+    // Redis 内嵌 Lua（Redis 5/6 的 Lua 5.1），原子维护位图及其分片索引。
     private static final String TOGGLE_LUA = """
             local bmKey = KEYS[1]
+            local shardIndexKey = KEYS[2]
             local offset = tonumber(ARGV[1])
             local op = ARGV[2] -- 'add' or 'remove'
+            local chunk = ARGV[3]
             local prev = redis.call('GETBIT', bmKey, offset)
             if op == 'add' then
               if prev == 1 then return 0 end
               redis.call('SETBIT', bmKey, offset, 1)
+              redis.call('SADD', shardIndexKey, chunk)
               return 1
             elseif op == 'remove' then
               if prev == 0 then return 0 end
               redis.call('SETBIT', bmKey, offset, 0)
+              if redis.call('BITCOUNT', bmKey) == 0 then
+                redis.call('DEL', bmKey)
+                redis.call('SREM', shardIndexKey, chunk)
+              end
               return 1
             end
             return -1

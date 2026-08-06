@@ -4,13 +4,12 @@ import com.tongji.comment.api.dto.CommentPageResponse;
 import com.tongji.comment.api.dto.CommentStatusResponse;
 import com.tongji.comment.api.dto.CommentSubmitRequest;
 import com.tongji.comment.api.dto.CommentSubmitResponse;
-import com.tongji.comment.event.CommentFeedbackProducer;
-import com.tongji.comment.event.CommentWriteEvent;
-import com.tongji.comment.event.CommentWriteProducer;
+import com.tongji.comment.mapper.CommentWriteOutboxMapper;
+import com.tongji.comment.model.CommentWriteOutbox;
+import com.tongji.comment.model.Comment;
 import com.tongji.comment.mapper.CommentMapper;
 import com.tongji.counter.service.CounterService;
 import com.tongji.comment.mapper.PendingCommentMapper;
-import com.tongji.comment.model.Comment;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.comment.service.impl.CommentServiceImpl;
 import com.tongji.common.exception.BusinessException;
@@ -56,9 +55,7 @@ class CommentServiceImplTest {
     @Mock
     private IdService idService;
     @Mock
-    private CommentWriteProducer commentWriteProducer;
-    @Mock
-    private CommentFeedbackProducer commentFeedbackProducer;
+    private CommentWriteOutboxMapper commentWriteOutboxMapper;
     @Mock
     private CounterService counterService;
 
@@ -72,22 +69,22 @@ class CommentServiceImplTest {
                 pendingCommentMapper,
                 textStorageService,
                 idService,
-                commentWriteProducer,
+                commentWriteOutboxMapper,
                 counterService
         );
     }
 
     @Test
-    void submitHasTransactionalBoundaryForPendingInsertAndPublish() throws Exception {
+    void submitHasTransactionalBoundaryForPendingAndOutboxInsert() throws Exception {
         Method submit = CommentServiceImpl.class.getMethod("submit", long.class, long.class, CommentSubmitRequest.class);
 
         assertThat(submit.getAnnotation(Transactional.class))
-                .withFailMessage("submit must be transactional so pending insert rolls back if Kafka publish fails")
+                .withFailMessage("submit must atomically persist pending comment and outbox event")
                 .isNotNull();
     }
 
     @Test
-    void submitNewRequestInsertsPendingAndPublishesWriteWithoutFeedback() {
+    void submitNewRequestInsertsPendingAndOutbox() {
         when(idService.nextId(IdNamespace.COMMENT)).thenReturn(101L);
         CommentSubmitRequest request = new CommentSubmitRequest(9L, null, null, "client-1", "hello");
 
@@ -105,14 +102,21 @@ class CommentServiceImplTest {
             assertThat(pending.getClientRequestId()).isEqualTo("client-1");
             assertThat(pending.getStatus()).isEqualTo("pending");
         });
-        verify(commentWriteProducer).publish(new CommentWriteEvent(101L, 9L, 0L, 0L, 7L, "client-1", "hello"));
-        verifyNoInteractions(commentFeedbackProducer);
+        ArgumentCaptor<CommentWriteOutbox> outboxCaptor = ArgumentCaptor.forClass(CommentWriteOutbox.class);
+        verify(commentWriteOutboxMapper).insert(outboxCaptor.capture());
+        assertThat(outboxCaptor.getValue()).satisfies(outbox -> {
+            assertThat(outbox.getCommentId()).isEqualTo(101L);
+            assertThat(outbox.getPostId()).isEqualTo(9L);
+            assertThat(outbox.getCreatorId()).isEqualTo(7L);
+            assertThat(outbox.getClientRequestId()).isEqualTo("client-1");
+            assertThat(outbox.getBody()).isEqualTo("hello");
+        });
         verify(commentMapper, never()).insert(any());
         verify(textStorageService, never()).saveCommentText(anyLong(), anyString());
     }
 
     @Test
-    void submitDoesNotTouchFeedbackProducer() {
+    void submitPersistsOutboxWithoutPublishingKafkaInline() {
         when(idService.nextId(IdNamespace.COMMENT)).thenReturn(101L);
         CommentSubmitRequest request = new CommentSubmitRequest(9L, null, null, "client-1", "hello");
 
@@ -120,8 +124,7 @@ class CommentServiceImplTest {
                 .doesNotThrowAnyException();
 
         verify(pendingCommentMapper).insert(any(PendingComment.class));
-        verify(commentWriteProducer).publish(new CommentWriteEvent(101L, 9L, 0L, 0L, 7L, "client-1", "hello"));
-        verifyNoInteractions(commentFeedbackProducer);
+        verify(commentWriteOutboxMapper).insert(any(CommentWriteOutbox.class));
     }
 
     @Test
@@ -139,7 +142,7 @@ class CommentServiceImplTest {
 
         assertThat(response.pendingCommentId()).isEqualTo("101");
         assertThat(response.status()).isEqualTo("pending");
-        verifyNoInteractions(idService, commentWriteProducer, commentFeedbackProducer);
+        verifyNoInteractions(idService, commentWriteOutboxMapper);
         verify(pendingCommentMapper, never()).insert(any());
     }
 
@@ -162,8 +165,7 @@ class CommentServiceImplTest {
         assertThat(response.clientRequestId()).isEqualTo("client-race");
         assertThat(response.pendingCommentId()).isEqualTo("101");
         assertThat(response.status()).isEqualTo("pending");
-        verify(commentWriteProducer, never()).publish(any());
-        verify(commentFeedbackProducer, never()).publish(any());
+        verify(commentWriteOutboxMapper, never()).insert(any());
     }
 
     @Test
@@ -174,7 +176,7 @@ class CommentServiceImplTest {
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.BAD_REQUEST);
 
-        verifyNoInteractions(pendingCommentMapper, idService, commentWriteProducer, commentFeedbackProducer);
+        verifyNoInteractions(pendingCommentMapper, idService, commentWriteOutboxMapper);
     }
 
     @Test
@@ -191,7 +193,7 @@ class CommentServiceImplTest {
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.BAD_REQUEST);
 
-        verifyNoInteractions(idService, commentWriteProducer, commentFeedbackProducer);
+        verifyNoInteractions(idService, commentWriteOutboxMapper);
         verify(pendingCommentMapper, never()).insert(any());
     }
 
@@ -210,7 +212,7 @@ class CommentServiceImplTest {
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.BAD_REQUEST);
 
-        verifyNoInteractions(idService, commentWriteProducer, commentFeedbackProducer);
+        verifyNoInteractions(idService, commentWriteOutboxMapper);
         verify(pendingCommentMapper, never()).insert(any());
     }
 
@@ -241,7 +243,10 @@ class CommentServiceImplTest {
                 101L, "first",
                 99L, "third"
         ));
-        when(counterService.isLiked(anyString(), anyString(), anyLong())).thenReturn(false);
+        when(counterService.getCountsBatch("comment", List.of("101", "100"), List.of("like")))
+                .thenReturn(Map.of("101", Map.of("like", 3L), "100", Map.of("like", 0L)));
+        when(counterService.isLikedBatch("comment", List.of("101", "100"), 7L))
+                .thenReturn(Map.of("101", true, "100", false));
 
         CommentPageResponse response = commentService.pageComments(9L, null, null, 2, 7L);
 

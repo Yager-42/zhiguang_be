@@ -63,6 +63,12 @@ comment:
   kafka:
     write-topic: comment-write
     feedback-topic: comment-feedback
+    write-partitions: ${COMMENT_WRITE_PARTITIONS:8}
+    consumer-concurrency: ${COMMENT_WRITE_CONCURRENCY:8}
+  outbox:
+    batch-size: ${COMMENT_OUTBOX_BATCH_SIZE:100}
+    claim-seconds: ${COMMENT_OUTBOX_CLAIM_SECONDS:30}
+    publish-interval-ms: ${COMMENT_OUTBOX_PUBLISH_INTERVAL_MS:50}
 
 mybatis:
   mapper-locations: classpath*:mapper/**/*.xml
