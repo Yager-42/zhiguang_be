@@ -52,8 +52,9 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       # 双 listener：PLAINTEXT(kafka:9092) 供容器内 app 使用；EXTERNAL(localhost:9094) 供宿主机工具直连
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://:9093,EXTERNAL://0.0.0.0:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,CONTROLLER://localhost:9093,EXTERNAL://localhost:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -129,7 +130,10 @@ services:
     entrypoint: ["cqlsh", "cassandra", "-f", "/init.cql"]
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.1
+    build:
+      context: .
+      dockerfile: Dockerfile.elasticsearch
+    image: zhiguang-elasticsearch:9.2.1-ik
     container_name: zhiguang-elasticsearch
     restart: unless-stopped
     environment:
@@ -235,9 +239,9 @@ services:
       SPRING_DATASOURCE_PASSWORD: zhiguang123456
       SPRING_DATA_REDIS_HOST: redis
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      SPRING_DATA_CASSANDRA_CONTACT_POINTS: cassandra
-      SPRING_DATA_CASSANDRA_LOCAL_DATACENTER: datacenter1
-      SPRING_DATA_CASSANDRA_KEYSPACE_NAME: zhiguang
+      SPRING_CASSANDRA_CONTACT_POINTS: cassandra
+      SPRING_CASSANDRA_LOCAL_DATACENTER: datacenter1
+      SPRING_CASSANDRA_KEYSPACE_NAME: zhiguang
       SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
       ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
       STORAGE_ENDPOINT: http://minio:9000
