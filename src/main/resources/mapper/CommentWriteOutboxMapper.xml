@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.comment.mapper.CommentWriteOutboxMapper">
+
+    <resultMap id="CommentWriteOutboxResultMap" type="com.tongji.comment.model.CommentWriteOutbox">
+        <id property="commentId" column="comment_id" />
+        <result property="postId" column="post_id" />
+        <result property="rootId" column="root_id" />
+        <result property="parentId" column="parent_id" />
+        <result property="creatorId" column="creator_id" />
+        <result property="clientRequestId" column="client_request_id" />
+        <result property="body" column="body" />
+        <result property="state" column="state" />
+        <result property="attemptCount" column="attempt_count" />
+        <result property="nextAttemptAt" column="next_attempt_at" />
+        <result property="claimToken" column="claim_token" />
+        <result property="claimUntil" column="claim_until" />
+        <result property="lastError" column="last_error" />
+        <result property="publishedAt" column="published_at" />
+        <result property="createdAt" column="created_at" />
+        <result property="updatedAt" column="updated_at" />
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.comment.model.CommentWriteOutbox">
+        INSERT INTO comment_write_outbox (
+            comment_id, post_id, root_id, parent_id, creator_id, client_request_id, body,
+            state, attempt_count, next_attempt_at, created_at, updated_at
+        ) VALUES (
+            #{commentId}, #{postId}, #{rootId}, #{parentId}, #{creatorId}, #{clientRequestId}, #{body},
+            'pending', 0, #{nextAttemptAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="releaseExpiredClaims">
+        UPDATE comment_write_outbox
+        SET state = 'pending',
+            claim_token = NULL,
+            claim_until = NULL,
+            updated_at = #{now}
+        WHERE state = 'publishing'
+          AND claim_until &lt; #{now}
+    </update>
+
+    <update id="claimReady">
+        UPDATE comment_write_outbox
+        SET state = 'publishing',
+            claim_token = #{claimToken},
+            claim_until = #{claimUntil},
+            updated_at = #{now}
+        WHERE state = 'pending'
+          AND next_attempt_at &lt;= #{now}
+        ORDER BY next_attempt_at, comment_id
+        LIMIT #{limit}
+    </update>
+
+    <select id="findClaimed" resultMap="CommentWriteOutboxResultMap">
+        SELECT *
+        FROM comment_write_outbox
+        WHERE state = 'publishing'
+          AND claim_token = #{claimToken}
+        ORDER BY next_attempt_at, comment_id
+    </select>
+
+    <update id="markPublished">
+        UPDATE comment_write_outbox
+        SET state = 'published',
+            published_at = #{publishedAt},
+            claim_token = NULL,
+            claim_until = NULL,
+            last_error = NULL,
+            updated_at = #{publishedAt}
+        WHERE comment_id = #{commentId}
+          AND state = 'publishing'
+          AND claim_token = #{claimToken}
+    </update>
+
+    <update id="markRetry">
+        UPDATE comment_write_outbox
+        SET state = 'pending',
+            attempt_count = #{attemptCount},
+            next_attempt_at = #{nextAttemptAt},
+            claim_token = NULL,
+            claim_until = NULL,
+            last_error = #{lastError},
+            updated_at = NOW(3)
+        WHERE comment_id = #{commentId}
+          AND state = 'publishing'
+          AND claim_token = #{claimToken}
+    </update>
+</mapper>

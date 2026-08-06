@@ -5,11 +5,11 @@ import com.tongji.comment.api.dto.CommentPageResponse;
 import com.tongji.comment.api.dto.CommentStatusResponse;
 import com.tongji.comment.api.dto.CommentSubmitRequest;
 import com.tongji.comment.api.dto.CommentSubmitResponse;
-import com.tongji.comment.event.CommentWriteEvent;
-import com.tongji.comment.event.CommentWriteProducer;
 import com.tongji.comment.mapper.CommentMapper;
+import com.tongji.comment.mapper.CommentWriteOutboxMapper;
 import com.tongji.comment.mapper.PendingCommentMapper;
 import com.tongji.comment.model.Comment;
+import com.tongji.comment.model.CommentWriteOutbox;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.comment.service.CommentService;
 import com.tongji.common.exception.BusinessException;
@@ -36,20 +36,20 @@ public class CommentServiceImpl implements CommentService {
     private final PendingCommentMapper pendingCommentMapper;
     private final TextStorageService textStorageService;
     private final IdService idService;
-    private final CommentWriteProducer commentWriteProducer;
+    private final CommentWriteOutboxMapper commentWriteOutboxMapper;
     private final CounterService counterService;
 
     public CommentServiceImpl(CommentMapper commentMapper,
                               PendingCommentMapper pendingCommentMapper,
                               TextStorageService textStorageService,
                               IdService idService,
-                              CommentWriteProducer commentWriteProducer,
+                              CommentWriteOutboxMapper commentWriteOutboxMapper,
                               CounterService counterService) {
         this.commentMapper = commentMapper;
         this.pendingCommentMapper = pendingCommentMapper;
         this.textStorageService = textStorageService;
         this.idService = idService;
-        this.commentWriteProducer = commentWriteProducer;
+        this.commentWriteOutboxMapper = commentWriteOutboxMapper;
         this.counterService = counterService;
     }
 
@@ -101,8 +101,18 @@ public class CommentServiceImpl implements CommentService {
             }
             throw exception;
         }
-        commentWriteProducer.publish(new CommentWriteEvent(commentId, postId, rootId, parentId, creatorId,
-                request.clientRequestId(), request.body()));
+        commentWriteOutboxMapper.insert(CommentWriteOutbox.builder()
+                .commentId(commentId)
+                .postId(postId)
+                .rootId(rootId)
+                .parentId(parentId)
+                .creatorId(creatorId)
+                .clientRequestId(request.clientRequestId())
+                .body(request.body())
+                .nextAttemptAt(now)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
         return new CommentSubmitResponse(request.clientRequestId(), String.valueOf(commentId), PENDING);
     }
 
@@ -149,8 +159,27 @@ public class CommentServiceImpl implements CommentService {
                 .filter(row -> !Integer.valueOf(1).equals(row.getStatus()))
                 .map(Comment::getCommentId)
                 .toList());
+        List<String> commentIds = pageRows.stream()
+                .map(row -> String.valueOf(row.getCommentId()))
+                .toList();
+        Map<String, Map<String, Long>> countsByComment;
+        Map<String, Boolean> likedByComment;
+        try {
+            countsByComment = counterService.getCountsBatch("comment", commentIds, List.of("like"));
+        } catch (RuntimeException exception) {
+            countsByComment = Map.of();
+        }
+        try {
+            likedByComment = currentUserId > 0
+                    ? counterService.isLikedBatch("comment", commentIds, currentUserId)
+                    : Map.of();
+        } catch (RuntimeException exception) {
+            likedByComment = Map.of();
+        }
+        Map<String, Map<String, Long>> pageCounts = countsByComment;
+        Map<String, Boolean> pageLiked = likedByComment;
         List<CommentItemResponse> items = pageRows.stream()
-                .map(row -> item(row, texts, currentUserId))
+                .map(row -> item(row, texts, pageCounts, pageLiked))
                 .toList();
         Comment last = items.isEmpty() ? null : pageRows.get(pageRows.size() - 1);
         return new CommentPageResponse(items,
@@ -159,21 +188,15 @@ public class CommentServiceImpl implements CommentService {
                 hasMore);
     }
 
-    private CommentItemResponse item(Comment row, Map<Long, String> texts, long currentUserId) {
+    private CommentItemResponse item(Comment row,
+                                     Map<Long, String> texts,
+                                     Map<String, Map<String, Long>> countsByComment,
+                                     Map<String, Boolean> likedByComment) {
         boolean deleted = Integer.valueOf(1).equals(row.getStatus());
         String commentIdStr = String.valueOf(row.getCommentId());
-        boolean liked = currentUserId > 0
-                && counterService.isLiked("comment", commentIdStr, currentUserId);
-        // likeCount 读 counter SDS（与写入路径对齐），不读 MySQL like_count（该字段无人更新）。
-        // SDS 段是无符号 32 位，DTO 是 Integer：钳制到 Integer.MAX_VALUE 防 (int) 截断成负数。
-        long likeCount = 0L;
-        try {
-            Map<String, Long> counts = counterService.getCounts("comment", commentIdStr, List.of("like"));
-            Long v = counts.get("like");
-            if (v != null) likeCount = v;
-        } catch (RuntimeException ignore) {
-            // counter 不可用时回退 0
-        }
+        boolean liked = Boolean.TRUE.equals(likedByComment.get(commentIdStr));
+        long likeCount = countsByComment.getOrDefault(commentIdStr, Map.of())
+                .getOrDefault("like", 0L);
         if (likeCount > Integer.MAX_VALUE) likeCount = Integer.MAX_VALUE;
         return new CommentItemResponse(
                 commentIdStr,

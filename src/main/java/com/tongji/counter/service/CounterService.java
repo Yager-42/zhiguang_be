@@ -41,11 +41,17 @@ public interface CounterService {
      */
     void overwriteCount(String entityType, String entityId, String metric, long value);
 
+    /**
+     * 为新实体创建全零 SDS；已有计数时保持原值。
+     */
+    void initializeCounts(String entityType, String entityId);
+
     Map<String, Map<String, Long>> getCountsBatch(String entityType, List<String> entityIds, List<String> metrics);
 
     /**
      * 判断是否点赞/收藏（位图）。
      */
     boolean isLiked(String entityType, String entityId, long userId);
+    Map<String, Boolean> isLikedBatch(String entityType, List<String> entityIds, long userId);
     boolean isFaved(String entityType, String entityId, long userId);
 }

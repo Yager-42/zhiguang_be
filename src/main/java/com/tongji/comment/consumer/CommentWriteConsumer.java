@@ -11,6 +11,7 @@ import com.tongji.comment.model.Comment;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.counter.event.CounterEvent;
 import com.tongji.counter.event.CounterEventProducer;
+import com.tongji.counter.service.CounterService;
 import com.tongji.storage.text.TextStorageService;
 import com.tongji.wallet.service.ContentRewardService;
 import org.springframework.dao.DuplicateKeyException;
@@ -31,6 +32,7 @@ public class CommentWriteConsumer {
     private final PendingCommentMapper pendingCommentMapper;
     private final TextStorageService textStorageService;
     private final CounterEventProducer counterEventProducer;
+    private final CounterService counterService;
     private final CommentFeedbackProducer commentFeedbackProducer;
     private final ContentRewardService contentRewardService;
 
@@ -39,6 +41,7 @@ public class CommentWriteConsumer {
                                 PendingCommentMapper pendingCommentMapper,
                                 TextStorageService textStorageService,
                                 CounterEventProducer counterEventProducer,
+                                CounterService counterService,
                                 CommentFeedbackProducer commentFeedbackProducer,
                                 ContentRewardService contentRewardService) {
         this.objectMapper = objectMapper;
@@ -46,6 +49,7 @@ public class CommentWriteConsumer {
         this.pendingCommentMapper = pendingCommentMapper;
         this.textStorageService = textStorageService;
         this.counterEventProducer = counterEventProducer;
+        this.counterService = counterService;
         this.commentFeedbackProducer = commentFeedbackProducer;
         this.contentRewardService = contentRewardService;
     }
@@ -77,10 +81,12 @@ public class CommentWriteConsumer {
         try {
             commentMapper.insert(comment(event));
         } catch (DuplicateKeyException exception) {
+            counterService.initializeCounts("comment", String.valueOf(commentId));
             pendingCommentMapper.updateStatus(commentId, "succeeded");
             return;
         }
 
+        counterService.initializeCounts("comment", String.valueOf(commentId));
         pendingCommentMapper.updateStatus(commentId, "succeeded");
         counterEventProducer.publish(counter(event));
         commentFeedbackProducer.publish(feedback(event));

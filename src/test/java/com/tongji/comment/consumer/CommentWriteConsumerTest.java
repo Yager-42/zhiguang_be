@@ -10,6 +10,7 @@ import com.tongji.comment.model.Comment;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.counter.event.CounterEvent;
 import com.tongji.counter.event.CounterEventProducer;
+import com.tongji.counter.service.CounterService;
 import com.tongji.storage.text.TextStorageService;
 import com.tongji.storage.text.TextWriteException;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,8 @@ class CommentWriteConsumerTest {
     @Mock
     private CounterEventProducer counterEventProducer;
     @Mock
+    private CounterService counterService;
+    @Mock
     private CommentFeedbackProducer commentFeedbackProducer;
     @Mock
     private com.tongji.wallet.service.ContentRewardService contentRewardService;
@@ -62,6 +65,7 @@ class CommentWriteConsumerTest {
                 pendingCommentMapper,
                 textStorageService,
                 counterEventProducer,
+                counterService,
                 commentFeedbackProducer,
                 contentRewardService
         );
@@ -158,11 +162,12 @@ class CommentWriteConsumerTest {
 
         consumer.handle(event);
 
-        InOrder order = inOrder(textStorageService, commentMapper, pendingCommentMapper,
+        InOrder order = inOrder(textStorageService, commentMapper, counterService, pendingCommentMapper,
                 counterEventProducer, commentFeedbackProducer, contentRewardService);
         ArgumentCaptor<Comment> commentCaptor = ArgumentCaptor.forClass(Comment.class);
         order.verify(textStorageService).saveCommentText(101L, "hello");
         order.verify(commentMapper).insert(commentCaptor.capture());
+        order.verify(counterService).initializeCounts("comment", "101");
         order.verify(pendingCommentMapper).updateStatus(101L, "succeeded");
         ArgumentCaptor<CounterEvent> counterCaptor = ArgumentCaptor.forClass(CounterEvent.class);
         order.verify(counterEventProducer).publish(counterCaptor.capture());
@@ -221,9 +226,10 @@ class CommentWriteConsumerTest {
 
         consumer.handle(event);
 
-        InOrder order = inOrder(textStorageService, commentMapper, pendingCommentMapper);
+        InOrder order = inOrder(textStorageService, commentMapper, counterService, pendingCommentMapper);
         order.verify(textStorageService).saveCommentText(101L, "hello");
         order.verify(commentMapper).insert(any());
+        order.verify(counterService).initializeCounts("comment", "101");
         order.verify(pendingCommentMapper).updateStatus(101L, "succeeded");
         verify(textStorageService, never()).saveCommentText(202L, "hello");
         verifyNoInteractions(counterEventProducer);
@@ -241,9 +247,10 @@ class CommentWriteConsumerTest {
 
         consumer.handle(event);
 
-        InOrder order = inOrder(textStorageService, commentMapper, pendingCommentMapper);
+        InOrder order = inOrder(textStorageService, commentMapper, counterService, pendingCommentMapper);
         order.verify(textStorageService).saveCommentText(101L, "hello");
         order.verify(commentMapper).insert(any());
+        order.verify(counterService).initializeCounts("comment", "101");
         order.verify(pendingCommentMapper).updateStatus(101L, "succeeded");
         verify(textStorageService, never()).saveCommentText(202L, "hello");
         verifyNoInteractions(counterEventProducer);
