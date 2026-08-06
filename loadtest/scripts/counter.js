@@ -1,5 +1,5 @@
 // S3 计数写读：like/unlike/fav/unfav + 计数读（位图 Lua → Kafka 聚合 → SDS）
-// P0 场景：热帖（50%）vs 随机帖（50%）；有效写 TPS 见 counter.effective_writes
+// P0 场景：热帖（50%）vs 随机帖（50%）；有效写 TPS 见 counter_effective_writes
 // 运行: k6 run -e VUS=300 scripts/counter.js
 import { check } from 'k6';
 import { Counter } from 'k6/metrics';
@@ -8,7 +8,7 @@ import { api, randomPostId, HOT_POST_ID, buildOptions } from './common.js';
 export const options = buildOptions();
 
 // 有效业务写次数：like/fav 返回 changed=true（幂等去重后真正产事件的操作）
-export const effectiveWrites = new Counter('counter.effective_writes');
+export const effectiveWrites = new Counter('counter_effective_writes');
 
 export default function () {
   const hot = Math.random() < 0.5;

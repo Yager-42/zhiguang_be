@@ -9,12 +9,12 @@ SET @id_base := __USER_ID_BASE__;
 SET @pwd := '__BCRYPT__';
 
 -- 用户
+INSERT IGNORE INTO users (id, phone, email, password_hash, nickname, created_at, updated_at)
 WITH RECURSIVE seq AS (
   SELECT 1 AS i
   UNION ALL
   SELECT i + 1 FROM seq WHERE i < @user_n
 )
-INSERT IGNORE INTO users (id, phone, email, password_hash, nickname, created_at, updated_at)
 SELECT
   @id_base + i,
   CONCAT('139', LPAD(i, 8, '0')),
@@ -26,12 +26,12 @@ SELECT
 FROM seq;
 
 -- 钱包账户
+INSERT IGNORE INTO wallet_account (owner_user_id, available_balance, held_balance, escrowed_balance, status, created_at, updated_at)
 WITH RECURSIVE seq AS (
   SELECT 1 AS i
   UNION ALL
   SELECT i + 1 FROM seq WHERE i < @user_n
 )
-INSERT IGNORE INTO wallet_account (owner_user_id, available_balance, held_balance, escrowed_balance, status, created_at, updated_at)
 SELECT
   @id_base + i,
   1000000,

@@ -1,22 +1,21 @@
 // S5 关注关系：follow / unfollow / status / following / counter
-// 注意令牌桶限流：容量 100、1 token/s/用户（rl:follow:{userId}），超限返回 200 + body=false
-// 每 VU 至少间隔 3 次迭代才 follow 一次，并单独统计限流命中
+// 注意令牌桶限流：容量 100、1 token/s/用户（rl:follow:{userId}），超限返回 200 + body=false。
+// 每 VU 最多每秒 follow 一次，并单独统计意外限流命中。
 // 运行: k6 run -e VUS=300 scripts/relation.js
 import { check } from 'k6';
 import { Counter } from 'k6/metrics';
-import { api, currentUser, randomUserId, sinceFollow, markFollowed, bumpSinceFollow, buildOptions } from './common.js';
+import { api, currentUser, randomUserId, followReady, markFollowed, buildOptions } from './common.js';
 
 export const options = buildOptions();
 
-export const rateLimited = new Counter('relation.rate_limited');
+export const rateLimited = new Counter('relation_rate_limited');
 
 export default function () {
-  bumpSinceFollow();
   const r = Math.random();
 
   if (r < 0.5) {
-    // follow：限流保护 —— 每个 VU 最多每 3 次迭代 follow 一次（1 token/s 足够）
-    if (sinceFollow() < 3) {
+    // follow：按后端令牌桶补充速率节流，避免无 think-time 场景耗尽令牌。
+    if (!followReady()) {
       readOnly();
       return;
     }

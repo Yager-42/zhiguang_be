@@ -27,7 +27,7 @@ export default function () {
     api('GET', `/api/v1/counter/knowpost/${randomPostId()}?metrics=like,fav`, null, { name: 'soak.counter.read' });
   } else if (roll < 0.8) {
     const term = hotTerm();
-    http.get(`${BASE_URL}/api/v1/search/suggest?prefix=${encodeURIComponent(term.slice(0, 2))}&size=10`, { tags: { name: 'soak.suggest' } });
+    api('GET', `/api/v1/search/suggest?prefix=${encodeURIComponent(term.slice(0, 2))}&size=10`, null, { name: 'soak.suggest' });
   } else {
     const res = api('GET', '/api/v1/knowposts/feed/follow', null, { name: 'soak.feed.follow' });
     const body = res.json();

@@ -23,8 +23,8 @@ for ((s = 0; s < DURATION; s += INTERVAL)); do
   redis_clients=$("${REDIS[@]}" info clients 2>/dev/null | awk -F: '/^connected_clients/{gsub("\r", ""); print $2}')
   redis_keys=$("${REDIS[@]}" info keyspace 2>/dev/null | awk -F: '/^db0:/{gsub("keys=", "", $2); print $2}')
 
-  mysql_threads=$("${MYSQL[@]}" -e "SHOW GLOBAL STATUS LIKE 'Threads_connected';" 2>/dev/null | tail -1)
-  queries=$("${MYSQL[@]}" -e "SHOW GLOBAL STATUS LIKE 'Queries';" 2>/dev/null | tail -1)
+  mysql_threads=$("${MYSQL[@]}" -e "SHOW GLOBAL STATUS LIKE 'Threads_connected';" 2>/dev/null | awk '{print $2}' | tail -1)
+  queries=$("${MYSQL[@]}" -e "SHOW GLOBAL STATUS LIKE 'Queries';" 2>/dev/null | awk '{print $2}' | tail -1)
   if [ -n "$queries" ] && [ -n "$prev_queries" ]; then
     mysql_qps=$(( (queries - prev_queries) / INTERVAL ))
   else

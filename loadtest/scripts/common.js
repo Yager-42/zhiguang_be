@@ -38,34 +38,38 @@ const state = {
   phone: '',
   loginCount: 0,
   iterCount: 0,
-  iterSinceFollow: 0,
+  lastFollowAtMs: 0,
 };
 
 // 当前 VU 对应的种子用户（idInTest 从 1 起）
 export function currentUser() {
   if (!state.phone) {
-    const n = (vu.idInTest - 1) % USER_POOL;
+    const n = ((vu.idInTest - 1) % USER_POOL) + 1;
     state.userId = String(USER_ID_BASE + n);
     state.phone = '139' + String(n).padStart(8, '0');
   }
   return { userId: state.userId, phone: state.phone };
 }
 
+// 固定到指定种子用户；用于所有 VU 必须共享同一资源所有者的场景。
+export function selectSeedUser(userNumber) {
+  if (state.phone) return;
+  const n = Math.max(1, Math.min(USER_POOL, Number(userNumber)));
+  state.userId = String(USER_ID_BASE + n);
+  state.phone = '139' + String(n).padStart(8, '0');
+}
+
 export function iterationCount() {
   return ++state.iterCount;
 }
 
-// 距离上一次 follow 动作经过的迭代数（relation.js 限流节流用）
-export function sinceFollow() {
-  return state.iterSinceFollow;
+// follow 写入按用户最多每秒一次，与后端令牌桶 1 token/s 的补充速率一致。
+export function followReady() {
+  return Date.now() - state.lastFollowAtMs >= 1000;
 }
 
 export function markFollowed() {
-  state.iterSinceFollow = 0;
-}
-
-export function bumpSinceFollow() {
-  state.iterSinceFollow++;
+  state.lastFollowAtMs = Date.now();
 }
 
 // ---------- 登录与鉴权 ----------
@@ -130,9 +134,9 @@ export function randomPostId() {
 
 export function randomUserId() {
   const u = currentUser();
-  let target = USER_ID_BASE + Math.floor(Math.random() * USER_POOL);
+  let target = USER_ID_BASE + 1 + Math.floor(Math.random() * USER_POOL);
   if (String(target) === u.userId) {
-    target = USER_ID_BASE + ((target - USER_ID_BASE + 1) % USER_POOL);
+    target = USER_ID_BASE + 1 + ((target - USER_ID_BASE) % USER_POOL);
   }
   return String(target);
 }

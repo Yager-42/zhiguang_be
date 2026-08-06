@@ -124,7 +124,7 @@ java -Xmx2g -XX:+UseG1GC -jar target/zhiguang-1.0-SNAPSHOT.jar
 | app 日志报 Cassandra 表不存在 | cassandra-init 未完成就启动（compose 版本不支持 service_completed_successfully） | 升级 compose ≥ 2.17；或手动 `docker compose run --rm cassandra-init` 后 `restart app` |
 | app 健康检查一直 starting | 某个中间件不可达 | `docker compose logs app` 看具体连接错误 |
 | 宿主机直连 Kafka 9092 失败 | 9092 的 advertised 是容器内地址 | 用 `localhost:9094` 或 `docker exec` 进容器操作 |
-| ES 索引创建失败（ik_max_word） | 镜像无 IK 插件 | 不影响部署；搜索压测前装插件或改 analyzer（见压测方案 FAQ） |
+| ES 索引创建失败（ik_max_word） | 自定义 ES 镜像或 IK 插件下载失败 | Compose 会用 `Dockerfile.elasticsearch` 安装匹配 9.2.1 的 IK；检查网络后执行 `docker compose build --no-cache elasticsearch` |
 | 想重置全部数据 | 旧 volume 残留 | `docker compose down -v && docker compose up -d --build`（**删除全部数据**，重灌种子） |
 | WSL 内 Docker Engine 下 host.docker.internal 不通 | 老版本 docker | 升级 docker ≥ 20.10；或压测时 BASE_URL 用 WSL 的 eth0 IP |
 

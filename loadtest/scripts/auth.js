@@ -2,7 +2,7 @@
 // 运行: k6 run -e VUS=300 scripts/auth.js
 import http from 'k6/http';
 import { check } from 'k6';
-import { BASE_URL, PASSWORD, currentUser, api, refreshToken, buildOptions, uuid } from './common.js';
+import { BASE_URL, PASSWORD, currentUser, api, refreshToken, buildOptions, forceRelogin } from './common.js';
 
 export const options = buildOptions();
 
@@ -29,13 +29,14 @@ export default function () {
       'auth.me has user': (r) => r.json().user !== undefined || r.json().id !== undefined,
     });
   } else {
-    // 刷新令牌（旧 refreshToken 轮换失效；用 uuid 模拟异常路径也会计入错误率）
-    const rt = refreshToken() || uuid();
+    // 先确保本 VU 已登录并持有 refresh token；刷新成功后强制下轮重登，避免复用已轮换失效的旧 token。
+    api('GET', '/api/v1/auth/me');
     const res = http.post(
       `${BASE_URL}/api/v1/auth/token/refresh`,
-      JSON.stringify({ refreshToken: rt }),
+      JSON.stringify({ refreshToken: refreshToken() }),
       { headers: { 'Content-Type': 'application/json' }, tags: { name: 'auth.token.refresh' } }
     );
     check(res, { 'auth.token.refresh 200': (r) => r.status === 200 });
+    forceRelogin();
   }
 }

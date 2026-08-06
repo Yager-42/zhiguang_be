@@ -2,8 +2,8 @@
 -- 约定：所有 check_name 的 violations 应 = 0；seeded-users / large-follower-count 输出实际数量用于人工核对。
 -- 任一 violations > 0 即判定种子数据不合规，需修复或重灌（./run.sh seed --force）。
 
-SET @lo := __USER_ID_BASE__;
-SET @hi := __USER_ID_BASE__ + __USER_N__;
+SET @lo := __USER_ID_BASE__ + 1;
+SET @hi := __USER_ID_BASE__ + __USER_N__ + 1;
 SET @post_lo := __POST_ID_BASE__ + 1;
 SET @post_hi := __POST_ID_BASE__ + __POST_N__;
 

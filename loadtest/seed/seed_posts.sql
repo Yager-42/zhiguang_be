@@ -10,16 +10,16 @@ SET @post_base := __POST_ID_BASE__;
 SET @user_base := __USER_ID_BASE__;
 SET @user_n := __USER_N__;
 
-WITH RECURSIVE seq AS (
-  SELECT 1 AS i
-  UNION ALL
-  SELECT i + 1 FROM seq WHERE i < @post_n
-)
 INSERT IGNORE INTO know_posts (
   id, tag_id, tags, title, description, content_url, content_object_key,
   content_etag, content_size, content_sha256, creator_id, is_top, type, visible,
   img_urls, video_url, status, publish_attempt_id, publish_failed_reason,
   create_time, update_time, publish_time
+)
+WITH RECURSIVE seq AS (
+  SELECT 1 AS i
+  UNION ALL
+  SELECT i + 1 FROM seq WHERE i < @post_n
 )
 SELECT
   @post_base + i,

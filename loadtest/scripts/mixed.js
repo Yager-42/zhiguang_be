@@ -7,13 +7,12 @@ import { check } from 'k6';
 import { sleep } from 'k6';
 import {
   BASE_URL, api, randomPostId, randomUserId, hotTerm, uuid, HOT_POST_ID,
-  sinceFollow, markFollowed, bumpSinceFollow, buildOptions,
+  followReady, markFollowed, buildOptions,
 } from './common.js';
 
 export const options = buildOptions();
 
 export default function () {
-  bumpSinceFollow();
 
   // 1. 每迭代必刷 Feed 首页（公共，70% 登录）
   const feed = api('GET', '/api/v1/knowposts/feed?page=1&size=20', null, { name: 'mixed.feed' });
@@ -46,15 +45,15 @@ export default function () {
     const res = api('POST', `/api/v1/posts/${postId}/comments`, {
       postId: Number(postId), clientRequestId: uuid(), body: 'mixed comment ' + uuid(),
     }, { name: 'mixed.comment.submit' });
-    check(res, { 'mixed.comment.submit 200': (r) => r.status === 200 });
+    check(res, { 'mixed.comment.submit 202': (r) => r.status === 202 });
   } else if (roll < 0.80) {
     // 搜索联想
     const term = hotTerm();
-    const res = http.get(`${BASE_URL}/api/v1/search/suggest?prefix=${encodeURIComponent(term.slice(0, 2))}&size=10`, { tags: { name: 'mixed.suggest' } });
+    const res = api('GET', `/api/v1/search/suggest?prefix=${encodeURIComponent(term.slice(0, 2))}&size=10`, null, { name: 'mixed.suggest' });
     check(res, { 'mixed.suggest 200': (r) => r.status === 200 });
   } else if (roll < 0.85) {
-    // 关注（受令牌桶限流：每 VU 至少隔 3 次迭代）
-    if (sinceFollow() >= 3) {
+    // 关注：按后端令牌桶补充速率，每 VU 最多每秒一次。
+    if (followReady()) {
       markFollowed();
       const res = api('POST', `/api/v1/relation/follow?toUserId=${randomUserId()}`, null, { name: 'mixed.follow' });
       check(res, { 'mixed.follow 200': (r) => r.status === 200 && r.body === 'true' });
