@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **feature_contract_version** | `0.1.0` |
+| **feature_contract_version** | `0.1.1` |
 | **status** | **frozen**（grill 收敛于 2026-08-06，决策记录见 §9） |
 | **updated** | 2026-08-06 |
 | **feature_id** | `comment-single-node-throughput-v1` |
@@ -353,15 +353,27 @@ queueCapacity：200
 
 禁止使用 `ForkJoinPool.commonPool()`。
 
-### 3.9 本地 singleflight
+### 3.9 复用现有分布式 singleflight
 
-单机单 App 使用本地 singleflight，不使用 Redis 分布式锁：
+评论页必须直接复用代码库已有的 `DistributedSingleFlightService`，禁止再新增评论专用的
+`ConcurrentHashMap`/本地 singleflight 实现，避免两套 singleflight 并存。
 
 ```java
-ConcurrentHashMap<String, CompletableFuture<CommentBasePage>>
+singleFlightService.execute(
+        "comment-page-head",
+        redisIndexKey,
+        new TypeReference<CommentBasePage>() {},
+        l3Loader
+);
 ```
 
-Key 使用 Redis index key。同一 key 同时只能有一个 L3 回源。完成、失败、取消路径都必须在 `finally` 清理 flight；禁止遗留永久锁。
+要求：
+
+- stage 固定为 `comment-page-head`，requestKey 使用 Redis index key。
+- stage mode 固定为 `distributed`，复用现有 Redis owner/follower、result replay、heartbeat 和 takeover 语义。
+- 同一 key 同时只能有一个 L3 owner 回源；follower 读取共享的 `CommentBasePage`，用户 liked 仍在 singleflight 外按请求叠加。
+- `result-ttl-millis` 不得超过 30000；`l1-cache-ttl-millis` 不得超过 3000，防止 singleflight result/local replay 突破评论缓存 30 秒陈旧上限。
+- Redis 协调失败沿用 `DistributedSingleFlightService` 在 `distributed` mode 下的现有失败语义；评论模块不得自行增加本地 fallback。
 
 ### 3.10 缓存失效与 30 秒一致性窗口
 
@@ -602,7 +614,7 @@ Hikari 初始保持 maximumPoolSize=10。只有指标证明 `acquire/pending` �
 - `commentReadExecutor` 队列有界。
 - outbox Kafka in-flight 有界。
 - Caffeine maximumSize 有界。
-- singleflight map 在 finally 清理。
+- `comment-page-head` 复用现有分布式 singleflight；running/result/failure/replay 状态均有界 TTL，不新增评论本地 flight map。
 - Kafka 消费由 broker lag 承担，不把未完成消息复制到无界内存队列。
 
 当有界 executor 满时使用 `CallerRunsPolicy` 形成调用方减速，不新增应用层 429/503 语义。
@@ -688,15 +700,15 @@ commentOutboxExecutor（仅用于Kafka future协调，不承载持久队列）
 - `db/schema.sql`
 - 评论 outbox initializer/mapper XML
 
-迁移要求：
+clean cutover 要求：
 
 1. 新建 `comment_outbox`。
-2. 将旧 `comment_write_outbox` 中非 published 行回填为 `COMMENT_WRITE_REQUESTED`。
-3. 切换 submit/dispatcher/consumer。
-4. 验证旧表无未处理记录。
-5. 删除旧表和旧代码。
+2. 不开发、不执行 `comment_write_outbox -> comment_outbox` 数据回填迁移。
+3. 切换前停止新流量并使用旧 dispatcher 排空旧表；只有 ready/publishing 非 published 行为 0 才可继续。
+4. 若旧表仍有未处理记录，cutover 必须阻塞，不允许丢弃，也不允许临时双写/回填绕过。
+5. 原子切换 submit/dispatcher/consumer 后，删除旧表和旧代码。
 
-不保留长期双写。
+不保留长期双写或兼容读取。
 
 ---
 
@@ -714,7 +726,7 @@ commentOutboxExecutor（仅用于Kafka future协调，不承载持久队列）
 - Caffeine `CommentBasePage`。
 - Redis IDs/cursor/hasMore/item fragments。
 - 空值缓存。
-- 本地 singleflight。
+- 复用现有 `DistributedSingleFlightService` 的 `comment-page-head` distributed stage。
 - Counter 页面组合接口。
 - L3 并发回源。
 - 创建/回复/删除/审核缓存失效。
@@ -781,7 +793,7 @@ commentOutboxExecutor（仅用于Kafka future协调，不承载持久队列）
 | C3 | 只有无 cursor 第一页进入 Caffeine/L2 index |
 | C4 | Caffeine 只保存 `CommentBasePage`，不保存用户 liked |
 | C5 | 同一 cache key 并发 miss 只发生一次 L3 回源 |
-| C6 | singleflight 成功、异常、取消路径均清理 flight |
+| C6 | distributed singleflight 成功/失败状态、owner heartbeat/takeover 与 result replay 均按有界 TTL 收敛，不遗留永久 RUNNING/锁定状态 |
 | C7 | 创建/回复/删除/审核缓存陈旧不超过 30 秒 |
 | C8 | Redis IDs 顺序与 MySQL 游标排序一致 |
 | C9 | 空评论区命中短期 empty cache，不重复穿透 L3 |
@@ -840,10 +852,14 @@ commentOutboxExecutor（仅用于Kafka future协调，不承载持久队列）
 | G5 | Outbox 模型 | 统一评论领域 `comment_outbox`，可靠承载 WRITE_REQUESTED/CREATED/DELETED/MODERATED |
 | G6 | 物化顺序 | Cassandra 在 JDBC 事务外先写，成功后进入短 MySQL finalizer 事务 |
 | G7 | 部署边界 | 单机单体，不做任何水平扩容 |
+| G8 | Singleflight | 复用现有 `DistributedSingleFlightService` distributed stage；不新增评论本地 singleflight |
+| G9 | Outbox cutover | 不做旧 outbox 数据迁移；旧 dispatcher 排空是切换前置条件，非空则阻塞 |
 
 ---
 
-## 10. 代码已回答、未向用户追问的决策
+## 10. 代码与追加边界已裁决的决策
+
+以下决策以代码现状和冻结边界为依据；其中 D6 已在 v0.1.1 按用户追加边界改写为复用现有分布式 singleflight。
 
 以下问题可由当前代码或性能目标直接裁决，未占用 grill 问答，但决定同样属于 V1 边界：
 
@@ -854,7 +870,7 @@ commentOutboxExecutor（仅用于Kafka future协调，不承载持久队列）
 | D3 | 只缓存无 cursor 第一页 | 热点收益最大，避免单机内存被 cursor 组合污染 |
 | D4 | Redis 使用 index/item 分离，不存完整评论页 JSON | 对应现有 Feed IDs/item 片段代码，也对应博客 reply_index/reply_content |
 | D5 | Caffeine/Redis 只缓存基础评论，不缓存用户 liked | 防止用户状态交叉污染；当前 Counter 已提供批量 liked |
-| D6 | 使用本地 singleflight | 当前只有一个 App，不需要 Redis 分布式锁 |
+| D6 | 复用现有分布式 singleflight | 项目已有 `DistributedSingleFlightService` 及 Redis owner/follower/result replay/heartbeat/takeover；禁止评论模块再造本地实现 |
 | D7 | Counter 保持 bitmap/SDS | 当前 Counter 代码已实现，不建立第二套点赞事实 |
 | D8 | Counter counts/liked 合并为一个页面 pipeline | 当前两个独立 pipeline 可直接收敛，减少 Redis RTT |
 | D9 | Cassandra 使用普通幂等 upsert，不用 LWT | 评论正文不可编辑；LWT Paxos 会损害写吞吐 |
@@ -877,6 +893,7 @@ commentOutboxExecutor（仅用于Kafka future协调，不承载持久队列）
 - Caffeine `maximumSize`。
 - Caffeine TTL 在 1–3 秒范围内的最终值。
 - `commentReadExecutor` 线程数和队列长度。
+- `comment-page-head` running/follower/failure TTL 可在不突破 result 30 秒、local replay 3 秒上限的前提下调优。
 - outbox batch size（初始 500）。
 - `comment-write` consumer concurrency（2/4/6/8 阶梯测试）。
 - Kafka `batch.size` 在 32–64KiB 的最终值。
@@ -890,3 +907,4 @@ commentOutboxExecutor（仅用于Kafka future协调，不承载持久队列）
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | `0.1.0` | 2026-08-06 | 初版 frozen；完成 G1–G7 grill，冻结单机三级缓存、统一评论 outbox、Cassandra-first 短事务、完整读写链路和相对性能验收边界 |
+| `0.1.1` | 2026-08-06 | 用户追加 G8/G9：评论页直接复用现有 `DistributedSingleFlightService` 的 distributed stage，不新增本地 singleflight；取消旧 `comment_write_outbox` 数据回填迁移，改为旧 dispatcher 排空后 clean cutover，旧表非空时阻塞切换 |
