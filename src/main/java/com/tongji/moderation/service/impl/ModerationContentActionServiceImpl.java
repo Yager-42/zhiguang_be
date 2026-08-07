@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.tongji.comment.mapper.CommentMapper;
+import com.tongji.comment.service.impl.CommentMutationService;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.common.id.IdNamespace;
@@ -42,6 +43,7 @@ public class ModerationContentActionServiceImpl implements ModerationContentActi
     private final StringRedisTemplate redisTemplate;
     private final Cache<String, KnowPostDetailResponse> detailCache;
     private final Cache<String, FeedPageResponse> feedPublicCache;
+    private final CommentMutationService commentMutationService;
 
     public ModerationContentActionServiceImpl(KnowPostMapper knowPostMapper,
                                               CommentMapper commentMapper,
@@ -50,7 +52,8 @@ public class ModerationContentActionServiceImpl implements ModerationContentActi
                                               ObjectMapper objectMapper,
                                               StringRedisTemplate redisTemplate,
                                               @Qualifier("knowPostDetailCache") Cache<String, KnowPostDetailResponse> detailCache,
-                                              @Qualifier("feedPublicCache") Cache<String, FeedPageResponse> feedPublicCache) {
+                                              @Qualifier("feedPublicCache") Cache<String, FeedPageResponse> feedPublicCache,
+                                              CommentMutationService commentMutationService) {
         this.knowPostMapper = knowPostMapper;
         this.commentMapper = commentMapper;
         this.outboxMapper = outboxMapper;
@@ -59,6 +62,7 @@ public class ModerationContentActionServiceImpl implements ModerationContentActi
         this.redisTemplate = redisTemplate;
         this.detailCache = detailCache;
         this.feedPublicCache = feedPublicCache;
+        this.commentMutationService = commentMutationService;
     }
 
     @Override
@@ -73,10 +77,7 @@ public class ModerationContentActionServiceImpl implements ModerationContentActi
             return;
         }
         if (ModerationTargetType.COMMENT.equals(report.getTargetType())) {
-            int updated = commentMapper.softDeleteForModeration(targetId);
-            if (updated == 0) {
-                assertCommentAlreadyDeleted(targetId);
-            }
+            commentMutationService.moderate(targetId);
             return;
         }
         throw new BusinessException(ErrorCode.BAD_REQUEST, "审核目标类型非法");

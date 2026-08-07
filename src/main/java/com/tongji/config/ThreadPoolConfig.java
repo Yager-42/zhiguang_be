@@ -1,5 +1,6 @@
 package com.tongji.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.TaskExecutor;
@@ -34,6 +35,24 @@ public class ThreadPoolConfig {
     @Bean(name = "reconciliationExecutor")
     public TaskExecutor reconciliationExecutor() {
         return buildExecutor(2, 4, 100, 60, "reconciliation-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
+    }
+
+    @Bean(name = "commentReadExecutor")
+    public TaskExecutor commentReadExecutor(
+            @Value("${comment.executor.read.core-size:8}") int coreSize,
+            @Value("${comment.executor.read.max-size:16}") int maxSize,
+            @Value("${comment.executor.read.queue-capacity:200}") int queueCapacity) {
+        return buildExecutor(coreSize, maxSize, queueCapacity, 60, "comment-read-",
+                new ThreadPoolExecutor.CallerRunsPolicy(), 60);
+    }
+
+    @Bean(name = "commentOutboxExecutor")
+    public TaskExecutor commentOutboxExecutor(
+            @Value("${comment.executor.outbox.core-size:2}") int coreSize,
+            @Value("${comment.executor.outbox.max-size:4}") int maxSize,
+            @Value("${comment.executor.outbox.queue-capacity:50}") int queueCapacity) {
+        return buildExecutor(coreSize, maxSize, queueCapacity, 60, "comment-outbox-",
+                new ThreadPoolExecutor.CallerRunsPolicy(), 60);
     }
 
     private ThreadPoolTaskExecutor buildExecutor(int corePoolSize,

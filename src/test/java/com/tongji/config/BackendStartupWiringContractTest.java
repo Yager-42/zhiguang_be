@@ -19,6 +19,7 @@ import com.tongji.promotion.bprime.service.PromotionDecisionProjectionService;
 import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
 import com.tongji.reconciliation.executor.PromotionDecisionProjectionReconciler;
+import com.tongji.wallet.service.ContentRewardService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -41,6 +42,7 @@ class BackendStartupWiringContractTest {
                 .withBean(IdService.class, () -> mock(IdService.class))
                 .withBean(ContentPublishedPublisher.class, () -> mock(ContentPublishedPublisher.class))
                 .withBean(ResilienceGuard.class, () -> mock(ResilienceGuard.class))
+                .withBean(ContentRewardService.class, () -> mock(ContentRewardService.class))
                 .withBean(PublishAttemptService.class)
                 .withBean(GorseProperties.class)
                 .withBean(GorseClient.class)

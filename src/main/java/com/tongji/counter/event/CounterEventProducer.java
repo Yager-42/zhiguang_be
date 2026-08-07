@@ -32,4 +32,15 @@ public class CounterEventProducer {
             // 生产异常不抛出影响主流程；可接入告警
         }
     }
+
+    public void publishReliable(CounterEvent event) {
+        try {
+            String payload = objectMapper.writeValueAsString(event);
+            kafka.send(CounterTopics.EVENTS, event.getEntityId(), payload).join();
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("counter event serialization failed", exception);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("counter event publish failed", exception);
+        }
+    }
 }

@@ -7,6 +7,8 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -70,11 +72,14 @@ public class CassandraTextStorageService implements TextStorageService {
 
     @Override
     public void saveCommentText(long commentId, String body) throws TextWriteException {
+        saveCommentTextIdempotent(commentId, body, LocalDateTime.now());
+    }
+
+    @Override
+    public void saveCommentTextIdempotent(long commentId, String body, LocalDateTime occurredAt) throws TextWriteException {
         try {
-            int version = commentTextRepository.findById(commentId)
-                    .map(CommentText::getVersion)
-                    .orElse(0) + 1;
-            commentTextRepository.save(new CommentText(commentId, body, version, Instant.now()));
+            Instant updatedAt = occurredAt.atZone(ZoneId.systemDefault()).toInstant();
+            commentTextRepository.save(new CommentText(commentId, body, 1, updatedAt));
         } catch (RuntimeException ex) {
             throw new TextWriteException("Failed to save comment text for commentId=" + commentId, ex);
         }

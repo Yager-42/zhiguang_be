@@ -198,8 +198,6 @@ class CassandraTextStorageServiceTest {
                 commentTextRepository,
                 restTemplate
         );
-        when(commentTextRepository.findById(201L)).thenReturn(Optional.empty());
-
         service.saveCommentText(201L, "comment-v1");
 
         ArgumentCaptor<CommentText> captor = ArgumentCaptor.forClass(CommentText.class);
@@ -212,22 +210,20 @@ class CassandraTextStorageServiceTest {
     }
 
     @Test
-    void saveCommentTextOverwriteIncrementsVersion() {
+    void saveCommentTextReplayKeepsDeterministicVersionWithoutReadBeforeWrite() {
         StubRestTemplate restTemplate = new StubRestTemplate();
         CassandraTextStorageService service = new CassandraTextStorageService(
                 postTextRepository,
                 commentTextRepository,
                 restTemplate
         );
-        CommentText existing = new CommentText(201L, "old", 8, Instant.parse("2026-01-01T00:00:00Z"));
-        when(commentTextRepository.findById(201L)).thenReturn(Optional.of(existing));
-
         service.saveCommentText(201L, "comment-v2");
 
         ArgumentCaptor<CommentText> captor = ArgumentCaptor.forClass(CommentText.class);
         verify(commentTextRepository).save(captor.capture());
-        assertThat(captor.getValue().getVersion()).isEqualTo(9);
+        assertThat(captor.getValue().getVersion()).isEqualTo(1);
         assertThat(captor.getValue().getBody()).isEqualTo("comment-v2");
+        verify(commentTextRepository, never()).findById(201L);
     }
 
     @Test
@@ -238,7 +234,6 @@ class CassandraTextStorageServiceTest {
                 commentTextRepository,
                 restTemplate
         );
-        when(commentTextRepository.findById(201L)).thenReturn(Optional.empty());
         when(commentTextRepository.save(any(CommentText.class))).thenThrow(new RuntimeException("write failed"));
 
         assertThatThrownBy(() -> service.saveCommentText(201L, "comment"))

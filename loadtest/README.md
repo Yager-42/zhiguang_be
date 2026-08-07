@@ -194,7 +194,31 @@ checks:           99.88%
 
 每档记录：**QPS（http_reqs 的 /s）、P95/P99、错误率** → 填压测方案第 7 节模板。
 
-### 5.3 判定（写报告时按此口径）
+### 5.3 评论单机吞吐专项
+
+`comment-throughput.sh` 会在 k6 `setup` 阶段预先登录 `TOKEN_POOL` 个用户；加压阶段只复用 token，不把登录请求混入评论链路。除 drain 场景外，每轮先按目标 QPS 预热 `WARMUP_SECONDS`，随后再运行 `HOLD` 指定的稳态测量窗口。专项汇总中的 QPS、评论读 P95/P99 和业务错误率只统计稳态窗口。
+
+脚本每次启动时默认暂停 app，将四个 `comment-events` 压测消费组推进到 Topic 最新 offset，再启动 app 并确认各分区 offset 已提交且 lag 为 0；校验失败会拒绝开跑。该行为只用于隔离压测环境中的历史副作用事件，可用 `RESET_EVENT_GROUP_OFFSETS=0` 关闭，不能用于生产环境。
+
+```bash
+RATE=2000 HOLD=30s WARMUP_SECONDS=10 TOKEN_POOL=32 ./comment-throughput.sh mixed
+```
+
+每次脚本启动默认先清理压测用户产生的旧评论、待处理记录、对应 outbox 和评论缓存，然后将四个
+`comment-events` 消费组推进到最新 offset。应用恢复健康后，Kafka lag 与 Hikari pending 必须连续
+三个采样周期保持为 0 才会开压。可分别用 `RESET_COMMENT_DATA=0`、
+`RESET_EVENT_GROUP_OFFSETS=0` 关闭清理或 offset 重置。
+清理评论数据后必须保留 `WARMUP_SECONDS>0`，否则冷缓存、连接池和 JVM 初始化延迟会混入稳态
+P95/P99；只有明确测试冷启动时才设置 `ALLOW_COLD_MEASUREMENT=1`。产物中的
+`measurement_mode` 会标记本轮是 `steady-after-warmup` 还是 `cold-start`。
+`BASE_URL` 供 k6 容器访问应用，`SUT_BASE_URL`（默认 `http://localhost:8080`）供 WSL
+侧的 Actuator 门禁和指标采样使用，两者不要混用。
+压测后可运行 `./comment-throughput.sh idle`，等待事件自然消费至 lag=0 且 Hikari pending=0；
+该命令不会清数据或重置 offset。
+
+`VUS` 是最大 VU，默认等于 `RATE`；`PREALLOCATED_VUS` 默认等于 `VUS`，在场景开始前完成 VU 初始化，避免测量中动态扩容。VU 不执行登录，统一复用 setup 阶段创建的 token 池。SUT 采样默认每 10 秒一次，读取 Redis/MySQL 的合并状态和应用已缓存的 Actuator 指标；`COLLECT_KAFKA_LAG=1` 才会额外调用单个消费组的 Kafka CLI。容量测试默认不实时写入体积很大的 k6 原始 JSON；需要逐请求时序诊断时显式设置 `RAW_JSON=1`。
+
+### 5.4 判定（写报告时按此口径）
 
 | 信号 | 含义 |
 |---|---|
@@ -218,6 +242,7 @@ checks:           99.88%
 | `K6_DOCKER=1` 时连不上应用 | BASE_URL 用了 localhost | 容器模式自动切 host.docker.internal；手动覆盖 `BASE_URL=http://host.docker.internal:8080` |
 | `loadgen-*.tsv` cpu_pct 高 | 压测机吃紧 | 降 VU / 用 RATE 模式 / 收紧 K6_CPUS 后重测 |
 | 帖子翻页结果不变 | Feed 三级缓存生效中 | 正常；看 feed.public 命中场景的 QPS 即为缓存命中上限 |
+| k6 出现负 rate、约 49s 假延迟或 Snowflake `ClockBackwardException` | Windows Time 服务未同步；WSL 先继承主机快时钟，再被 Linux NTP 阶跃回拨 | 管理员 PowerShell 执行 `sc.exe config W32Time start= auto`、`sc.exe start W32Time`、`w32tm /config /manualpeerlist:"ntp.aliyun.com,0x9 time.windows.com,0x9" /syncfromflags:manual /update`、`w32tm /resync /rediscover`，随后 `wsl --shutdown`；`comment-throughput.sh` 会在偏差超过 1 秒时拒绝开跑 |
 
 ## 7. 参数速查表（全部可选，均有默认值）
 

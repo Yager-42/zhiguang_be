@@ -138,30 +138,28 @@ CREATE TABLE IF NOT EXISTS pending_comments (
     create_time DATETIME(3) NOT NULL,
     update_time DATETIME(3) NOT NULL,
     PRIMARY KEY (pending_comment_id),
-    UNIQUE KEY uk_pending_comment_client_request (creator_id, client_request_id)
+    UNIQUE KEY uk_pending_comment_client_request (creator_id, client_request_id),
+    KEY idx_pending_comment_status_created (status, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS comment_write_outbox (
-    comment_id BIGINT UNSIGNED NOT NULL,
-    post_id BIGINT UNSIGNED NOT NULL,
-    root_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
-    parent_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
-    creator_id BIGINT UNSIGNED NOT NULL,
-    client_request_id VARCHAR(64) NOT NULL,
-    body TEXT NOT NULL,
-    state VARCHAR(16) NOT NULL DEFAULT 'pending',
-    attempt_count INT NOT NULL DEFAULT 0,
-    next_attempt_at DATETIME(3) NOT NULL,
+CREATE TABLE IF NOT EXISTS comment_outbox (
+    event_id BIGINT UNSIGNED NOT NULL,
+    event_type VARCHAR(40) NOT NULL,
+    aggregate_id BIGINT UNSIGNED NOT NULL,
+    payload JSON NOT NULL,
+    state TINYINT NOT NULL DEFAULT 0,
+    retry_count INT NOT NULL DEFAULT 0,
+    next_attempt_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     claim_token VARCHAR(64) NULL,
-    claim_until DATETIME(3) NULL,
-    last_error VARCHAR(512) NULL,
+    claimed_until DATETIME(3) NULL,
+    last_error VARCHAR(500) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     published_at DATETIME(3) NULL,
-    created_at DATETIME(3) NOT NULL,
-    updated_at DATETIME(3) NOT NULL,
-    PRIMARY KEY (comment_id),
-    UNIQUE KEY uk_comment_write_outbox_client (creator_id, client_request_id),
-    KEY idx_comment_write_outbox_ready (state, next_attempt_at, comment_id),
-    KEY idx_comment_write_outbox_claim (claim_token, state)
+    PRIMARY KEY (event_id),
+    UNIQUE KEY uk_comment_event (event_type, aggregate_id),
+    KEY idx_comment_outbox_ready (state, next_attempt_at, event_id),
+    KEY idx_comment_outbox_claim (claim_token, state),
+    KEY idx_comment_outbox_published (state, published_at, event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS reconciliation_task (
@@ -188,6 +186,7 @@ CREATE TABLE IF NOT EXISTS reconciliation_task (
     PRIMARY KEY (id),
     KEY idx_reconciliation_task_scheduled (status, next_execute_at),
     KEY idx_reconciliation_task_target (target_type, target_id, task_type),
+    KEY idx_reconciliation_task_dedupe_status (dedupe_scope, status),
     UNIQUE KEY uk_reconciliation_task_active_dedupe_scope (active_dedupe_scope)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

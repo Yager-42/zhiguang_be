@@ -29,6 +29,9 @@ public class CacheProperties {
 
         // 知文详情缓存配置
         private DetailCfg detailCfg = new DetailCfg();
+
+        // 评论首屏共享基础页缓存配置。
+        private CommentPageCfg commentPage = new CommentPageCfg();
     }
 
     @Data
@@ -55,6 +58,12 @@ public class CacheProperties {
         private int ttlSeconds = 30;
 
         // 最大条目数：超过后按 Caffeine 策略逐出。
+        private long maxSize = 5000;
+    }
+
+    @Data
+    public static class CommentPageCfg {
+        private int ttlSeconds = 3;
         private long maxSize = 5000;
     }
 

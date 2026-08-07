@@ -2,6 +2,15 @@
 
 Local code intelligence for this repository.
 
+## Development standards
+
+- All design, implementation, testing, and review work must follow
+  [`docs/standards/DEVELOPMENT_CODING_GUIDELINES.md`](docs/standards/DEVELOPMENT_CODING_GUIDELINES.md).
+- Architecture and data ownership must follow
+  [`docs/contracts/ARCHITECTURE_CONTRACT.md`](docs/contracts/ARCHITECTURE_CONTRACT.md).
+- When the two documents conflict, the architecture contract takes precedence. Update the documents before changing
+  an approved architecture or data-flow decision.
+
 ## Top tools
 
 - `codegraph_get_callers`: who calls a function

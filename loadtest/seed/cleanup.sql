@@ -13,6 +13,13 @@ DELETE FROM promotion_auction_command WHERE bidder_user_id >= @lo AND bidder_use
 DELETE FROM promotion_auction_window WHERE id = 3000002;
 DELETE FROM promotion_campaign WHERE id = 3000001;
 DELETE FROM publish_attempt WHERE creator_id >= @lo AND creator_id < @hi;
+DELETE FROM comment_outbox
+WHERE aggregate_id IN (
+    SELECT pending_comment_id FROM pending_comments WHERE creator_id >= @lo AND creator_id < @hi
+)
+OR aggregate_id IN (
+    SELECT comment_id FROM comments WHERE creator_id >= @lo AND creator_id < @hi
+);
 DELETE FROM comments WHERE creator_id >= @lo AND creator_id < @hi;
 DELETE FROM pending_comments WHERE creator_id >= @lo AND creator_id < @hi;
 DELETE FROM following WHERE from_user_id >= @lo AND from_user_id < @hi;

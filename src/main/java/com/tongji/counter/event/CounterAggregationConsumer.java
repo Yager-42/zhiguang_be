@@ -9,6 +9,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +32,9 @@ public class CounterAggregationConsumer {
     private final DefaultRedisScript<Long> decrScript;
     private final DefaultRedisScript<Long> aggregateScript;
     private final DefaultRedisScript<Long> cleanupScript;
+
+    @Value("${counter.event-dedupe-ttl-seconds:172800}")
+    private long eventDedupeTtlSeconds;
 
     // 使用 Redis Hash 作为持久化聚合桶：agg:{schema}:{etype}:{eid} ，field=idx ，value=delta
     public CounterAggregationConsumer(ObjectMapper objectMapper, StringRedisTemplate redis) {
@@ -65,8 +69,9 @@ public class CounterAggregationConsumer {
         try {
             // 增量与 dirty 索引在同一个 Lua 中提交，避免崩溃窗口丢失待刷实体。
             redis.execute(aggregateScript,
-                    List.of(aggKey, CounterKeys.aggregateDirtySetKey()),
-                    field, String.valueOf(evt.getDelta()));
+                    List.of(aggKey, CounterKeys.aggregateDirtySetKey(),
+                            CounterKeys.counterEventDedupeKey(evt.getEventId())),
+                    field, String.valueOf(evt.getDelta()), String.valueOf(eventDedupeTtlSeconds));
             ack.acknowledge();
         } catch (Exception ex) {
             // 不提交位点以便重试
@@ -136,6 +141,8 @@ public class CounterAggregationConsumer {
     }
 
     private static final String AGGREGATE_LUA = """
+            local accepted = redis.call('SET', KEYS[3], '1', 'NX', 'EX', ARGV[3])
+            if not accepted then return 0 end
             redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2])
             redis.call('SADD', KEYS[2], KEYS[1])
             return 1
