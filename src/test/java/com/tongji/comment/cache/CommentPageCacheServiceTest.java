@@ -95,6 +95,8 @@ class CommentPageCacheServiceTest {
 
         assertThat(result).isSameAs(expected);
         verify(singleFlightService).execute(anyString(), anyString(), any(), any());
+        verify(redisTemplate).executePipelined(any(org.springframework.data.redis.core.SessionCallback.class));
+        verify(redisTemplate).execute(any(org.springframework.data.redis.core.SessionCallback.class));
     }
 
     private CommentBasePage page(String commentId) {

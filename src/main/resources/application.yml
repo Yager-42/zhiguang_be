@@ -69,6 +69,8 @@ rocketmq:
     group: zhiguang-promotion-command-producer
 
 comment:
+  cache:
+    invalidation-window-ms: ${COMMENT_CACHE_INVALIDATION_WINDOW_MS:100}
   executor:
     read:
       core-size: ${COMMENT_READ_CORE_SIZE:8}

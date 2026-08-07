@@ -51,14 +51,15 @@ class CommentMaterializationServiceTest {
     @Test
     void insertsCommentTransitionsPendingAndCreatesAtomicEvent() {
         CommentOutboxEvent event = event();
-        when(pendingMapper.findById(101L)).thenReturn(pending("pending"));
+        PendingComment pending = pending("pending");
         when(commentMapper.insertIgnore(any(Comment.class))).thenReturn(1);
         when(pendingMapper.updateStatusIfCurrent(101L, "succeeded", "pending")).thenReturn(1);
         when(idService.nextId(IdNamespace.OUTBOX_EVENT)).thenReturn(301L);
 
-        service.finalizeMaterialization(event);
+        service.finalizeMaterialization(event, pending);
 
         verify(commentMapper).insertIgnore(any(Comment.class));
+        verify(pendingMapper, never()).findById(101L);
         verify(pendingMapper).updateStatusIfCurrent(101L, "succeeded", "pending");
         ArgumentCaptor<CommentOutbox> outbox = ArgumentCaptor.forClass(CommentOutbox.class);
         verify(outboxMapper).insertIgnore(outbox.capture());
@@ -70,14 +71,13 @@ class CommentMaterializationServiceTest {
     @Test
     void duplicateCommentValidatesCanonicalRowWithoutSecondInsertEffect() {
         CommentOutboxEvent event = event();
-        when(pendingMapper.findById(101L)).thenReturn(pending("succeeded"));
         when(commentMapper.insertIgnore(any(Comment.class))).thenReturn(0);
         when(commentMapper.findById(101L)).thenReturn(Comment.builder()
                 .commentId(101L).postId(9L).rootId(0L).parentId(0L).creatorId(7L)
                 .clientRequestId("client-1").createTime(event.occurredAt()).build());
         when(idService.nextId(IdNamespace.OUTBOX_EVENT)).thenReturn(302L);
 
-        service.finalizeMaterialization(event);
+        service.finalizeMaterialization(event, pending("succeeded"));
 
         verify(pendingMapper, never()).updateStatusIfCurrent(any(), any(), any());
         verify(outboxMapper).insertIgnore(any(CommentOutbox.class));
@@ -85,13 +85,27 @@ class CommentMaterializationServiceTest {
 
     @Test
     void rejectsEventThatDoesNotMatchCanonicalPendingRow() {
-        when(pendingMapper.findById(101L)).thenReturn(PendingComment.builder()
-                .pendingCommentId(101L).creatorId(8L).clientRequestId("client-1").status("pending").build());
+        PendingComment mismatched = PendingComment.builder()
+                .pendingCommentId(101L).creatorId(8L).clientRequestId("client-1").status("pending").build();
 
-        assertThatThrownBy(() -> service.finalizeMaterialization(event()))
+        assertThatThrownBy(() -> service.finalizeMaterialization(event(), mismatched))
                 .hasMessageContaining("canonical pending");
 
         verify(commentMapper, never()).insertIgnore(any(Comment.class));
+    }
+
+    @Test
+    void rereadsPendingOnlyWhenConditionalTransitionLosesRace() {
+        CommentOutboxEvent event = event();
+        when(commentMapper.insertIgnore(any(Comment.class))).thenReturn(1);
+        when(pendingMapper.updateStatusIfCurrent(101L, "succeeded", "pending")).thenReturn(0);
+        when(pendingMapper.findById(101L)).thenReturn(pending("succeeded"));
+        when(idService.nextId(IdNamespace.OUTBOX_EVENT)).thenReturn(303L);
+
+        service.finalizeMaterialization(event, pending("pending"));
+
+        verify(pendingMapper).findById(101L);
+        verify(outboxMapper).insertIgnore(any(CommentOutbox.class));
     }
 
     private CommentOutboxEvent event() {

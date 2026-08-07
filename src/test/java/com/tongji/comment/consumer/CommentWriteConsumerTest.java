@@ -47,14 +47,15 @@ class CommentWriteConsumerTest {
                 new ObjectMapper().findAndRegisterModules(), pendingMapper, textStorageService, finalizer,
                 mock(CommentMetrics.class));
         CommentOutboxEvent event = event();
-        when(pendingMapper.findById(101L)).thenReturn(PendingComment.builder()
-                .pendingCommentId(101L).creatorId(7L).clientRequestId("client-1").status("pending").build());
+        PendingComment pending = PendingComment.builder()
+                .pendingCommentId(101L).creatorId(7L).clientRequestId("client-1").status("pending").build();
+        when(pendingMapper.findById(101L)).thenReturn(pending);
 
         consumer.handle(event);
 
         var ordered = org.mockito.Mockito.inOrder(textStorageService, finalizer);
         ordered.verify(textStorageService).saveCommentTextIdempotent(101L, "hello", event.occurredAt());
-        ordered.verify(finalizer).finalizeMaterialization(event);
+        ordered.verify(finalizer).finalizeMaterialization(event, pending);
         assertThat(CommentWriteConsumer.class.getMethod("onMessage", String.class)
                 .getAnnotation(Transactional.class)).isNull();
     }
@@ -68,13 +69,14 @@ class CommentWriteConsumerTest {
                 new ObjectMapper().findAndRegisterModules(), pendingMapper, textStorageService, finalizer,
                 mock(CommentMetrics.class));
         CommentOutboxEvent event = event();
-        when(pendingMapper.findById(101L)).thenReturn(PendingComment.builder()
-                .pendingCommentId(101L).creatorId(7L).clientRequestId("client-1").status("pending").build());
+        PendingComment pending = PendingComment.builder()
+                .pendingCommentId(101L).creatorId(7L).clientRequestId("client-1").status("pending").build();
+        when(pendingMapper.findById(101L)).thenReturn(pending);
         org.mockito.Mockito.doThrow(new IllegalStateException("cassandra down"))
                 .when(textStorageService).saveCommentTextIdempotent(101L, "hello", event.occurredAt());
 
         assertThatThrownBy(() -> consumer.handle(event)).hasMessageContaining("cassandra down");
-        verify(finalizer, never()).finalizeMaterialization(event);
+        verify(finalizer, never()).finalizeMaterialization(event, pending);
     }
 
     @Test

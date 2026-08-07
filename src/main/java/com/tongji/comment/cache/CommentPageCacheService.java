@@ -126,21 +126,44 @@ public class CommentPageCacheService {
     public void write(String baseKey, String reverseIndexKey, CommentBasePage page) {
         try {
             if (page.items().isEmpty()) {
-                redisTemplate.opsForValue().set(CommentCacheKeys.indexEmpty(baseKey), "1",
-                        Duration.ofSeconds(ThreadLocalRandom.current().nextLong(5, 11)));
-                redisTemplate.opsForSet().add(reverseIndexKey, baseKey);
-                redisTemplate.expire(reverseIndexKey, Duration.ofMinutes(10));
+                Duration emptyTtl = Duration.ofSeconds(ThreadLocalRandom.current().nextLong(5, 11));
+                redisTemplate.executePipelined(new SessionCallback<>() {
+                    @Override
+                    public <K, V> Object execute(RedisOperations<K, V> operations) {
+                        @SuppressWarnings("unchecked")
+                        RedisOperations<String, String> stringOperations =
+                                (RedisOperations<String, String>) operations;
+                        stringOperations.opsForValue().set(CommentCacheKeys.indexEmpty(baseKey), "1", emptyTtl);
+                        stringOperations.opsForSet().add(reverseIndexKey, baseKey);
+                        stringOperations.expire(reverseIndexKey, Duration.ofMinutes(10));
+                        return null;
+                    }
+                });
                 return;
             }
+            List<SerializedCacheItem> serializedItems = new java.util.ArrayList<>(page.items().size());
             for (CommentBaseItem item : page.items()) {
-                redisTemplate.opsForValue().set(CommentCacheKeys.item(item.commentId()),
+                serializedItems.add(new SerializedCacheItem(
+                        CommentCacheKeys.item(item.commentId()),
                         objectMapper.writeValueAsString(item),
-                        Duration.ofSeconds(ThreadLocalRandom.current().nextLong(300, 601)));
+                        Duration.ofSeconds(ThreadLocalRandom.current().nextLong(300, 601))));
             }
             long indexTtlSeconds = ThreadLocalRandom.current().nextLong(20, 31);
             List<String> ids = page.items().stream().map(CommentBaseItem::commentId).toList();
             String cursor = page.nextCursorCreateTime() == null || page.nextCursorCommentId() == null
                     ? NULL_CURSOR : page.nextCursorCreateTime() + "|" + page.nextCursorCommentId();
+            redisTemplate.executePipelined(new SessionCallback<>() {
+                @Override
+                public <K, V> Object execute(RedisOperations<K, V> operations) {
+                    @SuppressWarnings("unchecked")
+                    RedisOperations<String, String> stringOperations =
+                            (RedisOperations<String, String>) operations;
+                    for (SerializedCacheItem item : serializedItems) {
+                        stringOperations.opsForValue().set(item.key(), item.value(), item.ttl());
+                    }
+                    return null;
+                }
+            });
             redisTemplate.execute(new SessionCallback<List<Object>>() {
                 @Override
                 public <K, V> List<Object> execute(RedisOperations<K, V> operations) {
@@ -148,6 +171,7 @@ public class CommentPageCacheService {
                     RedisOperations<String, String> stringOperations =
                             (RedisOperations<String, String>) operations;
                     stringOperations.multi();
+                    stringOperations.delete(CommentCacheKeys.indexEmpty(baseKey));
                     stringOperations.delete(CommentCacheKeys.indexIds(baseKey));
                     stringOperations.opsForList().rightPushAll(CommentCacheKeys.indexIds(baseKey), ids);
                     stringOperations.expire(CommentCacheKeys.indexIds(baseKey), Duration.ofSeconds(indexTtlSeconds));
@@ -174,5 +198,8 @@ public class CommentPageCacheService {
                 && LAST_ERROR_LOG_TIME.compareAndSet(previous, now)) {
             log.warn(message, exception);
         }
+    }
+
+    private record SerializedCacheItem(String key, String value, Duration ttl) {
     }
 }
