@@ -52,8 +52,7 @@ public class CommentMaterializationService {
     }
 
     @Transactional
-    public void finalizeMaterialization(CommentOutboxEvent event) {
-        PendingComment pending = pendingCommentMapper.findById(event.commentId());
+    public void finalizeMaterialization(CommentOutboxEvent event, PendingComment pending) {
         validatePending(event, pending);
 
         Comment candidate = toComment(event);
@@ -91,7 +90,7 @@ public class CommentMaterializationService {
                 .nextAttemptAt(now)
                 .createdAt(now)
                 .build());
-        eventPublisher.publishEvent(new CommentMutationEvent(CommentEventType.COMMENT_CREATED,
+        eventPublisher.publishEvent(new CommentMutationEvent(eventId, CommentEventType.COMMENT_CREATED,
                 source.commentId(), source.postId(), value(source.rootId()), value(source.parentId())));
     }
 

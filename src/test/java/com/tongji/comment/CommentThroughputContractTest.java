@@ -38,7 +38,9 @@ class CommentThroughputContractTest {
     @Test
     void onlyMysqlFinalizerOwnsMaterializationTransaction() throws Exception {
         assertThat(CommentMaterializationService.class
-                .getMethod("finalizeMaterialization", com.tongji.comment.event.CommentOutboxEvent.class)
+                .getMethod("finalizeMaterialization",
+                        com.tongji.comment.event.CommentOutboxEvent.class,
+                        com.tongji.comment.model.PendingComment.class)
                 .getAnnotation(Transactional.class)).isNotNull();
         assertThat(CommentWriteConsumer.class.getMethod("onMessage", String.class)
                 .getAnnotation(Transactional.class)).isNull();

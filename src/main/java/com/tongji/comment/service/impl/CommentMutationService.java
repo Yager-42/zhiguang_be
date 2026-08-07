@@ -74,7 +74,7 @@ public class CommentMutationService {
                 .nextAttemptAt(now)
                 .createdAt(now)
                 .build());
-        eventPublisher.publishEvent(new CommentMutationEvent(eventType, comment.getCommentId(),
+        eventPublisher.publishEvent(new CommentMutationEvent(eventId, eventType, comment.getCommentId(),
                 comment.getPostId(), value(comment.getRootId()), value(comment.getParentId())));
     }
 

@@ -217,7 +217,7 @@ comment-events / independent groups
 | Caffeine | new `commentPageCache` | 仅缓存 `CommentBasePage`；默认 max 5000、TTL 3 秒，可配置 |
 | Kafka | `comment-write`, new `comment-events`, `counter-events`, `comment-feedback` | outbox 批量发布；三个独立副作用 group；至少一次 + 幂等 |
 | Hikari | max pool 10 | listener 不再跨 Cassandra 持有连接；初始不扩池 |
-| Executors | new `commentReadExecutor`, `commentOutboxExecutor` | 有界；CallerRunsPolicy；不用 common pool |
+| Executors | new `commentReadExecutor`, `commentOutboxExecutor`, `commentCacheInvalidationScheduler` | 读/outbox 有界且使用 CallerRunsPolicy；缓存失效使用不接管 Spring 全局调度的专用单线程，按 100ms 窗口合并；不用 common pool |
 
 ### 2.4 Target code map
 
@@ -901,7 +901,7 @@ saveCommentTextIdempotent(commentId, body, occurredAt)
 **实现路径与事务顺序**
 
 ```text
-@Transactional finalizeMaterialization(event)
+@Transactional finalizeMaterialization(event, validatedPending)
 -> idempotent insert comments; duplicate -> read and verify canonical fields
 -> conditional pending pending->succeeded; already succeeded allowed only if same comment
 -> insert COMMENT_CREATED outbox with new stable OUTBOX eventId

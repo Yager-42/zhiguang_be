@@ -82,7 +82,7 @@ public class CommentWriteConsumer {
         }
         long finalizerStart = System.nanoTime();
         try {
-            materializationService.finalizeMaterialization(event);
+            materializationService.finalizeMaterialization(event, pending);
             metrics.materialization("mysql_finalizer", "success",
                     Duration.ofNanos(System.nanoTime() - finalizerStart));
         } catch (RuntimeException exception) {
