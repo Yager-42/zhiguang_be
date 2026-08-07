@@ -86,3 +86,24 @@ FROM promotion_campaign WHERE id = 3000001;
 
 SELECT 'promotion-window-open' AS check_name, COUNT(*) AS actual
 FROM promotion_auction_window WHERE id = 3000002 AND status = 'OPEN';
+
+-- 13. 评论链路完整性与状态分布
+SELECT 'orphan-comment-creator' AS check_name, COUNT(*) AS violations
+FROM comments c LEFT JOIN users u ON u.id = c.creator_id
+WHERE u.id IS NULL;
+
+SELECT 'orphan-pending-creator' AS check_name, COUNT(*) AS violations
+FROM pending_comments p LEFT JOIN users u ON u.id = p.creator_id
+WHERE u.id IS NULL;
+
+SELECT 'orphan-comment-outbox' AS check_name, COUNT(*) AS violations
+FROM comment_outbox o
+LEFT JOIN pending_comments p ON p.pending_comment_id = o.aggregate_id
+LEFT JOIN comments c ON c.comment_id = o.aggregate_id
+WHERE p.pending_comment_id IS NULL AND c.comment_id IS NULL;
+
+SELECT 'pending-status-distribution' AS check_name, status, COUNT(*) AS actual
+FROM pending_comments GROUP BY status ORDER BY status;
+
+SELECT 'outbox-state-distribution' AS check_name, event_type, state, COUNT(*) AS actual
+FROM comment_outbox GROUP BY event_type, state ORDER BY event_type, state;
