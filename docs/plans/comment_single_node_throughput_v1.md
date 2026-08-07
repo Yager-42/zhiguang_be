@@ -4,9 +4,9 @@
 |------|-----|
 | **plan_id** | `comment-single-node-throughput-v1` |
 | **plan_version** | `0.1.1` |
-| **status** | **ready - implementation not started** |
+| **status** | **completed - implementation and verification complete** |
 | **created** | 2026-08-06 |
-| **updated** | 2026-08-06 |
+| **updated** | 2026-08-07 |
 | **feature** | [`comment_single_node_throughput_v1.md`](../features/comment_single_node_throughput_v1.md) frozen v0.1.1 |
 | **code baseline** | Git `3468b38`；`com.tongji.comment`、`com.tongji.counter`、`com.tongji.cache`、`com.tongji.storage.text`、moderation、wallet、`application.yml`、`db/schema.sql`、`docker-compose.yml`、`loadtest/` |
 | **deployment boundary** | 1 Spring Boot App + 1 MySQL + 1 Redis + 1 Kafka broker + 1 Cassandra；不得用扩容获得验收结果 |
@@ -823,12 +823,12 @@ READY(0), next_attempt_at <= now
 
 **任务**
 
-published 事件保留 24 小时后每批最多清理 1000 行，并暴露 outbox 核心指标。
+published 事件保留 24 小时后每批最多清理 1000 行，cleaner 默认每 24 小时运行一次，并暴露 outbox 核心指标。
 
 **动手前必须理清**
 
 - 确认 cleaner 与 dispatcher scheduler 不共享会阻塞发送的单线程 executor。
-- 确认 ready index 不支持 published_at 清理时是否需要额外索引；只在 EXPLAIN 证明需要时加最小索引。
+- EXPLAIN 已证明 ready index 无法支持 published_at 清理；使用 `(state, published_at, event_id)` 联合索引避免大表扫描和 filesort。
 - 评估 metric 查询频率，禁止每次 Prometheus scrape 发多个大表 COUNT。
 
 **实现路径**
@@ -1342,17 +1342,17 @@ rg -n "postId.*send|send\([^,]+,[[:space:]]*String\.valueOf\([^)]*post" src/main
 
 ### V1.5 Offline completion gate
 
-- [ ] API/DTO/cursor/delete placeholder contract green。
-- [ ] L1/L2 不存 user liked；缺 fragment 整页 miss。
-- [ ] Counter 页面读取一次 pipeline。
-- [ ] 评论页只调用现有 `DistributedSingleFlightService`；owner/follower/result/failure/heartbeat/takeover 有界，result/local replay TTL 不超过 30 秒/3 秒。
-- [ ] submit 事务不调用 Kafka/Cassandra/Redis/Counter/Wallet。
-- [ ] dispatcher 无逐条 `.get()`/UPDATE，partial subset 正确。
-- [ ] write listener 无 `@Transactional` 和同步副作用。
-- [ ] finalizer 只有短 MySQL 事务且 created outbox 原子。
-- [ ] Counter/Reward/Feedback 三 group 独立且可证明幂等/重试。
-- [ ] old production outbox implementation removed。
-- [ ] full Maven suite 无新增失败。
+- [x] API/DTO/cursor/delete placeholder contract green。
+- [x] L1/L2 不存 user liked；缺 fragment 整页 miss。
+- [x] Counter 页面读取一次 pipeline。
+- [x] 评论页只调用现有 `DistributedSingleFlightService`；owner/follower/result/failure/heartbeat/takeover 有界，result/local replay TTL 不超过 30 秒/3 秒。
+- [x] submit 事务不调用 Kafka/Cassandra/Redis/Counter/Wallet。
+- [x] dispatcher 无逐条 `.get()`/UPDATE，partial subset 正确。
+- [x] write listener 无 `@Transactional` 和同步副作用。
+- [x] finalizer 只有短 MySQL 事务且 created outbox 原子。
+- [x] Counter/Reward/Feedback 三 group 独立且可证明幂等/重试。
+- [x] old production outbox implementation removed。
+- [x] full Maven suite 无新增失败。
 
 ## 12. Live verification
 
@@ -1432,26 +1432,26 @@ Gate：F1-F6、F10-F12、G4/G5/G6；任何吞异常导致的丢 event 都失败�
 
 ## 13. Final exit checklist
 
-- [ ] frozen feature version/status 未变化；如变化，plan 已先更新并重新审查。
-- [ ] HTTP URL、202/status、DTO、cursor、deleted placeholder 完全兼容。
-- [ ] 无 cursor 第一页使用 Caffeine -> Redis fragments -> MySQL/Cassandra。
-- [ ] Caffeine/Redis 只存 `CommentBasePage/Item` 基础数据，不含 user liked。
-- [ ] Counter counts/liked 单页面 pipeline；cold Cassandra/Counter 并发。
-- [ ] 评论页复用现有 distributed singleflight；没有第二套评论本地实现，result/local replay TTL 分别不超过 30 秒/3 秒；executor、Caffeine、Kafka in-flight 全部有界。
-- [ ] 创建/回复/删除/审核失效正确，主动失效失败时最大陈旧不超过 30 秒。
-- [ ] `comment_outbox` 原子承载 WRITE_REQUESTED/CREATED/DELETED/MODERATED。
-- [ ] dispatcher 批量 claim/send/update，partial success 正确，published 保留 24h 后小批清理。
-- [ ] Cassandra comment blind idempotent upsert，无读前写/LWT。
-- [ ] write listener 无 JDBC 长事务；finalizer 是真实代理的短 MySQL 事务。
-- [ ] CREATED 与 comments + pending succeeded 同事务，重复消息不重复事件。
-- [ ] Counter/Reward/Feedback 三个独立 group，不在物化线程同步执行。
-- [ ] side effects 对 duplicate CREATED 可证明幂等；Feedback send failure 可重试。
-- [ ] DLT 后 pending failed；DLT 更新失败可观测。
-- [ ] 不因 backlog 返回 429/503；持续过载只增长持久 backlog，不增长无界 JVM 队列。
-- [ ] legacy `comment_write_outbox` production table/code/wiring 已 clean cutover 删除。
-- [ ] 未实现旧 outbox 数据迁移；cutover 证据证明旧 dispatcher 先排空，非空会阻塞。
-- [ ] offline 全绿；live cache/write/fault gates 全绿且无 required skip。
-- [ ] 5 轮 baseline/candidate 报告满足 P1-P8，拓扑始终单机单实例。
+- [x] frozen feature version/status 未变化；如变化，plan 已先更新并重新审查。
+- [x] HTTP URL、202/status、DTO、cursor、deleted placeholder 完全兼容。
+- [x] 无 cursor 第一页使用 Caffeine -> Redis fragments -> MySQL/Cassandra。
+- [x] Caffeine/Redis 只存 `CommentBasePage/Item` 基础数据，不含 user liked。
+- [x] Counter counts/liked 单页面 pipeline；cold Cassandra/Counter 并发。
+- [x] 评论页复用现有 distributed singleflight；没有第二套评论本地实现，result/local replay TTL 分别不超过 30 秒/3 秒；executor、Caffeine、Kafka in-flight 全部有界。
+- [x] 创建/回复/删除/审核失效正确，主动失效失败时最大陈旧不超过 30 秒。
+- [x] `comment_outbox` 原子承载 WRITE_REQUESTED/CREATED/DELETED/MODERATED。
+- [x] dispatcher 批量 claim/send/update，partial success 正确，published 保留 24h 后小批清理。
+- [x] Cassandra comment blind idempotent upsert，无读前写/LWT。
+- [x] write listener 无 JDBC 长事务；finalizer 是真实代理的短 MySQL 事务。
+- [x] CREATED 与 comments + pending succeeded 同事务，重复消息不重复事件。
+- [x] Counter/Reward/Feedback 三个独立 group，不在物化线程同步执行。
+- [x] side effects 对 duplicate CREATED 可证明幂等；Feedback send failure 可重试。
+- [x] DLT 后 pending failed；DLT 更新失败可观测。
+- [x] 不因 backlog 返回 429/503；持续过载只增长持久 backlog，不增长无界 JVM 队列。
+- [x] legacy `comment_write_outbox` production table/code/wiring 已 clean cutover 删除。
+- [x] 未实现旧 outbox 数据迁移；cutover 证据证明旧 dispatcher 先排空，非空会阻塞。
+- [x] offline 全绿；live cache/write/fault gates 全绿且无 required skip。
+- [x] 5 轮 baseline/candidate 报告满足 P1-P8，拓扑始终单机单实例。
 
 ## 14. Revision history
 
@@ -1459,3 +1459,4 @@ Gate：F1-F6、F10-F12、G4/G5/G6；任何吞异常导致的丢 event 都失败�
 |---------|------|--------|
 | `0.1.0` | 2026-08-06 | 从 frozen feature v0.1.0 与 Git `3468b38` 代码基线建立逐任务实施说明；补齐当前/目标调用链、DB/Redis/Kafka/Cassandra 落点、迁移/clean cutover、每任务 context/test/closeout，以及 offline/live/5-run performance gates |
 | `0.1.1` | 2026-08-06 | 同步 feature v0.1.1 G8/G9：A4 改为直接复用现有 `DistributedSingleFlightService` 的 `comment-page-head` distributed stage，锁定 result/local replay 30 秒/3 秒上限并删除评论本地 map 方案；B1/D5/V2 删除旧 outbox 数据迁移，改为旧 dispatcher 先排空、非空阻塞的 clean cutover |
+| `0.1.2` | 2026-08-07 | 完成实现、离线/真实依赖/故障/性能验收；P1-P8 结果与最终镜像补充复测见 `loadtest/reports/comment-throughput-20260807.md` |
