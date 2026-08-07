@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.tongji.knowpost.api.dto.FeedPageResponse;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
+import com.tongji.comment.cache.CommentBasePage;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -52,6 +53,15 @@ public class CacheConfig {
         return Caffeine.newBuilder()
                 .maximumSize(props.getL2().getDetailCfg().getMaxSize())
                 .expireAfterWrite(Duration.ofSeconds(props.getL2().getDetailCfg().getTtlSeconds()))
+                .build();
+    }
+
+    @Bean("commentPageCache")
+    public Cache<String, CommentBasePage> commentPageCache(CacheProperties props) {
+        CacheProperties.CommentPageCfg config = props.getL2().getCommentPage();
+        return Caffeine.newBuilder()
+                .maximumSize(config.getMaxSize())
+                .expireAfterWrite(Duration.ofSeconds(config.getTtlSeconds()))
                 .build();
     }
 }

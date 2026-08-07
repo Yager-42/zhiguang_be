@@ -49,6 +49,14 @@ public interface CounterService {
     Map<String, Map<String, Long>> getCountsBatch(String entityType, List<String> entityIds, List<String> metrics);
 
     /**
+     * 使用一次 Redis pipeline 读取页面计数与请求用户点赞态。
+     */
+    Map<String, CommentPageCounterState> getPageStateBatch(String entityType,
+                                                           List<String> entityIds,
+                                                           Long userId,
+                                                           List<String> metrics);
+
+    /**
      * 判断是否点赞/收藏（位图）。
      */
     boolean isLiked(String entityType, String entityId, long userId);

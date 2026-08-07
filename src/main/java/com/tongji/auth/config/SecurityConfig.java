@@ -27,7 +27,12 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers(
+                                "/actuator/health",
+                                "/actuator/info",
+                                "/actuator/metrics",
+                                "/actuator/metrics/**"
+                        ).permitAll()
                         .requestMatchers("/api/v1/knowposts/feed").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/knowposts/detail/*")
                         .permitAll()
