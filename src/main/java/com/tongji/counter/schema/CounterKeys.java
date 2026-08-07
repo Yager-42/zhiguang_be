@@ -27,4 +27,8 @@ public final class CounterKeys {
     public static String aggregateDirtySetKey() {
         return String.format("agg:%s:dirty", CounterSchema.SCHEMA_ID);
     }
+
+    public static String counterEventDedupeKey(String eventId) {
+        return "counter:event:dedupe:" + eventId;
+    }
 }

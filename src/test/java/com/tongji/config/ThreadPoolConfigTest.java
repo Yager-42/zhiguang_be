@@ -64,6 +64,10 @@ class ThreadPoolConfigTest {
                     "canal-outbox-", 2, 4, 50, ThreadPoolExecutor.AbortPolicy.class, true, 60);
             assertExecutor(context.getBean("reconciliationExecutor", ThreadPoolTaskExecutor.class),
                     "reconciliation-", 2, 4, 100, ThreadPoolExecutor.CallerRunsPolicy.class, true, 60);
+            assertExecutor(context.getBean("commentReadExecutor", ThreadPoolTaskExecutor.class),
+                    "comment-read-", 8, 16, 200, ThreadPoolExecutor.CallerRunsPolicy.class, true, 60);
+            assertExecutor(context.getBean("commentOutboxExecutor", ThreadPoolTaskExecutor.class),
+                    "comment-outbox-", 2, 4, 50, ThreadPoolExecutor.CallerRunsPolicy.class, true, 60);
             assertThat(ReflectionTestUtils.getField(bridge, "taskExecutor")).isSameAs(canalExecutor);
             assertThat(ReflectionTestUtils.getField(consumer, "taskExecutor")).isSameAs(relationEventExecutor);
         });

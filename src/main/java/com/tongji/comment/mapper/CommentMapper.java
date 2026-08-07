@@ -11,6 +11,8 @@ import java.util.List;
 public interface CommentMapper {
     int insert(Comment comment);
 
+    int insertIgnore(Comment comment);
+
     Comment findById(@Param("commentId") Long commentId);
 
     List<Comment> listTopLevelByPost(@Param("postId") Long postId,

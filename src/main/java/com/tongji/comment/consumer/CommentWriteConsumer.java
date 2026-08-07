@@ -2,143 +2,118 @@ package com.tongji.comment.consumer;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tongji.comment.event.CommentFeedbackEvent;
-import com.tongji.comment.event.CommentFeedbackProducer;
-import com.tongji.comment.event.CommentWriteEvent;
-import com.tongji.comment.mapper.CommentMapper;
+import com.tongji.comment.event.CommentEventType;
+import com.tongji.comment.event.CommentOutboxEvent;
 import com.tongji.comment.mapper.PendingCommentMapper;
-import com.tongji.comment.model.Comment;
 import com.tongji.comment.model.PendingComment;
-import com.tongji.counter.event.CounterEvent;
-import com.tongji.counter.event.CounterEventProducer;
-import com.tongji.counter.service.CounterService;
+import com.tongji.comment.service.impl.CommentMaterializationService;
+import com.tongji.comment.metrics.CommentMetrics;
 import com.tongji.storage.text.TextStorageService;
-import com.tongji.wallet.service.ContentRewardService;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Duration;
 
 @Component
 public class CommentWriteConsumer {
-    private static final int COMMENT_COUNT_IDX = 3;
-
     private final ObjectMapper objectMapper;
-    private final CommentMapper commentMapper;
     private final PendingCommentMapper pendingCommentMapper;
     private final TextStorageService textStorageService;
-    private final CounterEventProducer counterEventProducer;
-    private final CounterService counterService;
-    private final CommentFeedbackProducer commentFeedbackProducer;
-    private final ContentRewardService contentRewardService;
+    private final CommentMaterializationService materializationService;
+    private final CommentMetrics metrics;
 
     public CommentWriteConsumer(ObjectMapper objectMapper,
-                                CommentMapper commentMapper,
                                 PendingCommentMapper pendingCommentMapper,
                                 TextStorageService textStorageService,
-                                CounterEventProducer counterEventProducer,
-                                CounterService counterService,
-                                CommentFeedbackProducer commentFeedbackProducer,
-                                ContentRewardService contentRewardService) {
+                                CommentMaterializationService materializationService,
+                                CommentMetrics metrics) {
         this.objectMapper = objectMapper;
-        this.commentMapper = commentMapper;
         this.pendingCommentMapper = pendingCommentMapper;
         this.textStorageService = textStorageService;
-        this.counterEventProducer = counterEventProducer;
-        this.counterService = counterService;
-        this.commentFeedbackProducer = commentFeedbackProducer;
-        this.contentRewardService = contentRewardService;
+        this.materializationService = materializationService;
+        this.metrics = metrics;
     }
 
-    @RetryableTopic
+    @RetryableTopic(
+            attempts = "${comment.kafka.write-retry-attempts:10}",
+            backoff = @Backoff(
+                    delayExpression = "${comment.kafka.write-retry-delay-ms:1000}",
+                    multiplierExpression = "${comment.kafka.write-retry-multiplier:2}",
+                    maxDelayExpression = "${comment.kafka.write-retry-max-delay-ms:10000}"
+            ),
+            exclude = IllegalArgumentException.class
+    )
     @KafkaListener(
             topics = "${comment.kafka.write-topic:comment-write}",
-            groupId = "comment-write-consumer",
+            groupId = "${comment.kafka.write-group:comment-write-consumer}",
             containerFactory = "commentWriteKafkaListenerContainerFactory"
     )
-    @Transactional
     public void onMessage(String message) {
         handle(read(message));
     }
 
-    void handle(CommentWriteEvent event) {
-        PendingComment pending = pendingCommentMapper.findByCreatorAndClientRequestId(
-                event.creatorId(), event.clientRequestId());
+    void handle(CommentOutboxEvent event) {
+        if (event.eventType() != CommentEventType.COMMENT_WRITE_REQUESTED) {
+            throw new IllegalArgumentException("unexpected event type on comment-write topic");
+        }
+        PendingComment pending = pendingCommentMapper.findById(event.commentId());
         if (pending == null) {
             throw new IllegalStateException("missing pending comment");
         }
-        if ("succeeded".equals(pending.getStatus())
-                || !event.commentId().equals(pending.getPendingCommentId())) {
+        if ("succeeded".equals(pending.getStatus())) {
             return;
         }
-
-        Long commentId = pending.getPendingCommentId();
-        textStorageService.saveCommentText(commentId, event.body());
+        if (!event.commentId().equals(pending.getPendingCommentId())
+                || !event.creatorId().equals(pending.getCreatorId())
+                || !event.clientRequestId().equals(pending.getClientRequestId())
+                || "failed".equals(pending.getStatus())) {
+            throw new IllegalStateException("comment event does not match pending row");
+        }
+        long cassandraStart = System.nanoTime();
         try {
-            commentMapper.insert(comment(event));
-        } catch (DuplicateKeyException exception) {
-            counterService.initializeCounts("comment", String.valueOf(commentId));
-            pendingCommentMapper.updateStatus(commentId, "succeeded");
-            return;
+            textStorageService.saveCommentTextIdempotent(event.commentId(), event.body(), event.occurredAt());
+            metrics.materialization("cassandra", "success", Duration.ofNanos(System.nanoTime() - cassandraStart));
+        } catch (RuntimeException exception) {
+            metrics.materialization("cassandra", "failure", Duration.ofNanos(System.nanoTime() - cassandraStart));
+            throw exception;
         }
-
-        counterService.initializeCounts("comment", String.valueOf(commentId));
-        pendingCommentMapper.updateStatus(commentId, "succeeded");
-        counterEventProducer.publish(counter(event));
-        commentFeedbackProducer.publish(feedback(event));
-        // 评论正式写入成功后发积分奖励。REQUIRES_NEW 独立事务 + catch 在 service 内，失败不阻塞评论主流程。
-        contentRewardService.rewardCommentCreation(event.creatorId(), commentId);
+        long finalizerStart = System.nanoTime();
+        try {
+            materializationService.finalizeMaterialization(event);
+            metrics.materialization("mysql_finalizer", "success",
+                    Duration.ofNanos(System.nanoTime() - finalizerStart));
+        } catch (RuntimeException exception) {
+            metrics.materialization("mysql_finalizer", "failure",
+                    Duration.ofNanos(System.nanoTime() - finalizerStart));
+            throw exception;
+        }
     }
 
     @DltHandler
     public void onDlt(String message) {
-        onDlt(read(message));
+        CommentOutboxEvent event = read(message);
+        int updated = pendingCommentMapper.updateStatusIfCurrent(event.commentId(), "failed", "pending");
+        if (updated == 1) {
+            metrics.dlt("failed_pending");
+            return;
+        }
+        PendingComment current = pendingCommentMapper.findById(event.commentId());
+        if (current != null && "failed".equals(current.getStatus())) {
+            metrics.dlt("already_failed");
+            return;
+        }
+        metrics.dlt("update_failure");
+        throw new IllegalStateException("comment DLT could not transition pending row to failed");
     }
 
-    void onDlt(CommentWriteEvent event) {
-        pendingCommentMapper.updateStatusIfCurrent(event.commentId(), "failed", "pending");
-    }
-
-    private CommentWriteEvent read(String message) {
+    private CommentOutboxEvent read(String message) {
         try {
-            return objectMapper.readValue(message, CommentWriteEvent.class);
+            return objectMapper.readValue(message, CommentOutboxEvent.class);
         } catch (JsonProcessingException exception) {
-            throw new IllegalArgumentException("invalid comment write event", exception);
+            throw new IllegalArgumentException("invalid comment outbox event", exception);
         }
-    }
-
-    private Comment comment(CommentWriteEvent event) {
-        LocalDateTime now = LocalDateTime.now();
-        return Comment.builder()
-                .commentId(event.commentId())
-                .postId(event.postId())
-                .rootId(event.rootId())
-                .parentId(event.parentId())
-                .creatorId(event.creatorId())
-                .clientRequestId(event.clientRequestId())
-                .status(0)
-                .likeCount(0)
-                .replyCount(0)
-                .createTime(now)
-                .updateTime(now)
-                .build();
-    }
-
-    private CounterEvent counter(CommentWriteEvent event) {
-        if (event.parentId() != null && event.parentId() != 0L) {
-            return CounterEvent.of("comment", String.valueOf(event.rootId()), "comment",
-                    COMMENT_COUNT_IDX, event.creatorId(), 1);
-        }
-        return CounterEvent.of("knowpost", String.valueOf(event.postId()), "comment",
-                COMMENT_COUNT_IDX, event.creatorId(), 1);
-    }
-
-    private CommentFeedbackEvent feedback(CommentWriteEvent event) {
-        return new CommentFeedbackEvent(event.commentId(), event.postId(), event.rootId(), event.parentId(),
-                event.creatorId(), CommentFeedbackEvent.COMMENT);
     }
 }
