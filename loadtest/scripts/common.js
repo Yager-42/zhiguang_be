@@ -126,6 +126,17 @@ export function api(method, path, body, extraTags) {
   return res;
 }
 
+// Capacity tests authenticate before the timed scenarios and reuse these tokens.
+// A 401 is returned to the caller instead of triggering hidden login traffic.
+export function apiWithAccessToken(method, path, body, extraTags, accessToken) {
+  const tags = { name: path.split('?')[0], ...(extraTags || {}) };
+  const params = {
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    tags,
+  };
+  return http.request(method, `${BASE_URL}${path}`, body ? JSON.stringify(body) : null, params);
+}
+
 // ---------- 数据工具 ----------
 
 export function randomPostId() {

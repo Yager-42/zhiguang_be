@@ -26,6 +26,16 @@
         )
     </insert>
 
+    <insert id="insertIgnore" parameterType="com.tongji.comment.model.Comment">
+        INSERT IGNORE INTO comments (
+            comment_id, post_id, root_id, parent_id, creator_id, client_request_id,
+            status, like_count, reply_count, create_time, update_time
+        ) VALUES (
+            #{commentId}, #{postId}, #{rootId}, #{parentId}, #{creatorId}, #{clientRequestId},
+            #{status}, #{likeCount}, #{replyCount}, #{createTime}, #{updateTime}
+        )
+    </insert>
+
     <select id="findById" resultMap="CommentResultMap">
         SELECT *
         FROM comments

@@ -6,6 +6,7 @@ import com.tongji.counter.schema.CounterKeys;
 import com.tongji.counter.schema.CounterSchema;
 import com.tongji.counter.schema.BitmapShard;
 import com.tongji.counter.service.CounterService;
+import com.tongji.counter.service.CommentPageCounterState;
 import com.tongji.counter.event.CounterEvent;
 import com.tongji.counter.event.CounterEventProducer;
 import lombok.extern.slf4j.Slf4j;
@@ -15,9 +16,11 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.context.ApplicationEventPublisher;
 import org.redisson.api.RedissonClient;
+import org.redisson.api.RScript;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RateType;
 import org.redisson.api.RBucket;
+import org.redisson.client.codec.StringCodec;
 import org.springframework.beans.factory.annotation.Value;
 
 import java.nio.charset.StandardCharsets;
@@ -327,6 +330,81 @@ public class CounterServiceImpl implements CounterService {
         return out;
     }
 
+    @Override
+    public Map<String, CommentPageCounterState> getPageStateBatch(String entityType,
+                                                                  List<String> entityIds,
+                                                                  Long userId,
+                                                                  List<String> metrics) {
+        Map<String, CommentPageCounterState> result = new LinkedHashMap<>();
+        if (entityIds == null || entityIds.isEmpty()) {
+            return result;
+        }
+        List<String> requestedMetrics = metrics == null ? List.of() : metrics;
+        for (String metric : requestedMetrics) {
+            if (!CounterSchema.SUPPORTED_METRICS.contains(metric)) {
+                throw new IllegalArgumentException("Unsupported metric " + metric);
+            }
+        }
+
+        boolean includeLiked = userId != null && userId > 0;
+        List<String> keys = new ArrayList<>(includeLiked ? entityIds.size() * 2 : entityIds.size());
+        for (String entityId : entityIds) {
+            keys.add(CounterKeys.sdsKey(entityType, entityId));
+        }
+        List<String> arguments = new ArrayList<>(requestedMetrics.size() + 3);
+        arguments.add(String.valueOf(entityIds.size()));
+        arguments.add(String.valueOf(requestedMetrics.size()));
+        for (String metric : requestedMetrics) {
+            arguments.add(String.valueOf(CounterSchema.NAME_TO_IDX.get(metric) * CounterSchema.FIELD_SIZE));
+        }
+        if (includeLiked) {
+            long chunk = BitmapShard.chunkOf(userId);
+            for (String entityId : entityIds) {
+                keys.add(CounterKeys.bitmapKey("like", entityType, entityId, chunk));
+            }
+            arguments.add(String.valueOf(BitmapShard.bitOf(userId)));
+        }
+
+        // 单次只读脚本复用 Redisson 连接池，避免 pipeline 短连接和 Lettuce 单连接队头阻塞。
+        List<Object> scriptKeys = new ArrayList<>(keys);
+        List<?> values = redisson.getScript(StringCodec.INSTANCE).eval(
+                RScript.Mode.READ_ONLY,
+                PAGE_STATE_LUA,
+                RScript.ReturnType.MULTI,
+                scriptKeys,
+                arguments.toArray()
+        );
+        List<?> safeValues = values == null ? List.of() : values;
+        int valueIndex = 0;
+        for (String entityId : entityIds) {
+            Map<String, Long> counts = new LinkedHashMap<>();
+            for (String metric : requestedMetrics) {
+                counts.put(metric, numberAt(safeValues, valueIndex++));
+            }
+            boolean liked = includeLiked && numberAt(safeValues, valueIndex++) == 1L;
+            result.put(entityId, new CommentPageCounterState(counts, liked));
+        }
+        return result;
+    }
+
+    private long numberAt(List<?> values, int index) {
+        if (index >= values.size()) {
+            return 0L;
+        }
+        Object value = values.get(index);
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof CharSequence text) {
+            try {
+                return Long.parseLong(text.toString());
+            } catch (NumberFormatException exception) {
+                log.warn("Unexpected counter page state value: {}", text);
+            }
+        }
+        return 0L;
+    }
+
     /**
      * 是否点赞判定：基于分片位图在分片内做位测试。
      * 毫秒级读取，不依赖计数快照。
@@ -533,6 +611,36 @@ public class CounterServiceImpl implements CounterService {
               return 1
             end
             return -1
+            """;
+
+    // 一次读取页面内所有 SDS 计数和当前用户点赞位，避免为每个 HTTP 请求创建 pipeline 专用连接。
+    private static final String PAGE_STATE_LUA = """
+            local entityCount = tonumber(ARGV[1])
+            local metricCount = tonumber(ARGV[2])
+            local sdsKeys = {}
+            for entityIndex = 1, entityCount do
+              sdsKeys[entityIndex] = KEYS[entityIndex]
+            end
+            local sdsValues = redis.call('MGET', unpack(sdsKeys))
+            local includeLiked = #KEYS > entityCount
+            local bitOffset = includeLiked and tonumber(ARGV[metricCount + 3]) or 0
+            local result = {}
+            for entityIndex = 1, entityCount do
+              local raw = sdsValues[entityIndex]
+              for metricIndex = 1, metricCount do
+                local byteOffset = tonumber(ARGV[metricIndex + 2]) + 1
+                local count = 0
+                if raw and string.len(raw) >= byteOffset + 3 then
+                  local b1, b2, b3, b4 = string.byte(raw, byteOffset, byteOffset + 3)
+                  count = b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
+                end
+                table.insert(result, count)
+              end
+              if includeLiked then
+                table.insert(result, redis.call('GETBIT', KEYS[entityCount + entityIndex], bitOffset))
+              end
+            end
+            return result
             """;
 
     private static final class CounterSdsRebuildOverloadedException extends RejectedExecutionException {

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.comment.mapper.CommentOutboxMapper">
+    <resultMap id="CommentOutboxResultMap" type="com.tongji.comment.model.CommentOutbox">
+        <id property="eventId" column="event_id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="aggregateId" column="aggregate_id"/>
+        <result property="payload" column="payload"/>
+        <result property="state" column="state"/>
+        <result property="retryCount" column="retry_count"/>
+        <result property="nextAttemptAt" column="next_attempt_at"/>
+        <result property="claimToken" column="claim_token"/>
+        <result property="claimedUntil" column="claimed_until"/>
+        <result property="lastError" column="last_error"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="publishedAt" column="published_at"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.comment.model.CommentOutbox">
+        INSERT INTO comment_outbox
+            (event_id, event_type, aggregate_id, payload, state, retry_count, next_attempt_at, created_at)
+        VALUES
+            (#{eventId}, #{eventType}, #{aggregateId}, #{payload}, 0, 0, #{nextAttemptAt}, #{createdAt})
+    </insert>
+
+    <insert id="insertIgnore" parameterType="com.tongji.comment.model.CommentOutbox">
+        INSERT IGNORE INTO comment_outbox
+            (event_id, event_type, aggregate_id, payload, state, retry_count, next_attempt_at, created_at)
+        VALUES
+            (#{eventId}, #{eventType}, #{aggregateId}, #{payload}, 0, 0, #{nextAttemptAt}, #{createdAt})
+    </insert>
+
+    <update id="releaseExpiredClaims">
+        UPDATE comment_outbox
+        SET state = 0, claim_token = NULL, claimed_until = NULL
+        WHERE state = 1 AND claimed_until &lt; #{now}
+    </update>
+
+    <update id="claimReady">
+        UPDATE comment_outbox
+        SET state = 1, claim_token = #{claimToken}, claimed_until = #{claimedUntil}
+        WHERE state = 0 AND next_attempt_at &lt;= #{now}
+        ORDER BY next_attempt_at, event_id
+        LIMIT #{limit}
+    </update>
+
+    <select id="findClaimed" resultMap="CommentOutboxResultMap">
+        SELECT event_id, event_type, aggregate_id, payload, state, retry_count, next_attempt_at,
+               claim_token, claimed_until, last_error, created_at, published_at
+        FROM comment_outbox
+        WHERE state = 1 AND claim_token = #{claimToken}
+        ORDER BY event_id
+    </select>
+
+    <update id="markPublishedBatch">
+        UPDATE comment_outbox
+        SET state = 2, published_at = #{publishedAt}, claim_token = NULL,
+            claimed_until = NULL, last_error = NULL
+        WHERE state = 1 AND claim_token = #{claimToken}
+          AND event_id IN
+        <foreach collection="eventIds" item="eventId" open="(" separator="," close=")">
+            #{eventId}
+        </foreach>
+    </update>
+
+    <update id="markRetryBatch">
+        UPDATE comment_outbox
+        SET state = 0,
+            retry_count = CASE event_id
+            <foreach collection="retries" item="retry">
+                WHEN #{retry.eventId} THEN #{retry.retryCount}
+            </foreach>
+            END,
+            next_attempt_at = CASE event_id
+            <foreach collection="retries" item="retry">
+                WHEN #{retry.eventId} THEN #{retry.nextAttemptAt}
+            </foreach>
+            END,
+            last_error = CASE event_id
+            <foreach collection="retries" item="retry">
+                WHEN #{retry.eventId} THEN #{retry.lastError}
+            </foreach>
+            END,
+            claim_token = NULL,
+            claimed_until = NULL
+        WHERE state = 1 AND claim_token = #{claimToken}
+          AND event_id IN
+        <foreach collection="retries" item="retry" open="(" separator="," close=")">
+            #{retry.eventId}
+        </foreach>
+    </update>
+
+    <delete id="deletePublishedBefore">
+        DELETE FROM comment_outbox
+        WHERE state = 2 AND published_at &lt; #{cutoff}
+        ORDER BY published_at, event_id
+        LIMIT #{limit}
+    </delete>
+</mapper>

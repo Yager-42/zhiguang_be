@@ -27,4 +27,15 @@ public class CommentFeedbackProducer {
             // Feedback events are best-effort and must not fail the primary comment flow.
         }
     }
+
+    public void publishReliable(CommentFeedbackEvent event) {
+        try {
+            String payload = objectMapper.writeValueAsString(event);
+            kafkaTemplate.send(topic, String.valueOf(event.commentId()), payload).join();
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("comment feedback serialization failed", exception);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("comment feedback publish failed", exception);
+        }
+    }
 }

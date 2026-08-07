@@ -13,6 +13,10 @@ import org.springframework.beans.factory.annotation.Value;
 public class RedissonConfig {
     @Value("${counter.rebuild.lock.watchdog-ms:30000}")
     private long lockWatchdogMs;
+    @Value("${spring.data.redis.redisson.connection-pool-size:128}")
+    private int connectionPoolSize;
+    @Value("${spring.data.redis.redisson.connection-minimum-idle-size:32}")
+    private int connectionMinimumIdleSize;
 
     @Bean
     public RedissonClient redissonClient(RedisProperties redisProperties) {
@@ -20,7 +24,10 @@ public class RedissonConfig {
         // 配置 Redisson 的锁看门狗超时，用于自动续约锁
         config.setLockWatchdogTimeout(lockWatchdogMs);
         String address = "redis://" + redisProperties.getHost() + ":" + redisProperties.getPort();
-        SingleServerConfig single = config.useSingleServer().setAddress(address);
+        SingleServerConfig single = config.useSingleServer()
+                .setAddress(address)
+                .setConnectionPoolSize(connectionPoolSize)
+                .setConnectionMinimumIdleSize(connectionMinimumIdleSize);
 
         if (redisProperties.getPassword() != null && !redisProperties.getPassword().isEmpty()) {
             single.setPassword(redisProperties.getPassword());

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.tongji.comment.mapper.CommentMapper;
+import com.tongji.comment.service.impl.CommentMutationService;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
 import com.tongji.knowpost.api.dto.FeedPageResponse;
@@ -35,6 +36,7 @@ class ModerationContentActionServiceTest {
     private Cache<String, KnowPostDetailResponse> detailCache;
     private Cache<String, FeedPageResponse> feedPublicCache;
     private ModerationContentActionService service;
+    private CommentMutationService commentMutationService;
 
     @BeforeEach
     void setUp() {
@@ -45,6 +47,7 @@ class ModerationContentActionServiceTest {
         redisTemplate = mock(StringRedisTemplate.class);
         detailCache = Caffeine.newBuilder().build();
         feedPublicCache = Caffeine.newBuilder().build();
+        commentMutationService = mock(CommentMutationService.class);
         service = new ModerationContentActionServiceImpl(
                 knowPostMapper,
                 commentMapper,
@@ -53,7 +56,8 @@ class ModerationContentActionServiceTest {
                 new ObjectMapper(),
                 redisTemplate,
                 detailCache,
-                feedPublicCache
+                feedPublicCache,
+                commentMutationService
         );
     }
 
@@ -118,11 +122,9 @@ class ModerationContentActionServiceTest {
 
     @Test
     void approvedCommentOnlySoftDeletesMetadata() {
-        when(commentMapper.softDeleteForModeration(301L)).thenReturn(1);
-
         service.applyApprovedAction(report("comment", 301L));
 
-        verify(commentMapper).softDeleteForModeration(301L);
+        verify(commentMutationService).moderate(301L);
         verify(outboxMapper, never()).insert(org.mockito.Mockito.any(), org.mockito.Mockito.any(), org.mockito.Mockito.any(), org.mockito.Mockito.any(), org.mockito.Mockito.any());
     }
 
@@ -139,11 +141,11 @@ class ModerationContentActionServiceTest {
 
     @Test
     void commentActionFailsWhenNoActiveCommentWasUpdated() {
-        when(commentMapper.softDeleteForModeration(301L)).thenReturn(0);
-        when(commentMapper.findById(301L)).thenReturn(null);
+        org.mockito.Mockito.doThrow(new IllegalStateException("comment moderation target does not exist"))
+                .when(commentMutationService).moderate(301L);
 
         assertThatThrownBy(() -> service.applyApprovedAction(report("comment", 301L)))
-                .hasMessageContaining("目标不存在");
+                .hasMessageContaining("does not exist");
     }
 
     @Test
@@ -170,13 +172,9 @@ class ModerationContentActionServiceTest {
 
     @Test
     void alreadyDeletedCommentActionIsIdempotentSuccess() {
-        when(commentMapper.softDeleteForModeration(301L)).thenReturn(0);
-        when(commentMapper.findById(301L)).thenReturn(com.tongji.comment.model.Comment.builder()
-                .commentId(301L)
-                .status(1)
-                .build());
-
         service.applyApprovedAction(report("comment", 301L));
+
+        verify(commentMutationService).moderate(301L);
     }
 
     private ModerationReport report(String targetType, long targetId) {
