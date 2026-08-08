@@ -211,6 +211,7 @@ services:
     image: zhiguang-app:latest
     container_name: zhiguang-app
     restart: unless-stopped
+    cpus: ${APP_CPUS:-4.0}
     depends_on:
       mysql:
         condition: service_healthy

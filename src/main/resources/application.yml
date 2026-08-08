@@ -10,8 +10,8 @@ spring:
     password: zhiguang123456
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:32}
+      minimum-idle: ${DB_POOL_MIN_IDLE:8}
       connection-timeout: 30000
   data:
     redis:

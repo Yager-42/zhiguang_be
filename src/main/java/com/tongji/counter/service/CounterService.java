@@ -57,6 +57,20 @@ public interface CounterService {
                                                            List<String> metrics);
 
     /**
+     * 使用一次 Redis 只读脚本读取 Feed 页面计数及请求用户的点赞、收藏状态。
+     *
+     * @param entityType 实体类型
+     * @param entityIds 页面实体 ID，数量范围为 1 到 50
+     * @param userId 当前用户 ID；匿名请求允许为空
+     * @param metrics 需要读取的 SDS 指标
+     * @return 按实体 ID 映射的页面状态；空 ID 列表返回空映射
+     */
+    Map<String, FeedPageCounterState> getFeedPageStateBatch(String entityType,
+                                                            List<String> entityIds,
+                                                            Long userId,
+                                                            List<String> metrics);
+
+    /**
      * 判断是否点赞/收藏（位图）。
      */
     boolean isLiked(String entityType, String entityId, long userId);
