@@ -15,6 +15,7 @@ import com.tongji.knowpost.model.KnowPostDetailRow;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.tongji.counter.service.CounterService;
+import com.tongji.counter.service.FeedPageCounterState;
 import com.tongji.storage.MinioStorageService;
 import com.tongji.relation.outbox.OutboxMapper;
 import com.tongji.cache.hotkey.HotKeyDetector;
@@ -277,9 +278,9 @@ public class KnowPostServiceImpl implements KnowPostService {
         // 0. L1 本地缓存（Caffeine）
         KnowPostDetailResponse local = knowPostDetailCache.getIfPresent(pageKey);
         if (local != null) {
-            recordHotKeyAndExtendTtl(id, pageKey);
-            log.info("detail source=local key={}", pageKey);
-            return enrichDetailResponse(local, currentUserIdNullable, true);
+            recordItemHeat(id);
+            log.debug("detail source=local key={}", pageKey);
+            return enrichDetailResponse(local, currentUserIdNullable);
         }
 
         String cached = redis.opsForValue().get(pageKey);
@@ -338,10 +339,6 @@ public class KnowPostServiceImpl implements KnowPostService {
             List<String> tags = parseStringArray(row.getTags());
             
             // 此处查询的计数仅作为缓存的基础值，后续 enrich 会刷新
-            Map<String, Long> counts = counterService.getCounts("knowpost", String.valueOf(row.getId()), List.of("like", "fav"));
-            Long likeCount = counts.getOrDefault("like", 0L);
-            Long favoriteCount = counts.getOrDefault("fav", 0L);
-
             resp = new KnowPostDetailResponse(
                     String.valueOf(row.getId()),
                     row.getTitle(),
@@ -353,8 +350,8 @@ public class KnowPostServiceImpl implements KnowPostService {
                     row.getAuthorAvatar(),
                     row.getAuthorNickname(),
                     row.getAuthorTagJson(),
-                    likeCount,
-                    favoriteCount,
+                    0L,
+                    0L,
                     null, // liked 状态暂时留空，由 enrich 填充
                     null, // faved 状态暂时留空，由 enrich 填充
                     row.getIsTop(),
@@ -376,13 +373,13 @@ public class KnowPostServiceImpl implements KnowPostService {
                 // L1 填充
                 knowPostDetailCache.put(pageKey, resp);
 
-                log.info("detail source=db key={}", pageKey);
+                log.debug("detail source=db key={}", pageKey);
             } catch (Exception ignored) {}
 
             // 10. 释放锁并返回最终结果
             // 返回前调用 enrich 填充用户维度的 liked/faved 状态
             singleFlight.remove(pageKey);
-            return enrichDetailResponse(resp, currentUserIdNullable, false);
+            return enrichDetailResponse(resp, currentUserIdNullable);
         }
     }
 
@@ -416,11 +413,11 @@ public class KnowPostServiceImpl implements KnowPostService {
             
             // 4. 记录热度并尝试续期
             // 如果该内容正在被高频访问，自动延长其缓存 TTL
-            recordHotKeyAndExtendTtl(id, pageKey);
-            log.info("detail source={} key={}", sourceLog, pageKey);
+            recordItemHeat(id);
+            log.debug("detail source={} key={}", sourceLog, pageKey);
             
             // 5. 叠加实时数据（计数与用户状态）并返回
-            return enrichDetailResponse(base, uid, true);
+            return enrichDetailResponse(base, uid);
         } catch (Exception ignored) {
             // 反序列化失败等异常情况，视为未命中，回源修复
             return null;
@@ -432,27 +429,21 @@ public class KnowPostServiceImpl implements KnowPostService {
      *
      * @param base 基础响应对象（来自缓存或 DB）
      * @param uid 当前用户 ID
-     * @param refreshCounts 是否需要从 CounterService 刷新计数（缓存命中时需要，DB 回源时不需要）
      * @return 叠加了最新状态的响应对象
      */
-    private KnowPostDetailResponse enrichDetailResponse(KnowPostDetailResponse base, Long uid, boolean refreshCounts) {
+    private KnowPostDetailResponse enrichDetailResponse(KnowPostDetailResponse base, Long uid) {
         Long likeCount = base.likeCount();
         Long favoriteCount = base.favoriteCount();
 
-        // 1. 刷新计数（仅在走缓存时执行）
-        // 因为缓存中的计数可能是旧的，权威计数在 CounterService (Redis SDS)
-        if (refreshCounts) {
-            Map<String, Long> counts = counterService.getCounts("knowpost", base.id(), List.of("like", "fav"));
-            if (counts != null) {
-                likeCount = counts.getOrDefault("like", likeCount == null ? 0L : likeCount);
-                favoriteCount = counts.getOrDefault("fav", favoriteCount == null ? 0L : favoriteCount);
-            }
+        Map<String, FeedPageCounterState> states = counterService.getFeedPageStateBatch(
+                "knowpost", List.of(base.id()), uid, List.of("like", "fav"));
+        FeedPageCounterState state = states == null ? null : states.get(base.id());
+        if (state != null) {
+            likeCount = state.counts().getOrDefault("like", likeCount == null ? 0L : likeCount);
+            favoriteCount = state.counts().getOrDefault("fav", favoriteCount == null ? 0L : favoriteCount);
         }
-
-        // 2. 获取用户维度的状态（是否已点赞/收藏）
-        // 这部分数据是个性化的，不能存入公共缓存
-        Boolean liked = uid != null && counterService.isLiked("knowpost", base.id(), uid);
-        Boolean faved = uid != null && counterService.isFaved("knowpost", base.id(), uid);
+        Boolean liked = state != null && state.liked();
+        Boolean faved = state != null && state.faved();
 
         // 3. 构造新的 Record 对象返回
         return new KnowPostDetailResponse(
@@ -478,34 +469,10 @@ public class KnowPostServiceImpl implements KnowPostService {
     }
 
     /**
-     * 记录内容热度，并根据热度等级延长相关缓存的 TTL。
-     * 延长的缓存包括：
-     * 1. 详情页整页缓存 (knowpost:detail:{id})
-     * 2. Feed 流内容片段缓存 (feed:item:{id})
-     * 这样可以确保热点内容在 Feed 流中也不会轻易过期，避免 Feed 流回源。
-     * @param id 内容 ID
-     * @param detailPageKey 详情页缓存 Key
+     * 仅在进程内记录内容热度；缓存 TTL 在写入时按热度确定，读取路径不做远程续期。
      */
-    private void recordHotKeyAndExtendTtl(long id, String detailPageKey) {
-        // 统一使用 knowpost:{id} 作为热度统计 Key
-        String hotKeyId = "knowpost:" + id;
-        hotKey.record(hotKeyId);
-        
-        int baseTtl = 60;
-        int target = hotKey.ttlForPublic(baseTtl, hotKeyId);
-        
-        // 1. 延长详情页缓存
-        Long detailTtl = redis.getExpire(detailPageKey);
-        if (detailTtl < target) {
-            redis.expire(detailPageKey, java.time.Duration.ofSeconds(target));
-        }
-        
-        // 2. 延长 Feed 流内容片段缓存
-        String itemKey = "feed:item:" + id;
-        Long itemTtl = redis.getExpire(itemKey);
-        if (itemTtl < target) {
-            redis.expire(itemKey, java.time.Duration.ofSeconds(target));
-        }
+    private void recordItemHeat(long id) {
+        hotKey.record("knowpost:detail:" + id + ":v" + DETAIL_LAYOUT_VER);
     }
 
     private void invalidateCache(long id) {

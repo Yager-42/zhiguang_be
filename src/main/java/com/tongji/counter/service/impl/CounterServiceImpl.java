@@ -7,6 +7,7 @@ import com.tongji.counter.schema.CounterSchema;
 import com.tongji.counter.schema.BitmapShard;
 import com.tongji.counter.service.CounterService;
 import com.tongji.counter.service.CommentPageCounterState;
+import com.tongji.counter.service.FeedPageCounterState;
 import com.tongji.counter.event.CounterEvent;
 import com.tongji.counter.event.CounterEventProducer;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +41,8 @@ import java.util.concurrent.RejectedExecutionException;
 @Slf4j
 @Service
 public class CounterServiceImpl implements CounterService {
+
+    private static final int MAX_FEED_PAGE_ENTITY_COUNT = 50;
 
     private final StringRedisTemplate redis;
     private final DefaultRedisScript<Long> toggleScript;
@@ -387,6 +390,70 @@ public class CounterServiceImpl implements CounterService {
         return result;
     }
 
+    @Override
+    public Map<String, FeedPageCounterState> getFeedPageStateBatch(String entityType,
+                                                                   List<String> entityIds,
+                                                                   Long userId,
+                                                                   List<String> metrics) {
+        Map<String, FeedPageCounterState> result = new LinkedHashMap<>();
+        if (entityIds == null || entityIds.isEmpty()) {
+            return result;
+        }
+        if (entityIds.size() > MAX_FEED_PAGE_ENTITY_COUNT) {
+            throw new IllegalArgumentException("Feed page entity count exceeds " + MAX_FEED_PAGE_ENTITY_COUNT);
+        }
+        List<String> requestedMetrics = metrics == null ? List.of() : metrics;
+        for (String metric : requestedMetrics) {
+            if (!CounterSchema.SUPPORTED_METRICS.contains(metric)) {
+                throw new IllegalArgumentException("Unsupported metric " + metric);
+            }
+        }
+
+        boolean includeUserState = userId != null && userId > 0;
+        int entityCount = entityIds.size();
+        List<String> keys = new ArrayList<>(includeUserState ? entityCount * 3 : entityCount);
+        for (String entityId : entityIds) {
+            keys.add(CounterKeys.sdsKey(entityType, entityId));
+        }
+        List<String> arguments = new ArrayList<>(requestedMetrics.size() + 3);
+        arguments.add(String.valueOf(entityCount));
+        arguments.add(String.valueOf(requestedMetrics.size()));
+        for (String metric : requestedMetrics) {
+            arguments.add(String.valueOf(CounterSchema.NAME_TO_IDX.get(metric) * CounterSchema.FIELD_SIZE));
+        }
+        if (includeUserState) {
+            long chunk = BitmapShard.chunkOf(userId);
+            for (String entityId : entityIds) {
+                keys.add(CounterKeys.bitmapKey("like", entityType, entityId, chunk));
+            }
+            for (String entityId : entityIds) {
+                keys.add(CounterKeys.bitmapKey("fav", entityType, entityId, chunk));
+            }
+            arguments.add(String.valueOf(BitmapShard.bitOf(userId)));
+        }
+
+        List<Object> scriptKeys = new ArrayList<>(keys);
+        List<?> values = redisson.getScript(StringCodec.INSTANCE).eval(
+                RScript.Mode.READ_ONLY,
+                FEED_PAGE_STATE_LUA,
+                RScript.ReturnType.MULTI,
+                scriptKeys,
+                arguments.toArray()
+        );
+        List<?> safeValues = values == null ? List.of() : values;
+        int valueIndex = 0;
+        for (String entityId : entityIds) {
+            Map<String, Long> counts = new LinkedHashMap<>();
+            for (String metric : requestedMetrics) {
+                counts.put(metric, numberAt(safeValues, valueIndex++));
+            }
+            boolean liked = includeUserState && numberAt(safeValues, valueIndex++) == 1L;
+            boolean faved = includeUserState && numberAt(safeValues, valueIndex++) == 1L;
+            result.put(entityId, new FeedPageCounterState(counts, liked, faved));
+        }
+        return result;
+    }
+
     private long numberAt(List<?> values, int index) {
         if (index >= values.size()) {
             return 0L;
@@ -638,6 +705,37 @@ public class CounterServiceImpl implements CounterService {
               end
               if includeLiked then
                 table.insert(result, redis.call('GETBIT', KEYS[entityCount + entityIndex], bitOffset))
+              end
+            end
+            return result
+            """;
+
+    // 一次读取 Feed 页面内所有 SDS 计数和当前用户点赞、收藏位，消除逐条同步往返。
+    private static final String FEED_PAGE_STATE_LUA = """
+            local entityCount = tonumber(ARGV[1])
+            local metricCount = tonumber(ARGV[2])
+            local sdsKeys = {}
+            for entityIndex = 1, entityCount do
+              sdsKeys[entityIndex] = KEYS[entityIndex]
+            end
+            local sdsValues = redis.call('MGET', unpack(sdsKeys))
+            local includeUserState = #KEYS == entityCount * 3
+            local bitOffset = includeUserState and tonumber(ARGV[metricCount + 3]) or 0
+            local result = {}
+            for entityIndex = 1, entityCount do
+              local raw = sdsValues[entityIndex]
+              for metricIndex = 1, metricCount do
+                local byteOffset = tonumber(ARGV[metricIndex + 2]) + 1
+                local count = 0
+                if raw and string.len(raw) >= byteOffset + 3 then
+                  local b1, b2, b3, b4 = string.byte(raw, byteOffset, byteOffset + 3)
+                  count = b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
+                end
+                table.insert(result, count)
+              end
+              if includeUserState then
+                table.insert(result, redis.call('GETBIT', KEYS[entityCount + entityIndex], bitOffset))
+                table.insert(result, redis.call('GETBIT', KEYS[entityCount * 2 + entityIndex], bitOffset))
               end
             end
             return result

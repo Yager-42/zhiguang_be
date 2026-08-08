@@ -8,6 +8,7 @@ import com.tongji.knowpost.api.dto.FeedPageResponse;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPostFeedRow;
 import com.tongji.counter.service.CounterService;
+import com.tongji.counter.service.FeedPageCounterState;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.tongji.cache.hotkey.HotKeyDetector;
 import com.tongji.promotion.api.dto.PromotionAllocationView;
@@ -170,12 +171,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
         FeedPageResponse local = feedPublicCache.getIfPresent(localPageKey);
 
         if (local != null && local.items() != null) {
-            // 对返回列表中的每个条目进行热度统计
-            for (FeedItemResponse item : local.items()) {
-                recordItemHotKey(item.id());
-            }
-
-            log.info("feed.public source=local localPageKey={} page={} size={}", localPageKey, safePage, safeSize);
+            log.debug("feed.public source=local localPageKey={} page={} size={}", localPageKey, safePage, safeSize);
             List<FeedItemResponse> enrichedLocal = enrich(local.items(), currentUserIdNullable);
 
             return new FeedPageResponse(enrichedLocal, local.page(), local.size(), local.hasMore());
@@ -185,13 +181,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
         FeedPageResponse fromCache = assembleFromCache(idsKey, hasMoreKey, safePage, safeSize, currentUserIdNullable);
         if (fromCache != null) {
             feedPublicCache.put(localPageKey, fromCache);
-            // 对返回列表中的每个条目进行热度统计
-            if (fromCache.items() != null) {
-                for (FeedItemResponse item : fromCache.items()) {
-                    recordItemHotKey(item.id());
-                }
-            }
-            log.info("feed.public source=3tier localPageKey={} page={} size={}", localPageKey, safePage, safeSize);
+            log.debug("feed.public source=3tier localPageKey={} page={} size={}", localPageKey, safePage, safeSize);
             return fromCache;
         }
 
@@ -206,13 +196,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
             FeedPageResponse again = assembleFromCache(idsKey, hasMoreKey, safePage, safeSize, currentUserIdNullable);
             if (again != null) {
                 feedPublicCache.put(localPageKey, again);
-                // 对返回列表中的每个条目进行热度统计
-                if (again.items() != null) {
-                    for (FeedItemResponse item : again.items()) {
-                        recordItemHotKey(item.id());
-                    }
-                }
-                log.info("feed.public source=3tier(after-flight) localPageKey={} page={} size={}", localPageKey, safePage, safeSize);
+                log.debug("feed.public source=3tier(after-flight) localPageKey={} page={} size={}", localPageKey, safePage, safeSize);
                 singleFlight.remove(idsKey);
                 return again;
             }
@@ -240,31 +224,11 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
 
             // 返回时覆盖用户维度状态，不写回缓存
             List<FeedItemResponse> enriched = enrich(items, currentUserIdNullable);
-            log.info("feed.public source=db localPageKey={} page={} size={} hasMore={}", localPageKey, safePage, safeSize, hasMore);
+            log.debug("feed.public source=db localPageKey={} page={} size={} hasMore={}", localPageKey, safePage, safeSize, hasMore);
             // 释放单航班锁，允许后续请求正常进入
             singleFlight.remove(idsKey);
 
             return new FeedPageResponse(enriched, safePage, safeSize, hasMore);
-        }
-    }
-
-    /**
-     * 记录单个内容条目的热度，并尝试延长其相关片段缓存的 TTL。
-     * @param itemId 内容 ID
-     */
-    private void recordItemHotKey(String itemId) {
-        // 使用内容 ID 作为热点统计 Key，而不是页面 Key
-        String hotKeyId = "knowpost:" + itemId;
-        hotKey.record(hotKeyId);
-        
-        int baseTtl = 60;
-        int target = hotKey.ttlForPublic(baseTtl, hotKeyId);
-        
-        // 延长该内容的详情片段缓存
-        String itemKey = "feed:item:" + itemId;
-        Long itemTtl = redis.getExpire(itemKey);
-        if (itemTtl < target) {
-            redis.expire(itemKey, Duration.ofSeconds(target));
         }
     }
 
@@ -276,14 +240,28 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
      * @return 叠加 liked/faved 的列表
      */
     private List<FeedItemResponse> enrich(List<FeedItemResponse> base, Long uid) {
+        if (base == null || base.isEmpty()) {
+            return List.of();
+        }
+        List<String> entityIds = base.stream().map(FeedItemResponse::id).toList();
+        Map<String, FeedPageCounterState> states = loadFeedPageStates(entityIds, uid);
         List<FeedItemResponse> out = new ArrayList<>(base.size());
-
         for (FeedItemResponse it : base) {
-            boolean liked = uid != null && counterService.isLiked("knowpost", it.id(), uid);
-            boolean faved = uid != null && counterService.isFaved("knowpost", it.id(), uid);
-            out.add(it.withInteractions(it.likeCount(), it.favoriteCount(), liked, faved));
+            FeedPageCounterState state = states.get(it.id());
+            Map<String, Long> counts = state == null ? Map.of() : state.counts();
+            Long likeCount = counts.getOrDefault("like", it.likeCount() == null ? 0L : it.likeCount());
+            Long favoriteCount = counts.getOrDefault("fav", it.favoriteCount() == null ? 0L : it.favoriteCount());
+            boolean liked = state != null && state.liked();
+            boolean faved = state != null && state.faved();
+            out.add(it.withInteractions(likeCount, favoriteCount, liked, faved));
         }
         return out;
+    }
+
+    private Map<String, FeedPageCounterState> loadFeedPageStates(List<String> entityIds, Long userId) {
+        Map<String, FeedPageCounterState> states = counterService.getFeedPageStateBatch(
+                "knowpost", entityIds, userId, List.of("like", "fav"));
+        return states == null ? Map.of() : states;
     }
 
     /**
@@ -331,23 +309,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
             }
         }
 
-        List<FeedItemResponse> enriched = new ArrayList<>(idList.size());
-        for (int i = 0; i < idList.size(); i++) {
-            FeedItemResponse base = items.get(i);
-            if (base == null) {
-                continue;
-            }
-
-            Map<String, Long> counts = counterService.getCounts("knowpost", String.valueOf(base.id()), List.of("like", "fav"));
-            Long likeCount = counts.getOrDefault("like", 0L);
-            Long favoriteCount = counts.getOrDefault("fav", 0L);
-
-            // 用户维度状态实时计算，不落入片段缓存以避免用户数据污染
-            boolean liked = uid != null && counterService.isLiked("knowpost", base.id(), uid);
-            boolean faved = uid != null && counterService.isFaved("knowpost", base.id(), uid);
-
-            enriched.add(base.withInteractions(likeCount, favoriteCount, liked, faved));
-        }
+        List<FeedItemResponse> enriched = enrich(items, uid);
         // hasMore 优先使用软缓存值；若缺失，则以“满页”作为兜底判断
         boolean hasMore = hasMoreStr != null ? "1".equals(hasMoreStr) : (idList.size() == size);
 
@@ -433,8 +395,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
         FeedPageResponse local = feedMineCache.getIfPresent(key);
         if (local != null) {
             hotKey.record(key);
-            maybeExtendTtlMine(key);
-            log.info("feed.mine source=local key={} page={} size={} user={}", key, safePage, safeSize, userId);
+            log.debug("feed.mine source=local key={} page={} size={} user={}", key, safePage, safeSize, userId);
             return local;
         }
 
@@ -449,7 +410,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
                     feedMineCache.put(key, cachedResp);
                     hotKey.record(key);
                     maybeExtendTtlMine(key);
-                    log.info("feed.mine source=page key={} page={} size={} user={}", key, safePage, safeSize, userId);
+                    log.debug("feed.mine source=page key={} page={} size={} user={}", key, safePage, safeSize, userId);
                 List<FeedItemResponse> enriched = enrich(cachedResp.items(), userId);
                 return new FeedPageResponse(enriched, cachedResp.page(), cachedResp.size(), cachedResp.hasMore());
             }
@@ -472,7 +433,7 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
             feedMineCache.put(key, resp);
             hotKey.record(key);
         } catch (Exception ignored) {}
-        log.info("feed.mine source=db key={} page={} size={} user={} hasMore={}", key, safePage, safeSize, userId, hasMore);
+        log.debug("feed.mine source=db key={} page={} size={} user={} hasMore={}", key, safePage, safeSize, userId, hasMore);
         return resp;
     }
 
@@ -500,6 +461,15 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
      * @return 条目列表
      */
     private List<FeedItemResponse> mapRowsToItems(List<KnowPostFeedRow> rows, Long userIdNullable, boolean includeIsTop) {
+        if (rows == null || rows.isEmpty()) {
+            return List.of();
+        }
+        List<String> entityIds = rows.stream()
+                .map(KnowPostFeedRow::getId)
+                .filter(Objects::nonNull)
+                .map(String::valueOf)
+                .toList();
+        Map<String, FeedPageCounterState> states = loadFeedPageStates(entityIds, userIdNullable);
         List<FeedItemResponse> items = new ArrayList<>(rows.size());
 
         for (KnowPostFeedRow r : rows) {
@@ -507,16 +477,18 @@ public class KnowPostFeedServiceImpl implements KnowPostFeedService {
             List<String> imgs = parseStringArray(r.getImgUrls());
             String cover = imgs.isEmpty() ? null : imgs.getFirst();
 
-            Map<String, Long> counts = counterService.getCounts("knowpost", String.valueOf(r.getId()), List.of("like", "fav"));
+            String entityId = String.valueOf(r.getId());
+            FeedPageCounterState state = states.get(entityId);
+            Map<String, Long> counts = state == null ? Map.of() : state.counts();
             Long likeCount = counts.getOrDefault("like", 0L);
             Long favoriteCount = counts.getOrDefault("fav", 0L);
 
-            Boolean liked = userIdNullable != null && counterService.isLiked("knowpost", String.valueOf(r.getId()), userIdNullable);
-            Boolean faved = userIdNullable != null && counterService.isFaved("knowpost", String.valueOf(r.getId()), userIdNullable);
+            Boolean liked = state != null && state.liked();
+            Boolean faved = state != null && state.faved();
             Boolean isTop = includeIsTop ? r.getIsTop() : null;
 
             items.add(FeedItemResponse.organic(
-                    String.valueOf(r.getId()),
+                    entityId,
                     r.getTitle(),
                     r.getDescription(),
                     cover,

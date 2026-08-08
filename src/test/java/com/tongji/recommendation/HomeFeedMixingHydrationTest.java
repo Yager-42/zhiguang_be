@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.tongji.cache.hotkey.HotKeyDetector;
 import com.tongji.counter.service.CounterService;
+import com.tongji.counter.service.FeedPageCounterState;
 import com.tongji.knowpost.api.dto.FeedItemResponse;
 import com.tongji.knowpost.api.dto.FeedPageResponse;
 import com.tongji.knowpost.mapper.KnowPostMapper;
@@ -28,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -77,8 +79,6 @@ class HomeFeedMixingHydrationTest {
                 feedRow(12L, "2026-06-18T10:15:29Z"),
                 feedRow(11L, "2026-06-18T10:15:30Z")
         ));
-        when(counterService.getCounts(eq("knowpost"), anyString(), anyList())).thenReturn(Map.of("like", 0L, "fav", 0L));
-
         List<FeedItemResponse> items = service.getFeedByIds(List.of(11L, 12L), null, KnowPostFeedService.FeedVisibilityScope.PUBLIC);
 
         assertThat(items).extracting(FeedItemResponse::id).containsExactly("11", "12");
@@ -87,19 +87,27 @@ class HomeFeedMixingHydrationTest {
     @Test
     void sourceAwareHydrationUsesFollowVisibilityForFollowScope() {
         when(knowPostMapper.listFeedByIds(List.of(21L), 42L, true)).thenReturn(List.of(feedRow(21L, "2026-06-18T10:15:30Z")));
-        when(counterService.getCounts(eq("knowpost"), anyString(), anyList())).thenReturn(Map.of("like", 0L, "fav", 0L));
+        when(counterService.getFeedPageStateBatch("knowpost", List.of("21"), 42L, List.of("like", "fav")))
+                .thenReturn(Map.of("21", new FeedPageCounterState(Map.of("like", 7L, "fav", 3L), true, false)));
 
         List<FeedItemResponse> items = service.getFeedByIds(List.of(21L), 42L, KnowPostFeedService.FeedVisibilityScope.FOLLOW);
 
         assertThat(items).extracting(FeedItemResponse::id).containsExactly("21");
+        assertThat(items.getFirst().likeCount()).isEqualTo(7L);
+        assertThat(items.getFirst().favoriteCount()).isEqualTo(3L);
+        assertThat(items.getFirst().liked()).isTrue();
+        assertThat(items.getFirst().faved()).isFalse();
+        verify(counterService, times(1)).getFeedPageStateBatch(
+                "knowpost", List.of("21"), 42L, List.of("like", "fav"));
+        verify(counterService, never()).getCounts(anyString(), anyString(), anyList());
+        verify(counterService, never()).isLiked(anyString(), anyString(), eq(42L));
+        verify(counterService, never()).isFaved(anyString(), anyString(), eq(42L));
     }
 
     @Test
     void publicHydrationExcludesFollowersOnlyRowsWhileFollowHydrationAllowsThem() {
         when(knowPostMapper.listFeedByIds(List.of(31L), 42L, false)).thenReturn(List.of());
         when(knowPostMapper.listFeedByIds(List.of(31L), 42L, true)).thenReturn(List.of(feedRow(31L, "2026-06-18T10:15:30Z")));
-        when(counterService.getCounts(eq("knowpost"), anyString(), anyList())).thenReturn(Map.of("like", 0L, "fav", 0L));
-
         List<FeedItemResponse> publicItems = service.getFeedByIds(List.of(31L), 42L, KnowPostFeedService.FeedVisibilityScope.PUBLIC);
         List<FeedItemResponse> followItems = service.getFeedByIds(List.of(31L), 42L, KnowPostFeedService.FeedVisibilityScope.FOLLOW);
 
@@ -112,8 +120,6 @@ class HomeFeedMixingHydrationTest {
         when(knowPostMapper.listFeedByIds(List.of(41L, 42L), null, false)).thenReturn(List.of(
                 feedRow(42L, "2026-06-18T10:15:29Z")
         ));
-        when(counterService.getCounts(eq("knowpost"), anyString(), anyList())).thenReturn(Map.of("like", 0L, "fav", 0L));
-
         List<FeedItemResponse> items = service.getFeedByIds(List.of(41L, 42L), null, KnowPostFeedService.FeedVisibilityScope.PUBLIC);
 
         assertThat(items).extracting(FeedItemResponse::id).containsExactly("42");
@@ -158,7 +164,6 @@ class HomeFeedMixingHydrationTest {
         // cache 命中路径：organic 页 [202, 203]，page=1 时在前插入 1 条 promoted
         when(feedPublicCache.getIfPresent(anyString())).thenReturn(
                 new FeedPageResponse(List.of(feedItem("202"), feedItem("203")), 1, 2, false));
-        when(redisTemplate.getExpire(anyString())).thenReturn(100L);
         when(promotionAllocationService.getActiveFeedAllocation()).thenReturn(List.of(
                 new PromotionAllocationView("201", "feed_top_slot", "301", "401")));
         when(knowPostMapper.listFeedByIds(List.of(201L), null, false))
@@ -176,13 +181,13 @@ class HomeFeedMixingHydrationTest {
     void publicFeedPageBeyondOneDoesNotInsertPromotedSlot() {
         when(feedPublicCache.getIfPresent(anyString())).thenReturn(
                 new FeedPageResponse(List.of(feedItem("301"), feedItem("302")), 2, 2, false));
-        when(redisTemplate.getExpire(anyString())).thenReturn(100L);
 
         FeedPageResponse response = service.getPublicFeed(2, 2, null);
 
         assertThat(response.items()).extracting(FeedItemResponse::id).containsExactly("301", "302");
         assertThat(response.items()).allSatisfy(item -> assertThat(item.commercial()).isFalse());
         verify(promotionAllocationService, never()).getActiveFeedAllocation();
+        verify(redisTemplate, never()).getExpire(anyString());
     }
 
     @Test
@@ -190,7 +195,6 @@ class HomeFeedMixingHydrationTest {
         // promoted 201 与 organic 201 重叠：去重后页大小仍为 2（promoted 201 + organic 202）
         when(feedPublicCache.getIfPresent(anyString())).thenReturn(
                 new FeedPageResponse(List.of(feedItem("201"), feedItem("202")), 1, 2, false));
-        when(redisTemplate.getExpire(anyString())).thenReturn(100L);
         when(promotionAllocationService.getActiveFeedAllocation()).thenReturn(List.of(
                 new PromotionAllocationView("201", "feed_top_slot", "301", "401")));
         when(knowPostMapper.listFeedByIds(List.of(201L), null, false))
