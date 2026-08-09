@@ -60,6 +60,27 @@ public class PromotionBPrimeKafkaConfig {
         return factory;
     }
 
+    /**
+     * 为实时 fanout 提供独立 Kafka consumer 线程，允许与 decision/projection 拆进程部署。
+     *
+     * @param consumerFactory Kafka consumer 工厂
+     * @param promotionProperties 推广竞价容量配置
+     * @return 使用手动 ACK 的 fanout listener container 工厂
+     */
+    @Bean(name = "promotionDecisionFanoutKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String>
+            promotionDecisionFanoutKafkaListenerContainerFactory(
+                    ConsumerFactory<String, String> consumerFactory,
+                    PromotionBPrimeProperties promotionProperties) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setConcurrency(promotionProperties.getFanoutConcurrency());
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+        factory.setCommonErrorHandler(retryForeverErrorHandler());
+        return factory;
+    }
+
     private DefaultErrorHandler retryForeverErrorHandler() {
         return new DefaultErrorHandler(new FixedBackOff(1000L, FixedBackOff.UNLIMITED_ATTEMPTS));
     }

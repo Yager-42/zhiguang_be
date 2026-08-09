@@ -44,25 +44,6 @@ local function expire_command_fields(fields)
             'FIELDS', #fields, unpack(fields))
 end
 
-local function ranking_items()
-    local members = redis.call('ZREVRANGE', rankingKey, 0, 29)
-    local items = {}
-    for rank, member in ipairs(members) do
-        local values = redis.call('HMGET', prefix .. ':campaign:' .. member,
-                'bidAmount', 'bidderUserId', 'postId')
-        if values[1] and values[2] and values[3] then
-            items[#items + 1] = {
-                campaignId = member,
-                bidderUserId = values[2],
-                postId = values[3],
-                bidAmount = tonumber(values[1]),
-                rank = rank
-            }
-        end
-    end
-    return items
-end
-
 local function create_decision(decisionType, accepted, reason, ranking, payload)
     local previousVersion = tonumber(redis.call('HGET', stateKey, 'decisionVersion') or '0')
     local decisionVersion = redis.call('HINCRBY', stateKey, 'decisionVersion', 1)
@@ -172,8 +153,8 @@ redis.call('ZADD', rankingKey, score, campaignId)
 redis.call('HSET', escrowKey, campaignId .. ':currentHold', tostring(bidAmount))
 redis.call('HSET', stateKey, 'updatedAt', tostring(nowEpochMs))
 
-return store(create_decision('BID_ACCEPTED', true, nil, ranking_items(), {
+-- 高频 BID decision 只保留变化项的标量字段；Top30 仍以 rankingKey 为权威并由 snapshot 按需读取。
+return store(create_decision('BID_ACCEPTED', true, nil, {}, {
     submittedAt = submittedAt,
-    authorizedAmount = authorizedAmount,
-    currentHold = bidAmount
+    authorizedAmount = authorizedAmount
 }))

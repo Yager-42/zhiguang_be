@@ -3,6 +3,7 @@ package com.tongji.promotion.bprime.realtime;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.promotion.api.dto.PromotionWebSocketBidAck;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
+import com.tongji.promotion.bprime.metrics.PromotionPerformanceMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -18,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -27,14 +29,17 @@ class PromotionNativeBidWebSocketHandlerTest {
     private PromotionBidWebSocketProtocolService protocolService;
     private PromotionNativeBidWebSocketHandler handler;
     private WebSocketSession session;
+    private PromotionPerformanceMetrics performanceMetrics;
 
     @BeforeEach
     void setUp() {
         protocolService = mock(PromotionBidWebSocketProtocolService.class);
+        performanceMetrics = mock(PromotionPerformanceMetrics.class);
         PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
         properties.setWebSocketNativeSessionQueueCapacity(16);
         handler = new PromotionNativeBidWebSocketHandler(
-                protocolService, new ObjectMapper(), Runnable::run, properties);
+                protocolService, new ObjectMapper().findAndRegisterModules(), Runnable::run,
+                performanceMetrics, properties);
         session = mock(WebSocketSession.class);
         when(session.getId()).thenReturn("session-1");
         when(session.getPrincipal()).thenReturn((Principal) () -> "42");
@@ -74,7 +79,8 @@ class PromotionNativeBidWebSocketHandlerTest {
         PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
         properties.setWebSocketNativeSessionQueueCapacity(1);
         PromotionNativeBidWebSocketHandler boundedHandler = new PromotionNativeBidWebSocketHandler(
-                protocolService, new ObjectMapper(), outboundTasks::add, properties);
+                protocolService, new ObjectMapper().findAndRegisterModules(), outboundTasks::add,
+                performanceMetrics, properties);
         WebSocketSession slowSession = mock(WebSocketSession.class);
         when(slowSession.getId()).thenReturn("slow-session");
         when(slowSession.getPrincipal()).thenReturn((Principal) () -> "42");
@@ -95,5 +101,42 @@ class PromotionNativeBidWebSocketHandlerTest {
         assertThat(closeCaptor.getValue().getCode()).isEqualTo(4000);
         assertThat(outboundTasks).isEmpty();
         verify(protocolService, times(2)).submit(any(), any());
+        verify(performanceMetrics).recordWebSocketBackpressureClose();
+    }
+
+    @Test
+    void privateOutcomeIsWrittenBeforePendingPublicRoomUpdate() throws Exception {
+        List<Runnable> outboundTasks = new ArrayList<>();
+        PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
+        PromotionNativeBidWebSocketHandler prioritizedHandler = new PromotionNativeBidWebSocketHandler(
+                protocolService, new ObjectMapper().findAndRegisterModules(), outboundTasks::add,
+                performanceMetrics, properties);
+        WebSocketSession prioritizedSession = mock(WebSocketSession.class);
+        when(prioritizedSession.getId()).thenReturn("priority-session");
+        when(prioritizedSession.getPrincipal()).thenReturn((Principal) () -> "42");
+        when(prioritizedSession.isOpen()).thenReturn(true);
+        prioritizedHandler.afterConnectionEstablished(prioritizedSession);
+        prioritizedHandler.handleMessage(prioritizedSession,
+                new TextMessage("{\"type\":\"SUBSCRIBE\",\"auctionWindowId\":301}"));
+        outboundTasks.removeFirst().run();
+        clearInvocations(prioritizedSession);
+
+        PromotionAuctionRealtimeEvent publicEvent = new PromotionAuctionRealtimeEvent(
+                "event-public", PromotionAuctionRealtimeEvent.RANKING_DELTA, 301L, "d-1",
+                2L, 1L, "OPEN", List.of(), List.of(new PromotionBidDelta("201", "42", "1001", 120L)),
+                java.time.Instant.parse("2026-06-20T10:05:00Z"));
+        PromotionAuctionOutcomeEvent outcome = new PromotionAuctionOutcomeEvent(
+                "event-outcome", PromotionAuctionOutcomeEvent.BID_CONFIRMED, 301L, 42L,
+                "cmd-1", "d-1", 2L, 120L, null,
+                java.time.Instant.parse("2026-06-20T10:05:00Z"));
+
+        prioritizedHandler.publishPublic(publicEvent);
+        prioritizedHandler.publishOutcome(outcome);
+        outboundTasks.removeFirst().run();
+
+        ArgumentCaptor<TextMessage> messages = ArgumentCaptor.forClass(TextMessage.class);
+        verify(prioritizedSession, times(2)).sendMessage(messages.capture());
+        assertThat(messages.getAllValues().get(0).getPayload()).contains("BID_CONFIRMED");
+        assertThat(messages.getAllValues().get(1).getPayload()).contains("RANKING_DELTA");
     }
 }

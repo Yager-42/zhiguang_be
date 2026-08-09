@@ -4,19 +4,24 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.bprime.realtime.PromotionAuctionOutcomeEvent;
-import com.tongji.promotion.bprime.realtime.PromotionAuctionRealtimeEvent;
 import com.tongji.promotion.bprime.realtime.PromotionAuctionRealtimePublisher;
+import com.tongji.promotion.bprime.realtime.PromotionPublicUpdateCoalescer;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
+@ConditionalOnProperty(
+        name = {"promotion.bprime.enabled", "promotion.bprime.fanout-consumer-enabled"},
+        havingValue = "true")
 public class PromotionDecisionFanoutService {
 
     private static final long MAX_TRACKED_EVENTS = 200_000L;
 
     private final PromotionAuctionRealtimePublisher publisher;
+    private final PromotionPublicUpdateCoalescer publicUpdateCoalescer;
     private final Cache<String, Boolean> deliveredEventIds = Caffeine.newBuilder()
             .maximumSize(MAX_TRACKED_EVENTS)
             .expireAfterWrite(Duration.ofHours(2))
@@ -26,8 +31,11 @@ public class PromotionDecisionFanoutService {
             .expireAfterAccess(Duration.ofHours(2))
             .build();
 
-    public PromotionDecisionFanoutService(PromotionAuctionRealtimePublisher publisher) {
+    public PromotionDecisionFanoutService(
+            PromotionAuctionRealtimePublisher publisher,
+            PromotionPublicUpdateCoalescer publicUpdateCoalescer) {
         this.publisher = publisher;
+        this.publicUpdateCoalescer = publicUpdateCoalescer;
     }
 
     public boolean publishDecision(PromotionAuctionDecision decision) {
@@ -38,15 +46,17 @@ public class PromotionDecisionFanoutService {
         try {
             switch (decision.type()) {
                 case "BID_ACCEPTED" -> {
-                    publishPublic(rankingEvent(decision));
+                    publicUpdateCoalescer.enqueueBid(decision);
                     publishOutcome(outcomeEvent(decision, PromotionAuctionOutcomeEvent.BID_CONFIRMED));
                 }
-                case "BID_REJECTED" -> publishOutcome(outcomeEvent(decision, PromotionAuctionOutcomeEvent.BID_REJECTED));
+                case "BID_REJECTED" -> publishOutcome(
+                        outcomeEvent(decision, PromotionAuctionOutcomeEvent.BID_REJECTED));
                 case "ESCROW_APPLIED" -> {
                     // 授权投影不对客户端广播，但仍推进窗口可见版本以保持后续事件连续。
                 }
-                case "WINDOW_CLOSED" -> publishPublic(windowClosedEvent(decision));
-                default -> throw new IllegalArgumentException("unsupported promotion decision type: " + decision.type());
+                case "WINDOW_CLOSED" -> publicUpdateCoalescer.publishWindowClosed(decision);
+                default -> throw new IllegalArgumentException(
+                        "unsupported promotion decision type: " + decision.type());
             }
         } catch (RuntimeException e) {
             rollbackVisibleDecision(decision, previous);
@@ -101,17 +111,6 @@ public class PromotionDecisionFanoutService {
     private record VisibleDecision(long decisionVersion, String decisionId) {
     }
 
-    private void publishPublic(PromotionAuctionRealtimeEvent event) {
-        if (deliveredEventIds.asMap().putIfAbsent(event.eventId(), Boolean.TRUE) == null) {
-            try {
-                publisher.publishPublic(event);
-            } catch (RuntimeException e) {
-                deliveredEventIds.invalidate(event.eventId());
-                throw e;
-            }
-        }
-    }
-
     private void publishOutcome(PromotionAuctionOutcomeEvent event) {
         if (deliveredEventIds.asMap().putIfAbsent(event.eventId(), Boolean.TRUE) == null) {
             try {
@@ -121,32 +120,6 @@ public class PromotionDecisionFanoutService {
                 throw e;
             }
         }
-    }
-
-    private PromotionAuctionRealtimeEvent rankingEvent(PromotionAuctionDecision decision) {
-        return new PromotionAuctionRealtimeEvent(
-                "decision-" + decision.decisionId() + ":public",
-                PromotionAuctionRealtimeEvent.RANKING_UPDATED,
-                decision.auctionWindowId(),
-                decision.decisionId(),
-                decision.decisionVersion(),
-                decision.decisionVersion(),
-                "OPEN",
-                decision.ranking(),
-                decision.decidedAt());
-    }
-
-    private PromotionAuctionRealtimeEvent windowClosedEvent(PromotionAuctionDecision decision) {
-        return new PromotionAuctionRealtimeEvent(
-                "decision-" + decision.decisionId() + ":public",
-                PromotionAuctionRealtimeEvent.WINDOW_CLOSED,
-                decision.auctionWindowId(),
-                decision.decisionId(),
-                decision.decisionVersion(),
-                decision.decisionVersion(),
-                String.valueOf(decision.payload().getOrDefault("finalWindowStatus", "SETTLED")),
-                decision.ranking(),
-                decision.decidedAt());
     }
 
     private PromotionAuctionOutcomeEvent outcomeEvent(PromotionAuctionDecision decision, String eventType) {

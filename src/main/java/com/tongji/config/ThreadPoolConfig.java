@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -64,6 +65,26 @@ public class ThreadPoolConfig {
             @Value("${promotion.bprime.web-socket-channel-queue-capacity:65536}") int queueCapacity) {
         return buildExecutor(threadCount, threadCount, queueCapacity, 60, "promotion-bid-ws-outbound-",
                 new ThreadPoolExecutor.AbortPolicy(), 60);
+    }
+
+    /**
+     * 为可恢复的房间公共状态通知提供独立调度资源，避免占用私有 ACK/outcome 写线程。
+     *
+     * @param threadCount 固定调度线程数，必须为正数
+     * @return 已初始化且由 Spring 关闭的调度器
+     */
+    @Bean(name = "promotionPublicUpdateScheduler")
+    public ThreadPoolTaskScheduler promotionPublicUpdateScheduler(
+            @Value("${promotion.bprime.public-update-scheduler-thread-count:2}") int threadCount) {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(threadCount);
+        scheduler.setThreadNamePrefix("promotion-public-update-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        scheduler.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        scheduler.initialize();
+        return scheduler;
     }
 
     @Bean(name = "commentReadExecutor")

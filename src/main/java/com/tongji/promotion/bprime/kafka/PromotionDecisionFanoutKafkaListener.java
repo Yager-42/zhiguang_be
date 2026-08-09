@@ -12,7 +12,9 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 @Component
-@ConditionalOnProperty(name = "promotion.bprime.enabled", havingValue = "true")
+@ConditionalOnProperty(
+        name = {"promotion.bprime.enabled", "promotion.bprime.fanout-consumer-enabled"},
+        havingValue = "true")
 public class PromotionDecisionFanoutKafkaListener {
 
     private final ObjectMapper objectMapper;
@@ -32,7 +34,7 @@ public class PromotionDecisionFanoutKafkaListener {
 
     @KafkaListener(topics = "${promotion.bprime.decision-topic:zhiguang.promotion.auction.decisions.v2}",
             groupId = "${promotion.bprime.fanout-consumer-group:zhiguang-promotion-fanout-consumer}",
-            containerFactory = "promotionDecisionKafkaListenerContainerFactory")
+            containerFactory = "promotionDecisionFanoutKafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
         PromotionAuctionDecision decision = support.requireDecision(record.key(),
                 objectMapper.readValue(record.value(), PromotionAuctionDecisionLogEnvelope.class));

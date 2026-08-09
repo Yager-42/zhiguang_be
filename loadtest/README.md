@@ -172,9 +172,10 @@ k6 run -e VUS=100 -e RATE=20000 -e DURATION_SECONDS=30 \
 默认峰值为 `9000 bids/s`，可通过 `PEAK_RATE` 覆盖；入口阶段的实际 QPS 必须按各阶段 counter 除以
 对应阶段时长计算，不能使用包含 setup 和 ACK drain 的 k6 全局 counter rate。
 
-`promotion-ws-user-feedback.js` 是用户视角的主竞价场景。每个用户订阅房间排名、私有收单 ACK 和最终
-outcome，从 snapshot 初始化可见价格，经过稳定的个体反应时间和逐次轻微扰动后提交高于所见价格的
-bid，并等待 `BID_CONFIRMED` 或 `BID_REJECTED` 后才考虑下一次出价。
+`promotion-ws-user-feedback.js` 是用户视角的主竞价场景。每个用户通过高活动原生 WebSocket 在同一连接
+订阅合并后的房间 `RANKING_DELTA`、接收私有收单 ACK 和最终 outcome，从 snapshot 初始化可见价格，
+经过稳定的个体反应时间和逐次轻微扰动后提交高于所见价格的 bid，并等待 `BID_CONFIRMED` 或
+`BID_REJECTED` 后才考虑下一次出价。公共 `eventVersion` 跳号时脚本会读取 snapshot 恢复本地排名。
 `promotion_user_final_feedbacks / MEASURE_SECONDS` 是最终用户反馈 QPS，
 `promotion_user_final_feedback_duration` 是提交到最终反馈的延迟；
 `PUBLISHED` 仅计入入口 ACK，不能当作竞价完成。

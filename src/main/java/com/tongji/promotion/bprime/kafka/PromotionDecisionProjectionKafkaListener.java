@@ -16,7 +16,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-@ConditionalOnProperty(name = "promotion.bprime.enabled", havingValue = "true")
+@ConditionalOnProperty(
+        name = {"promotion.bprime.enabled", "promotion.bprime.projection-consumer-enabled"},
+        havingValue = "true")
 public class PromotionDecisionProjectionKafkaListener {
 
     private final ObjectMapper objectMapper;
