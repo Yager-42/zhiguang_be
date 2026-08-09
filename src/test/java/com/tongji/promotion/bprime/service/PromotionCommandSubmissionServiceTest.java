@@ -2,35 +2,29 @@ package com.tongji.promotion.bprime.service;
 
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
-import com.tongji.common.id.IdNamespace;
-import com.tongji.common.id.IdService;
 import com.tongji.promotion.api.dto.SubmitPromotionBidCommandResponse;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
-import com.tongji.promotion.bprime.mapper.PromotionAuctionCommandMapper;
-import com.tongji.promotion.bprime.model.PromotionAuctionCommandRecord;
+import com.tongji.promotion.bprime.metrics.PromotionPerformanceMetrics;
+import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
+import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
+import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import com.tongji.promotion.bprime.mq.PromotionCommandMessagePort;
-import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
-import com.tongji.promotion.mapper.PromotionCampaignMapper;
-import com.tongji.promotion.model.PromotionAuctionWindow;
-import com.tongji.promotion.model.PromotionAuctionWindowStatus;
-import com.tongji.promotion.model.PromotionCampaign;
-import com.tongji.promotion.model.PromotionCampaignStatus;
-import com.tongji.promotion.model.PromotionResourceType;
+import com.tongji.promotion.bprime.redis.PromotionBidFastPathPrecheckRepository;
+import com.tongji.promotion.bprime.redis.PromotionBidRouteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,152 +33,159 @@ import static org.mockito.Mockito.when;
 class PromotionCommandSubmissionServiceTest {
 
     @Mock
-    private PromotionCampaignMapper campaignMapper;
-    @Mock
-    private PromotionAuctionWindowMapper windowMapper;
-    @Mock
-    private PromotionAuctionCommandMapper commandMapper;
+    private PromotionBidRouteRepository routeRepository;
     @Mock
     private PromotionCommandMessagePort messagePort;
     @Mock
-    private IdService idService;
+    private PromotionPerformanceMetrics performanceMetrics;
+    @Mock
+    private PromotionBidFastPathPrecheckBatcher fastPathPrecheckBatcher;
 
-    private PromotionBPrimeProperties properties;
     private PromotionCommandSubmissionService service;
+    private PromotionBidFastRejectFilter fastRejectFilter;
 
     @BeforeEach
     void setUp() {
-        properties = new PromotionBPrimeProperties();
-        service = new PromotionCommandSubmissionService(campaignMapper, windowMapper, commandMapper,
-                messagePort, properties, idService);
-    }
-
-    @Test
-    void submitCreatesCommandOnlyWhenBprimeDisabled() {
-        Instant now = Instant.parse("2026-06-20T10:05:00Z");
-        when(campaignMapper.findById(201L)).thenReturn(campaign());
-        when(windowMapper.findOpenWindow(PromotionResourceType.FEED_TOP_SLOT, now)).thenReturn(window());
-        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(9001L, 9002L);
-
-        SubmitPromotionBidCommandResponse response = service.submit(42L, 201L, 120L, "idem-1", now);
-
-        ArgumentCaptor<PromotionAuctionCommandRecord> captor = ArgumentCaptor.forClass(PromotionAuctionCommandRecord.class);
-        verify(commandMapper).insert(captor.capture());
-        verify(messagePort, never()).send(any());
-        assertThat(captor.getValue().getCommandId()).isEqualTo("promotion-bprime-9001");
-        assertThat(captor.getValue().getStatus()).isEqualTo("SUBMITTED");
-        assertThat(response.commandId()).isEqualTo("promotion-bprime-9001");
-        assertThat(response.status()).isEqualTo("SUBMITTED");
-    }
-
-    @Test
-    void submitPublishesAndMarksPublishedWhenEnabled() {
+        PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
         properties.setEnabled(true);
+        fastRejectFilter = new PromotionBidFastRejectFilter(properties);
+        service = new PromotionCommandSubmissionService(routeRepository, messagePort, performanceMetrics, properties,
+                fastRejectFilter, fastPathPrecheckBatcher, Runnable::run);
+    }
+
+    @Test
+    void submitReadsRedisRouteAndWaitsForBrokerSendWithoutMysqlCommand() {
         Instant now = Instant.parse("2026-06-20T10:05:00Z");
-        when(campaignMapper.findById(201L)).thenReturn(campaign());
-        when(windowMapper.findOpenWindow(PromotionResourceType.FEED_TOP_SLOT, now)).thenReturn(window());
-        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(9001L, 9002L);
+        when(routeRepository.find(201L)).thenReturn(route());
 
-        SubmitPromotionBidCommandResponse response = service.submit(42L, 201L, 120L, "idem-1", now);
+        SubmitPromotionBidCommandResponse response = service.submitAsync(42L, 201L, 120L, "idem-1", now).join();
 
-        verify(messagePort).send(any());
-        verify(commandMapper).updateStatus("promotion-bprime-9001", "PUBLISHED");
+        ArgumentCaptor<PromotionAuctionCommand> captor = ArgumentCaptor.forClass(PromotionAuctionCommand.class);
+        verify(messagePort).send(captor.capture());
+        verify(performanceMetrics).recordIngressAccepted();
+        assertThat(captor.getValue().type()).isEqualTo("BID");
+        assertThat(captor.getValue().auctionWindowId()).isEqualTo(301L);
         assertThat(response.status()).isEqualTo("PUBLISHED");
+        assertThat(response.commandId()).startsWith("promotion-bprime-");
     }
 
     @Test
-    void submitPublishesAfterTransactionCommitWhenSynchronizationActive() {
-        properties.setEnabled(true);
+    void sameIdempotencyProducesSameCommandIdentity() {
         Instant now = Instant.parse("2026-06-20T10:05:00Z");
-        when(campaignMapper.findById(201L)).thenReturn(campaign());
-        when(windowMapper.findOpenWindow(PromotionResourceType.FEED_TOP_SLOT, now)).thenReturn(window());
-        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(9001L, 9002L);
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            SubmitPromotionBidCommandResponse response = service.submit(42L, 201L, 120L, "idem-1", now);
+        when(routeRepository.find(201L)).thenReturn(route());
 
-            verify(messagePort, never()).send(any());
-            verify(commandMapper, never()).updateStatus("promotion-bprime-9001", "PUBLISHED");
-            assertThat(response.status()).isEqualTo("SUBMITTED");
+        String first = service.submitAsync(42L, 201L, 120L, "idem-1", now).join().commandId();
+        String second = service.submitAsync(42L, 201L, 120L, "idem-1", now.plusMillis(1)).join().commandId();
 
-            for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
-                synchronization.afterCommit();
-            }
-
-            verify(messagePort).send(any());
-            verify(commandMapper).updateStatus("promotion-bprime-9001", "PUBLISHED");
-        } finally {
-            TransactionSynchronizationManager.clearSynchronization();
-        }
+        assertThat(second).isEqualTo(first);
     }
 
     @Test
-    void sameIdempotencyAndSameHashReturnsExistingCommand() {
-        Instant now = Instant.parse("2026-06-20T10:05:00Z");
-        when(campaignMapper.findById(201L)).thenReturn(campaign());
-        when(windowMapper.findOpenWindow(PromotionResourceType.FEED_TOP_SLOT, now)).thenReturn(window());
-        PromotionAuctionCommandRecord existing = existingCommand(
-                service.requestHash(201L, 42L, 301L, 120L, "idem-1"));
-        when(commandMapper.findByIdempotency(301L, 42L, "idem-1")).thenReturn(existing);
-
-        SubmitPromotionBidCommandResponse response = service.submit(42L, 201L, 120L, "idem-1", now);
-
-        assertThat(response.commandId()).isEqualTo("cmd-existing");
-        verify(commandMapper, never()).insert(any());
+    void missingEscrowRouteRejectsBeforeBrokerSend() {
+        assertThatThrownBy(() -> service.submitAsync(42L, 201L, 120L, "idem-1", Instant.now()).join())
+                .isInstanceOf(CompletionException.class)
+                .hasCauseInstanceOf(BusinessException.class)
+                .satisfies(error -> assertThat(((BusinessException) error.getCause()).getErrorCode())
+                        .isEqualTo(ErrorCode.PROMOTION_BID_ESCROW_REQUIRED));
+        verify(messagePort, never()).send(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void sameIdempotencyDifferentHashRejects() {
+    void belowReserveDefersToAuthoritativeCommandPath() {
         Instant now = Instant.parse("2026-06-20T10:05:00Z");
-        when(campaignMapper.findById(201L)).thenReturn(campaign());
-        when(windowMapper.findOpenWindow(PromotionResourceType.FEED_TOP_SLOT, now)).thenReturn(window());
-        when(commandMapper.findByIdempotency(301L, 42L, "idem-1")).thenReturn(existingCommand("different"));
+        when(routeRepository.find(201L)).thenReturn(route());
 
-        assertThatThrownBy(() -> service.submit(42L, 201L, 120L, "idem-1", now))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.BAD_REQUEST);
+        SubmitPromotionBidCommandResponse response = service.submitAsync(42L, 201L, 99L, "idem-low", now).join();
+
+        assertThat(response.status()).isEqualTo("PUBLISHED");
+        verify(messagePort).send(org.mockito.ArgumentMatchers.any());
     }
 
-    private PromotionAuctionCommandRecord existingCommand(String requestHash) {
-        return PromotionAuctionCommandRecord.builder()
-                .id(1L)
-                .commandId("cmd-existing")
-                .idempotencyKey("idem-1")
-                .requestHash(requestHash)
-                .auctionWindowId(301L)
-                .campaignId(201L)
-                .bidderUserId(42L)
-                .postId(1001L)
-                .resourceType("FEED_TOP_SLOT")
-                .bidAmount(120L)
-                .status("SUBMITTED")
-                .createdAt(Instant.parse("2026-06-20T10:05:00Z"))
-                .updatedAt(Instant.parse("2026-06-20T10:05:00Z"))
-                .build();
+    @Test
+    void acceptedWatermarkRejectsBeforeRedisRouteAndBroker() {
+        Instant now = Instant.parse("2026-06-20T10:05:00Z");
+        fastRejectFilter.observeRoute(route());
+        fastRejectFilter.observeDecision(acceptedDecision(150L));
+        when(fastPathPrecheckBatcher.checkAsync(301L, serviceCommandId("idem-stale")))
+                .thenReturn(CompletableFuture.completedFuture(
+                        new PromotionBidFastPathPrecheckRepository.Result(true, true, false)));
+
+        SubmitPromotionBidCommandResponse response = service.submitAsync(
+                42L, 201L, 150L, "idem-stale", now).join();
+
+        assertThat(response.status()).isEqualTo("REJECTED");
+        assertThat(response.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
+        verify(routeRepository, never()).find(org.mockito.ArgumentMatchers.anyLong());
+        verify(messagePort, never()).send(org.mockito.ArgumentMatchers.any());
     }
 
-    private PromotionCampaign campaign() {
-        return PromotionCampaign.builder()
-                .id(201L)
-                .creatorUserId(42L)
-                .postId(1001L)
-                .resourceType(PromotionResourceType.FEED_TOP_SLOT)
-                .status(PromotionCampaignStatus.ACTIVE)
-                .startAt(Instant.parse("2026-06-20T10:00:00Z"))
-                .endAt(Instant.parse("2026-06-20T12:00:00Z"))
-                .build();
+    @Test
+    void duplicateCandidateFallsThroughSoLuaCanReplayOriginalDecision() {
+        Instant now = Instant.parse("2026-06-20T10:05:00Z");
+        fastRejectFilter.observeRoute(route());
+        fastRejectFilter.observeDecision(acceptedDecision(150L));
+        when(fastPathPrecheckBatcher.checkAsync(301L, serviceCommandId("idem-replay")))
+                .thenReturn(CompletableFuture.completedFuture(
+                        new PromotionBidFastPathPrecheckRepository.Result(true, true, true)));
+        when(routeRepository.find(201L)).thenReturn(route());
+
+        SubmitPromotionBidCommandResponse response = service.submitAsync(
+                42L, 201L, 150L, "idem-replay", now).join();
+
+        assertThat(response.status()).isEqualTo("PUBLISHED");
+        verify(messagePort).send(org.mockito.ArgumentMatchers.any());
+        verify(performanceMetrics, never()).recordFastRejected(org.mockito.ArgumentMatchers.anyString());
     }
 
-    private PromotionAuctionWindow window() {
-        return PromotionAuctionWindow.builder()
-                .id(301L)
-                .resourceType(PromotionResourceType.FEED_TOP_SLOT)
-                .windowStartAt(Instant.parse("2026-06-20T10:00:00Z"))
-                .windowEndAt(Instant.parse("2026-06-20T11:00:00Z"))
-                .slotCount(1)
-                .reservePrice(1L)
-                .status(PromotionAuctionWindowStatus.OPEN)
-                .build();
+    @Test
+    void unavailablePrecheckFallsThroughAndIsMetered() {
+        Instant now = Instant.parse("2026-06-20T10:05:00Z");
+        fastRejectFilter.observeRoute(route());
+        fastRejectFilter.observeDecision(acceptedDecision(150L));
+        when(fastPathPrecheckBatcher.checkAsync(301L, serviceCommandId("idem-uncertain")))
+                .thenReturn(CompletableFuture.completedFuture(
+                        new PromotionBidFastPathPrecheckRepository.Result(false, false, false)));
+        when(routeRepository.find(201L)).thenReturn(route());
+
+        SubmitPromotionBidCommandResponse response = service.submitAsync(
+                42L, 201L, 150L, "idem-uncertain", now).join();
+
+        assertThat(response.status()).isEqualTo("PUBLISHED");
+        verify(performanceMetrics).recordFastRejectPrecheckFailure();
+        verify(messagePort).send(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void fastRejectUsesBatchedPrecheck() {
+        Instant now = Instant.parse("2026-06-20T10:05:00Z");
+        fastRejectFilter.observeRoute(route());
+        fastRejectFilter.observeDecision(acceptedDecision(150L));
+        String commandId = serviceCommandId("idem-batched");
+        when(fastPathPrecheckBatcher.checkAsync(301L, commandId))
+                .thenReturn(CompletableFuture.completedFuture(
+                        new PromotionBidFastPathPrecheckRepository.Result(true, true, false)));
+
+        SubmitPromotionBidCommandResponse response = service.submitAsync(
+                42L, 201L, 150L, "idem-batched", now).join();
+
+        assertThat(response.status()).isEqualTo("REJECTED");
+        assertThat(response.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
+        verify(routeRepository, never()).find(org.mockito.ArgumentMatchers.anyLong());
+        verify(messagePort, never()).send(org.mockito.ArgumentMatchers.any());
+    }
+
+    private PromotionBidRoute route() {
+        return new PromotionBidRoute(201L, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L,
+                "OPEN", Instant.parse("2026-06-20T11:00:00Z"));
+    }
+
+    private PromotionAuctionDecision acceptedDecision(long bidAmount) {
+        return new PromotionAuctionDecision("d-1", "cmd-1", "hash", 301L, 201L, 42L, 1001L,
+                "FEED_TOP_SLOT", "BID_ACCEPTED", true, null, bidAmount, List.of(), List.of(),
+                Instant.parse("2026-06-20T10:05:00Z"));
+    }
+
+    private String serviceCommandId(String idempotencyKey) {
+        return com.tongji.promotion.bprime.model.PromotionCommandIdentity.bidCommandId(301L, 42L, idempotencyKey);
     }
 }

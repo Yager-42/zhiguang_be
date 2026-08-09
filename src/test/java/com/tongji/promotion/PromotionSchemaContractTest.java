@@ -20,6 +20,7 @@ class PromotionSchemaContractTest {
 
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_campaign");
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_auction_window");
+        assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_bid_escrow");
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_bid");
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_auction_command");
         assertThat(schema).doesNotContain("CREATE TABLE IF NOT EXISTS promotion_auction_decision");
@@ -28,8 +29,9 @@ class PromotionSchemaContractTest {
         assertThat(schema).contains("last_kafka_topic VARCHAR(128) NULL");
         assertThat(schema).contains("last_kafka_partition INT NULL");
         assertThat(schema).contains("last_kafka_offset BIGINT NULL");
-        assertThat(checkpointMapper).contains("SELECT last_decision_version");
-        assertThat(checkpointMapper).contains("SELECT last_decision_id");
+        assertThat(schema).contains("reserve_price BIGINT NOT NULL");
+        assertThat(schema).contains("window_status VARCHAR(16) NOT NULL");
+        assertThat(checkpointMapper).contains("SELECT auction_window_id, last_decision_id, last_decision_version");
         assertThat(checkpointMapper).contains("last_decision_version = VALUES(last_decision_version)");
         assertThat(checkpointMapper).contains("COALESCE(VALUES(last_kafka_topic), last_kafka_topic)");
         assertThat(checkpointMapper).contains("COALESCE(VALUES(last_kafka_partition), last_kafka_partition)");
@@ -38,7 +40,10 @@ class PromotionSchemaContractTest {
         assertThat(schema).contains("uk_promotion_window_resource_time");
         assertThat(schema).contains("uk_promotion_command_id");
         assertThat(schema).contains("uk_promotion_command_idempotency");
+        assertThat(schema).contains("idx_promotion_command_publish");
         assertThat(schema).contains("idx_promotion_bid_window_status_amount");
+        assertThat(schema).contains("uk_promotion_escrow_window_campaign");
+        assertThat(schema).contains("chk_promotion_escrow_amount");
         assertThat(schema).contains("idx_promotion_slot_resource_time");
     }
 }

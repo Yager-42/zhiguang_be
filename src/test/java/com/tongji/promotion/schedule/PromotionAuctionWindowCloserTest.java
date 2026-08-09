@@ -2,6 +2,7 @@ package com.tongji.promotion.schedule;
 
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.kafka.PromotionDecisionLogPort;
+import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
@@ -19,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.HashOperations;
 
 import java.time.Instant;
 import java.util.List;
@@ -43,6 +45,9 @@ class PromotionAuctionWindowCloserTest {
     private PromotionBidMapper bidMapper;
 
     @Mock
+    private PromotionBidEscrowMapper escrowMapper;
+
+    @Mock
     private PromotionAuctionService auctionService;
 
     @Mock
@@ -57,6 +62,9 @@ class PromotionAuctionWindowCloserTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
+    @Mock
+    private HashOperations<String, Object, Object> hashOperations;
+
     private PromotionAuctionWindowCloser closer;
     private PromotionBPrimeProperties properties;
 
@@ -64,7 +72,7 @@ class PromotionAuctionWindowCloserTest {
     void setUp() {
         properties = new PromotionBPrimeProperties();
         properties.setEnabled(true);
-        closer = new PromotionAuctionWindowCloser(windowMapper, bidMapper, auctionService, decisionLogPort,
+        closer = new PromotionAuctionWindowCloser(windowMapper, bidMapper, escrowMapper, auctionService, decisionLogPort,
                 cacheService, properties, redisTemplate);
     }
 
@@ -74,8 +82,9 @@ class PromotionAuctionWindowCloserTest {
                 "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
         when(windowMapper.listClosableWindows(any(), eq(50))).thenReturn(List.of(window));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("promotion:auction:301:close_decision_version")).thenReturn(null);
-        when(valueOperations.increment("promotion:auction:301:decision_version")).thenReturn(6L);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(valueOperations.get("promotion:auction:{301}:close_decision_version")).thenReturn(null);
+        when(hashOperations.increment("promotion:auction:{301}:state", "decisionVersion", 1L)).thenReturn(6L);
         when(bidMapper.listActiveBidsByWindowId(301L,
                 Instant.parse("2026-06-20T11:00:00Z"),
                 Instant.parse("2026-06-20T12:00:00Z")))
@@ -101,8 +110,8 @@ class PromotionAuctionWindowCloserTest {
                 .contains("CAPTURE", "RELEASE");
         verify(cacheService).refreshActiveAllocations(PromotionResourceType.FEED_TOP_SLOT,
                 Instant.parse("2026-06-20T11:00:00Z"));
-        verify(valueOperations).set("promotion:auction:301:close_decision_version", "6");
-        verify(redisTemplate, never()).delete("promotion:auction:301:close_decision_version");
+        verify(valueOperations).set("promotion:auction:{301}:close_decision_version", "6");
+        verify(redisTemplate, never()).delete("promotion:auction:{301}:close_decision_version");
         verify(windowMapper, never()).markSettled(eq(301L), any());
     }
 
@@ -112,7 +121,7 @@ class PromotionAuctionWindowCloserTest {
                 "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
         when(windowMapper.listClosableWindows(any(), eq(50))).thenReturn(List.of(window));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("promotion:auction:301:close_decision_version")).thenReturn("6");
+        when(valueOperations.get("promotion:auction:{301}:close_decision_version")).thenReturn("6");
         when(bidMapper.listActiveBidsByWindowId(301L,
                 Instant.parse("2026-06-20T11:00:00Z"),
                 Instant.parse("2026-06-20T12:00:00Z")))
@@ -123,7 +132,7 @@ class PromotionAuctionWindowCloserTest {
         org.mockito.ArgumentCaptor<PromotionAuctionDecision> captor = forClass(PromotionAuctionDecision.class);
         verify(decisionLogPort).append(captor.capture());
         org.assertj.core.api.Assertions.assertThat(captor.getValue().decisionVersion()).isEqualTo(6L);
-        verify(valueOperations, never()).increment("promotion:auction:301:decision_version");
+        verify(hashOperations, never()).increment("promotion:auction:{301}:state", "decisionVersion", 1L);
     }
 
     @Test
@@ -132,8 +141,9 @@ class PromotionAuctionWindowCloserTest {
                 "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
         when(windowMapper.listClosableWindows(any(), eq(50))).thenReturn(List.of(window));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("promotion:auction:301:close_decision_version")).thenReturn(null);
-        when(valueOperations.increment("promotion:auction:301:decision_version")).thenReturn(6L);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(valueOperations.get("promotion:auction:{301}:close_decision_version")).thenReturn(null);
+        when(hashOperations.increment("promotion:auction:{301}:state", "decisionVersion", 1L)).thenReturn(6L);
         when(bidMapper.listActiveBidsByWindowId(301L,
                 Instant.parse("2026-06-20T11:00:00Z"),
                 Instant.parse("2026-06-20T12:00:00Z")))
@@ -143,8 +153,8 @@ class PromotionAuctionWindowCloserTest {
         assertThatThrownBy(() -> closer.closeDueWindows(Instant.parse("2026-06-20T11:00:00Z"), 50))
                 .isInstanceOf(IllegalStateException.class);
 
-        verify(valueOperations).set("promotion:auction:301:close_decision_version", "6");
-        verify(redisTemplate, never()).delete("promotion:auction:301:close_decision_version");
+        verify(valueOperations).set("promotion:auction:{301}:close_decision_version", "6");
+        verify(redisTemplate, never()).delete("promotion:auction:{301}:close_decision_version");
     }
 
     @Test
@@ -153,8 +163,9 @@ class PromotionAuctionWindowCloserTest {
                 "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
         when(windowMapper.listClosableWindows(any(), eq(50))).thenReturn(List.of(window));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("promotion:auction:301:close_decision_version")).thenReturn(null, "6");
-        when(valueOperations.increment("promotion:auction:301:decision_version")).thenReturn(6L, 7L);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(valueOperations.get("promotion:auction:{301}:close_decision_version")).thenReturn(null, "6");
+        when(hashOperations.increment("promotion:auction:{301}:state", "decisionVersion", 1L)).thenReturn(6L, 7L);
         when(bidMapper.listActiveBidsByWindowId(301L,
                 Instant.parse("2026-06-20T11:00:00Z"),
                 Instant.parse("2026-06-20T12:00:00Z")))
@@ -168,7 +179,7 @@ class PromotionAuctionWindowCloserTest {
         org.assertj.core.api.Assertions.assertThat(captor.getAllValues())
                 .extracting(PromotionAuctionDecision::decisionVersion)
                 .containsExactly(6L, 6L);
-        verify(valueOperations, times(1)).increment("promotion:auction:301:decision_version");
+        verify(hashOperations, times(1)).increment("promotion:auction:{301}:state", "decisionVersion", 1L);
     }
 
     @Test

@@ -3,10 +3,8 @@ package com.tongji.promotion.api;
 import com.tongji.auth.token.JwtService;
 import com.tongji.promotion.api.dto.CreatePromotionCampaignRequest;
 import com.tongji.promotion.api.dto.PromotionCampaignResponse;
-import com.tongji.promotion.api.dto.SubmitPromotionBidCommandResponse;
-import com.tongji.promotion.api.dto.SubmitPromotionBidRequest;
+import com.tongji.promotion.bprime.service.PromotionBidEscrowService;
 import com.tongji.promotion.bprime.service.PromotionSnapshotService;
-import com.tongji.promotion.bprime.service.PromotionCommandSubmissionService;
 import com.tongji.promotion.model.PromotionCampaign;
 import com.tongji.promotion.model.PromotionCampaignStatus;
 import com.tongji.promotion.model.PromotionResourceType;
@@ -33,7 +31,7 @@ class PromotionControllerTest {
     private PromotionCampaignService campaignService;
 
     @Mock
-    private PromotionCommandSubmissionService commandSubmissionService;
+    private PromotionBidEscrowService bidEscrowService;
 
     @Mock
     private PromotionSnapshotService snapshotService;
@@ -48,23 +46,8 @@ class PromotionControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new PromotionController(campaignService, commandSubmissionService, snapshotService,
-                allocationService, jwtService);
-    }
-
-    @Test
-    void submitBidDelegatesToCommandSubmissionWithoutDirectBidMutation() {
-        when(jwtService.extractUserId(any())).thenReturn(42L);
-        when(commandSubmissionService.submit(eq(42L), eq(201L), eq(120L), eq("idem-1"), any()))
-                .thenReturn(new SubmitPromotionBidCommandResponse("cmd-1", "301", "SUBMITTED", false));
-
-        SubmitPromotionBidCommandResponse response = controller.submitBid(
-                201L, new SubmitPromotionBidRequest(120L, "idem-1"), null);
-
-        verify(commandSubmissionService).submit(eq(42L), eq(201L), eq(120L), eq("idem-1"), any());
-        assertThat(response.commandId()).isEqualTo("cmd-1");
-        assertThat(response.auctionWindowId()).isEqualTo("301");
-        assertThat(response.resultAvailable()).isFalse();
+        controller = new PromotionController(campaignService, bidEscrowService, snapshotService, allocationService,
+                jwtService);
     }
 
     @Test

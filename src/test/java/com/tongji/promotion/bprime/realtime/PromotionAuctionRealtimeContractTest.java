@@ -13,10 +13,17 @@ class PromotionAuctionRealtimeContractTest {
     @Test
     void definesOnlyPromotionAuctionChannelsForThisChange() {
         assertThat(PromotionAuctionRealtimeChannels.ENDPOINT).isEqualTo("/ws/promotion-auction");
+        assertThat(PromotionAuctionRealtimeChannels.NATIVE_ENDPOINT)
+                .isEqualTo("/ws/promotion-auction-native");
+        assertThat(PromotionAuctionRealtimeChannels.APPLICATION_PREFIX).isEqualTo("/app");
+        assertThat(PromotionAuctionRealtimeChannels.BID_APPLICATION_DESTINATION)
+                .isEqualTo("/promotion-auctions/bids");
         assertThat(PromotionAuctionRealtimeChannels.publicTopic(301L))
                 .isEqualTo("/topic/promotion-auctions/301");
         assertThat(PromotionAuctionRealtimeChannels.PRIVATE_OUTCOME_QUEUE)
                 .isEqualTo("/queue/promotion-auction-outcomes");
+        assertThat(PromotionAuctionRealtimeChannels.PRIVATE_BID_ACK_QUEUE)
+                .isEqualTo("/queue/promotion-auction-bid-acks");
     }
 
     @Test
