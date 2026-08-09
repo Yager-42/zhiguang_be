@@ -5,7 +5,7 @@
 #   ./run.sh seed                  灌种子数据（幂等；含参数合规前置校验）
 #   ./run.sh seed --force          先清理（cleanup.sql）再灌
 #   ./run.sh verify                校验种子数据合规性（自关注/孤儿/格式/长度/状态，见 seed/verify_seed.sql）
-#   ./run.sh baseline              单链路分级加压：auth feed counter comment relation search wallet promotion × VUS_LEVELS
+#   ./run.sh baseline              单链路分级加压：auth feed counter comment relation search wallet × VUS_LEVELS
 #   ./run.sh mixed                 混合常态基线（MIXED_VUS=300, MIXED_HOLD=30m）
 #   ./run.sh mixed --high          混合高压（按 VUS_LEVELS 逐级加压至拐点）
 #   ./run.sh soak                  长稳（SOAK_VUS=300, SOAK_HOLD=2h）
@@ -46,6 +46,7 @@ mkdir -p "$RESULTS_DIR" "$METRICS_DIR"
 # 种子规模
 USER_N="${USER_N:-1000}"
 POST_N="${POST_N:-500}"
+PROMOTION_CAMPAIGN_N="${PROMOTION_CAMPAIGN_N:-100}"
 FOLLOW_PER_USER="${FOLLOW_PER_USER:-20}"
 LARGE_FOLLOWER_N="${LARGE_FOLLOWER_N:-0}"
 LARGE_AUTHOR_ID="${LARGE_AUTHOR_ID:-1000001}"
@@ -60,7 +61,7 @@ fi
 # 加压级别
 VUS_LEVELS="${VUS_LEVELS:-100 300 600 1000}"
 HOLD="${HOLD:-4m}"
-BASELINE_SCRIPTS="${BASELINE_SCRIPTS:-auth feed counter comment relation search wallet promotion}"
+BASELINE_SCRIPTS="${BASELINE_SCRIPTS:-auth feed counter comment relation search wallet}"
 MIXED_VUS="${MIXED_VUS:-300}"
 MIXED_HOLD="${MIXED_HOLD:-30m}"
 SOAK_VUS="${SOAK_VUS:-300}"
@@ -76,7 +77,8 @@ node_run() {
     node "$@"
   else
     log "node not found; using node:20-alpine container" >&2
-    docker run --rm -i -v "$PWD:/loadtest" -w /loadtest node:20-alpine node "$@"
+    docker run --rm -i --add-host=host.docker.internal:host-gateway \
+      -v "$PWD:/loadtest" -w /loadtest node:20-alpine node "$@"
   fi
 }
 
@@ -88,6 +90,7 @@ render() { # 渲染 SQL 占位符
       -e "s|__LARGE_AUTHOR_ID__|$LARGE_AUTHOR_ID|g" \
       -e "s|__USER_ID_BASE__|$USER_ID_BASE|g" \
       -e "s|__POST_ID_BASE__|$POST_ID_BASE|g" \
+      -e "s|__PROMOTION_CAMPAIGN_N__|$PROMOTION_CAMPAIGN_N|g" \
       -e "s|__BCRYPT__|$PWD_HASH|g" "$1"
 }
 
@@ -110,9 +113,9 @@ else
 fi
 
 start_samplers() { # tag —— 同时采 SUT 侧与压测机侧，判定瓶颈归属
-  ./collect_metrics.sh > "$METRICS_DIR/sut-$1.tsv" &
+  bash ./collect_metrics.sh > "$METRICS_DIR/sut-$1.tsv" &
   SUT_SAMPLER=$!
-  ./loadgen_metrics.sh > "$METRICS_DIR/loadgen-$1.tsv" &
+  bash ./loadgen_metrics.sh > "$METRICS_DIR/loadgen-$1.tsv" &
   LOADGEN_SAMPLER=$!
 }
 
@@ -151,6 +154,10 @@ case "$cmd" in
     fi
     if [ "$LARGE_FOLLOWER_N" -gt $((USER_N - 1)) ]; then
       log "ERROR: LARGE_FOLLOWER_N must be <= USER_N-1 (大V粉丝必须落在用户池内且排除大V自己)"
+      exit 1
+    fi
+    if [ "$PROMOTION_CAMPAIGN_N" -lt 1 ] || [ "$PROMOTION_CAMPAIGN_N" -gt "$USER_N" ] || [ "$PROMOTION_CAMPAIGN_N" -gt "$POST_N" ]; then
+      log "ERROR: PROMOTION_CAMPAIGN_N must be between 1 and min(USER_N, POST_N)"
       exit 1
     fi
     if [ "${1:-}" = "--force" ]; then

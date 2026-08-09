@@ -77,7 +77,7 @@ MAVEN_OPTS="-Xmx2g -XX:+UseG1GC" mvn spring-boot:run   # JDK21 + Maven；或 IDE
 
 | 场景 | 需要开启 |
 |---|---|
-| 竞价 B' 全链路（scripts/promotion.js） | `PROMOTION_BPRIME_ENABLED=true docker compose up -d`（容器）或启动参数（宿主直跑）；需 RocketMQ |
+| 竞价 WebSocket 链路（scripts/promotion-ws-fast-reject.js / promotion-ws-capacity.js / promotion-ws-realistic.js） | `PROMOTION_BPRIME_ENABLED=true docker compose up -d`（容器）或启动参数（宿主直跑）；需 RocketMQ |
 | 推荐混排（Gorse） | `docker compose --profile recommendation up -d gorse` + `GORSE_ENABLED=true` 重启 app（可选，默认关） |
 | fanout 全链路 | 需 Canal 开启的测试环境（本地 `canal.enabled=false`，只能压到写入 outbox 为止） |
 
@@ -145,6 +145,54 @@ k6 run -e RATE=100 -e VUS=300 -e HOLD=10m scripts/mixed.js
 k6 run -e RATE=200 -e VUS=400 -e HOLD=10m scripts/mixed.js
 ```
 
+### 4.3.1 竞价 WebSocket 专项
+
+Eliaaazzz 风格的高活动 WebSocket 快拒场景默认使用原生 WebSocket 持久连接，在 setup 中先为每个 campaign
+完成一次 Redis Lua 权威接受并校验本地单调水位已生效，再以固定目标速率重复提交同价 bid：
+
+```bash
+k6 run -e VUS=100 -e RATE=20000 -e DURATION_SECONDS=30 \
+  scripts/promotion-ws-fast-reject.js
+```
+
+`promotion_ws_bid_sent` 是 WebSocket 入站量，`promotion_ws_bid_fast_rejected` 是通过 Redis 前置守卫后
+未进入 RocketMQ 的安全快拒，`promotion_ws_bid_published` 是进入可靠决策链路的请求，
+`promotion_ws_bid_ack_duration` 是发包到私有 ACK 的端到端延迟。该口径用于验证 20k bids/s 网关负载，
+不等于 Redis Lua + Kafka 的 `decision_qps`。发送窗口结束后默认保留 5 秒 ACK drain；稳态入站 QPS 必须按
+`promotion_ws_bid_sent / DURATION_SECONDS` 计算，不能用包含 setup 和 drain 的 k6 Counter rate。设置
+`PROMOTION_WS_TRANSPORT=stomp` 可回归兼容通道，默认 `native` 对齐 Elia 的原生 WS 读循环与单写泵。
+
+`promotion-ws-capacity.js` 保留旧 REST 容量场景的闭环口径：40 VU 预热 15 秒、停顿 15 秒、
+100 VU 测量 30 秒，每个 VU 收到上一条 ACK 后才继续发送。它用于和历史约 3000 ingress QPS
+结果对比，不得与 `promotion-ws-fast-reject.js` 的固定 RATE 开环结果混用。
+
+`promotion-ws-realistic.js` 是状态化单房间主场景：持久连接按稳态、升温、尖峰、冷却阶段独立到达，
+并生成正常加价、旧页面价格、原幂等键重试、同价新键双击和保证金不足请求。先渲染并执行
+`seed/seed_promotion_realistic.sql`，再通过 `PROMOTION_EXPECTED_WINDOW_ID` 强校验所有活动进入专用窗口。
+默认峰值为 `9000 bids/s`，可通过 `PEAK_RATE` 覆盖；入口阶段的实际 QPS 必须按各阶段 counter 除以
+对应阶段时长计算，不能使用包含 setup 和 ACK drain 的 k6 全局 counter rate。
+
+`promotion-ws-user-feedback.js` 是用户视角的主竞价场景。每个用户订阅房间排名、私有收单 ACK 和最终
+outcome，从 snapshot 初始化可见价格，经过稳定的个体反应时间和逐次轻微扰动后提交高于所见价格的
+bid，并等待 `BID_CONFIRMED` 或 `BID_REJECTED` 后才考虑下一次出价。
+`promotion_user_final_feedbacks / MEASURE_SECONDS` 是最终用户反馈 QPS，
+`promotion_user_final_feedback_duration` 是提交到最终反馈的延迟；
+`PUBLISHED` 仅计入入口 ACK，不能当作竞价完成。
+
+默认数据库存在历史窗口或 projection checkpoint 时，应创建独立测试 schema，并通过
+`docker compose -f docker-compose.yml -f loadtest/docker-compose.isolated.yml` 启动 app；
+`LOADTEST_DATASOURCE_URL` 指向该 schema。command/decision topic 和三个 consumer group 也必须使用唯一名称。
+压测完成后可将隔离 Kafka topic 从头输出并通过 `scripts/analyze-promotion-decision-latency.mjs` 计算
+`submittedAt -> decidedAt` 的真实决策 p95/p99 与停发后 drain，不能用 WebSocket ACK 延迟替代。
+
+应用重启会清空进程内单调水位。脚本会先通过原生 WebSocket 让每个 campaign 经权威链路接受一次
+`PROMOTION_FAST_REJECT_BID_AMOUNT` 再开压；同一批种子已接受过该价格时，需提高该参数，或重新执行 seed
+刷新窗口。竞价提交不开放 REST；原生 WebSocket 与兼容 STOMP 都通过有界异步微批合并 Redis
+状态/幂等预检，并使用相同守卫与同一收单服务。Redis Lua 始终是接受竞价的唯一裁决者。
+
+首次执行或种子过期时先运行 `PROMOTION_CAMPAIGN_N=100 ./run.sh seed`。单房间场景的所有活动映射
+到同一竞价窗口；多房间场景在 FEED/SEARCH 两个独立窗口间分流。
+
 ### 4.4 单机模式（只有一台机器）
 
 ```bash
@@ -167,7 +215,7 @@ K6_CPUS=1 K6_MEM=512m K6_DOCKER=1 ./run.sh mixed    # 更紧配额，CPU 让给 
 ```bash
 k6 run -e VUS=300 -e HOLD=5m -e P95=1500 scripts/feed.js      # 放宽阈值防误报
 k6 run -e VUS=200 -e HOLD=5m -e HOT_POST_ID=2000002 scripts/counter.js   # 换热帖
-k6 run -e VUS=100 -e HOLD=5m -e PROMO_CAMPAIGN_ID=3000001 -e PROMO_WINDOW_ID=3000002 scripts/promotion.js
+k6 run -e VUS=100 -e RATE=20000 -e DURATION_SECONDS=30 scripts/promotion-ws-fast-reject.js
 ```
 
 ## 5. 结果解读
