@@ -410,7 +410,28 @@ CREATE TABLE IF NOT EXISTS promotion_auction_window (
     KEY idx_promotion_window_status_settled (status, settled_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 推广出价：某活动在某窗口的单条出价，接单即冻结申报价；(campaign_id, auction_window_id) 唯一防重复出价。
+-- 推广竞价保证金：低频预授权冻结总额；current_hold 由 Redis 决策异步投影。
+CREATE TABLE IF NOT EXISTS promotion_bid_escrow (
+    id BIGINT UNSIGNED NOT NULL,
+    auction_window_id BIGINT UNSIGNED NOT NULL,
+    campaign_id BIGINT UNSIGNED NOT NULL,
+    bidder_user_id BIGINT UNSIGNED NOT NULL,
+    authorized_amount BIGINT NOT NULL,
+    current_hold BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL,
+    expires_at DATETIME(3) NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_promotion_escrow_window_campaign (auction_window_id, campaign_id),
+    KEY idx_promotion_escrow_window_status (auction_window_id, status, campaign_id),
+    KEY idx_promotion_escrow_bidder_status (bidder_user_id, status, expires_at),
+    CONSTRAINT chk_promotion_escrow_amount CHECK (
+        authorized_amount > 0 AND current_hold >= 0 AND current_hold <= authorized_amount
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 推广出价：Kafka 决策日志投影的活动窗口最高有效出价。
 CREATE TABLE IF NOT EXISTS promotion_bid (
     id BIGINT UNSIGNED NOT NULL,
     campaign_id BIGINT UNSIGNED NOT NULL,
@@ -445,13 +466,16 @@ CREATE TABLE IF NOT EXISTS promotion_auction_command (
     post_id BIGINT UNSIGNED NOT NULL,
     resource_type VARCHAR(64) NOT NULL,
     bid_amount BIGINT NOT NULL,
+    reserve_price BIGINT NOT NULL,
+    window_status VARCHAR(16) NOT NULL,
     status VARCHAR(32) NOT NULL,
     created_at DATETIME(3) NOT NULL,
     updated_at DATETIME(3) NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uk_promotion_command_id (command_id),
     UNIQUE KEY uk_promotion_command_idempotency (auction_window_id, bidder_user_id, idempotency_key),
-    KEY idx_promotion_command_window_status (auction_window_id, status, created_at)
+    KEY idx_promotion_command_window_status (auction_window_id, status, created_at),
+    KEY idx_promotion_command_publish (status, updated_at, created_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS promotion_projection_checkpoint (

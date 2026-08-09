@@ -4,5 +4,11 @@ public record SubmitPromotionBidCommandResponse(
         String commandId,
         String auctionWindowId,
         String status,
-        boolean resultAvailable
-) {}
+        boolean resultAvailable,
+        String rejectionReason
+) {
+    public SubmitPromotionBidCommandResponse(String commandId, String auctionWindowId, String status,
+                                             boolean resultAvailable) {
+        this(commandId, auctionWindowId, status, resultAvailable, null);
+    }
+}

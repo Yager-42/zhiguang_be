@@ -22,12 +22,15 @@ public class PromotionAuctionCommandRecord {
     private long postId;
     private String resourceType;
     private long bidAmount;
+    private long reservePrice;
+    private String windowStatus;
     private String status;
     private Instant createdAt;
     private Instant updatedAt;
 
     public PromotionAuctionCommand toCommand() {
         return new PromotionAuctionCommand(commandId, idempotencyKey, requestHash, auctionWindowId,
-                campaignId, bidderUserId, postId, resourceType, bidAmount, "BID", createdAt);
+                campaignId, bidderUserId, postId, resourceType, bidAmount, reservePrice, windowStatus,
+                "BID", createdAt);
     }
 }

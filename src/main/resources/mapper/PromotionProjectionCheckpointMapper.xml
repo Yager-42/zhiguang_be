@@ -3,15 +3,19 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper">
-    <select id="findLastDecisionVersion" resultType="long">
-        SELECT last_decision_version
-        FROM promotion_projection_checkpoint
-        WHERE auction_window_id = #{auctionWindowId}
-        LIMIT 1
-    </select>
+    <resultMap id="PromotionProjectionCheckpointResultMap"
+               type="com.tongji.promotion.bprime.model.PromotionProjectionCheckpointRecord">
+        <id column="auction_window_id" property="auctionWindowId"/>
+        <result column="last_decision_id" property="lastDecisionId"/>
+        <result column="last_decision_version" property="lastDecisionVersion"/>
+        <result column="last_kafka_topic" property="lastKafkaTopic"/>
+        <result column="last_kafka_partition" property="lastKafkaPartition"/>
+        <result column="last_kafka_offset" property="lastKafkaOffset"/>
+    </resultMap>
 
-    <select id="findLastDecisionId" resultType="string">
-        SELECT last_decision_id
+    <select id="findByAuctionWindowId" resultMap="PromotionProjectionCheckpointResultMap">
+        SELECT auction_window_id, last_decision_id, last_decision_version,
+               last_kafka_topic, last_kafka_partition, last_kafka_offset
         FROM promotion_projection_checkpoint
         WHERE auction_window_id = #{auctionWindowId}
         LIMIT 1

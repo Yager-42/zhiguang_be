@@ -4,6 +4,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -19,12 +20,14 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 public class CounterConfig {
 
     @Bean
+    @Primary
     public ProducerFactory<String, String> stringProducerFactory(KafkaProperties properties) {
         var props = properties.buildProducerProperties();
         return new DefaultKafkaProducerFactory<>(props, new StringSerializer(), new StringSerializer()); // 统一字符串序列化
     }
 
     @Bean
+    @Primary
     public KafkaTemplate<String, String> stringKafkaTemplate(ProducerFactory<String, String> pf) {
         return new KafkaTemplate<>(pf);
     }

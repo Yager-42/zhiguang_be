@@ -2,7 +2,11 @@ package com.tongji.promotion.schedule;
 
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.kafka.PromotionDecisionLogPort;
+import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
+import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
+import com.tongji.promotion.bprime.model.PromotionWalletEffect;
+import com.tongji.promotion.bprime.redis.PromotionAuctionRedisKeys;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
@@ -18,6 +22,8 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -25,6 +31,7 @@ public class PromotionAuctionWindowCloser {
 
     private final PromotionAuctionWindowMapper windowMapper;
     private final PromotionBidMapper bidMapper;
+    private final PromotionBidEscrowMapper escrowMapper;
     private final PromotionAuctionService auctionService;
     private final PromotionDecisionLogPort decisionLogPort;
     private final PromotionAllocationCacheService cacheService;
@@ -55,6 +62,9 @@ public class PromotionAuctionWindowCloser {
                     .takeWhile(bid -> bid.getBidAmount() >= window.getReservePrice())
                     .limit(window.getSlotCount())
                     .count();
+            Map<Long, PromotionBidEscrowRecord> escrows = escrowMapper.listActiveByWindowId(window.getId()).stream()
+                    .collect(Collectors.toMap(PromotionBidEscrowRecord::getCampaignId, Function.identity()));
+            List<PromotionWalletEffect> walletEffects = closeWalletEffects(window, ranked, winnerCount, escrows);
             long decisionVersion = nextDecisionVersion(window.getId());
             decisionLogPort.append(new PromotionAuctionDecision(
                     "promotion-bprime-close-window-" + window.getId() + "-v" + decisionVersion,
@@ -72,12 +82,12 @@ public class PromotionAuctionWindowCloser {
                     null,
                     0L,
                     finalRanking(ranked),
-                    closeWalletEffects(window, ranked, winnerCount),
+                    walletEffects,
                     Map.of(
                             "finalRanking", finalRanking(ranked),
                             "winners", winners(window, ranked, winnerCount),
                             "clearingPrices", clearingPrices(window, ranked, winnerCount),
-                            "walletEffects", closeWalletEffects(window, ranked, winnerCount),
+                            "walletEffects", walletEffects,
                             "allocationStartAt", allocationStartAt.toString(),
                             "allocationEndAt", allocationEndAt.toString(),
                             "finalWindowStatus", "SETTLED"
@@ -121,31 +131,35 @@ public class PromotionAuctionWindowCloser {
                 .toList();
     }
 
-    private List<com.tongji.promotion.bprime.model.PromotionWalletEffect> closeWalletEffects(
-            PromotionAuctionWindow window, List<PromotionBid> ranked, int winnerCount) {
+    private List<PromotionWalletEffect> closeWalletEffects(
+            PromotionAuctionWindow window, List<PromotionBid> ranked, int winnerCount,
+            Map<Long, PromotionBidEscrowRecord> escrows) {
         return java.util.stream.IntStream.range(0, ranked.size())
                 .boxed()
-                .flatMap(i -> walletEffectsForBid(window, ranked, winnerCount, i).stream())
+                .flatMap(i -> walletEffectsForBid(window, ranked, winnerCount, i, escrows).stream())
                 .toList();
     }
 
-    private List<com.tongji.promotion.bprime.model.PromotionWalletEffect> walletEffectsForBid(
-            PromotionAuctionWindow window, List<PromotionBid> ranked, int winnerCount, int index) {
+    private List<PromotionWalletEffect> walletEffectsForBid(
+            PromotionAuctionWindow window, List<PromotionBid> ranked, int winnerCount, int index,
+            Map<Long, PromotionBidEscrowRecord> escrows) {
         PromotionBid bid = ranked.get(index);
+        PromotionBidEscrowRecord escrow = escrows.get(bid.getCampaignId());
+        long authorizedAmount = escrow == null ? bid.getBidAmount() : escrow.getAuthorizedAmount();
         if (index >= winnerCount) {
-            return List.of(new com.tongji.promotion.bprime.model.PromotionWalletEffect(
-                    bid.getBidderUserId(), bid.getBidAmount(), "RELEASE",
+            return List.of(new PromotionWalletEffect(
+                    bid.getBidderUserId(), authorizedAmount, "RELEASE",
                     "promotion-bprime:" + bid.getAuctionWindowId() + ":" + bid.getCampaignId() + ":release"));
         }
         long clearingPrice = clearingPrice(window, ranked, index);
-        long releaseAmount = bid.getBidAmount() - clearingPrice;
-        var capture = new com.tongji.promotion.bprime.model.PromotionWalletEffect(
+        long releaseAmount = authorizedAmount - clearingPrice;
+        PromotionWalletEffect capture = new PromotionWalletEffect(
                 bid.getBidderUserId(), clearingPrice, "CAPTURE",
                 "promotion-bprime:" + window.getId() + ":" + bid.getCampaignId() + ":capture");
         if (releaseAmount <= 0) {
             return List.of(capture);
         }
-        return List.of(capture, new com.tongji.promotion.bprime.model.PromotionWalletEffect(
+        return List.of(capture, new PromotionWalletEffect(
                 bid.getBidderUserId(), releaseAmount, "RELEASE",
                 "promotion-bprime:" + window.getId() + ":" + bid.getCampaignId() + ":release"));
     }
@@ -156,12 +170,13 @@ public class PromotionAuctionWindowCloser {
     }
 
     private long nextDecisionVersion(long auctionWindowId) {
-        String pendingKey = "promotion:auction:" + auctionWindowId + ":close_decision_version";
+        String prefix = PromotionAuctionRedisKeys.prefix(auctionWindowId);
+        String pendingKey = prefix + ":close_decision_version";
         String pendingVersion = redisTemplate.opsForValue().get(pendingKey);
         if (pendingVersion != null && !pendingVersion.isBlank()) {
             return Long.parseLong(pendingVersion);
         }
-        Long version = redisTemplate.opsForValue().increment("promotion:auction:" + auctionWindowId + ":decision_version");
+        Long version = redisTemplate.opsForHash().increment(prefix + ":state", "decisionVersion", 1L);
         if (version == null) {
             throw new IllegalStateException("promotion decision version increment failed: " + auctionWindowId);
         }

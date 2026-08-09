@@ -1,33 +1,32 @@
 package com.tongji.promotion.bprime.service;
 
 import com.tongji.promotion.bprime.model.PromotionAuctionSnapshot;
+import com.tongji.promotion.bprime.model.PromotionAuctionHotSnapshot;
 import com.tongji.promotion.bprime.model.PromotionRankingItem;
+import com.tongji.promotion.bprime.redis.PromotionRedisSnapshotAdapter;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionSlotAllocationMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionAuctionWindowStatus;
 import com.tongji.promotion.model.PromotionSlotAllocation;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 @Service
 public class PromotionSnapshotService {
 
     private final PromotionAuctionWindowMapper windowMapper;
     private final PromotionSlotAllocationMapper allocationMapper;
-    private final StringRedisTemplate redisTemplate;
+    private final PromotionRedisSnapshotAdapter redisSnapshotAdapter;
 
     public PromotionSnapshotService(PromotionAuctionWindowMapper windowMapper,
                                     PromotionSlotAllocationMapper allocationMapper,
-                                    StringRedisTemplate redisTemplate) {
+                                    PromotionRedisSnapshotAdapter redisSnapshotAdapter) {
         this.windowMapper = windowMapper;
         this.allocationMapper = allocationMapper;
-        this.redisTemplate = redisTemplate;
+        this.redisSnapshotAdapter = redisSnapshotAdapter;
     }
 
     public PromotionAuctionSnapshot snapshot(long auctionWindowId) {
@@ -35,44 +34,18 @@ public class PromotionSnapshotService {
         String status = window == null || window.getStatus() == null ? "UNKNOWN" : window.getStatus().name();
         String windowIdStr = String.valueOf(auctionWindowId);
         Instant windowEndAt = window != null ? window.getWindowEndAt() : null;
+        PromotionAuctionHotSnapshot hotSnapshot = redisSnapshotAdapter.snapshot(auctionWindowId);
         if (window != null && window.getStatus() == PromotionAuctionWindowStatus.SETTLED) {
             return new PromotionAuctionSnapshot(windowIdStr, status, allocationRanking(auctionWindowId),
-                    Instant.now(), redisDecisionVersion(auctionWindowId), windowEndAt);
+                    Instant.now(), hotSnapshot.decisionVersion(), windowEndAt);
         }
-        List<PromotionRankingItem> hotRanking = hotRanking(auctionWindowId);
+        List<PromotionRankingItem> hotRanking = hotSnapshot.ranking();
         if (!hotRanking.isEmpty()) {
             return new PromotionAuctionSnapshot(windowIdStr, status, hotRanking, Instant.now(),
-                    redisDecisionVersion(auctionWindowId), windowEndAt);
+                    hotSnapshot.decisionVersion(), windowEndAt);
         }
         return new PromotionAuctionSnapshot(windowIdStr, status, List.of(), Instant.now(),
-                redisDecisionVersion(auctionWindowId), windowEndAt);
-    }
-
-    private List<PromotionRankingItem> hotRanking(long auctionWindowId) {
-        String prefix = "promotion:auction:" + auctionWindowId;
-        Set<String> campaigns = redisTemplate.opsForZSet().reverseRange(prefix + ":ranking", 0, 29);
-        if (campaigns == null || campaigns.isEmpty()) {
-            return List.of();
-        }
-        List<PromotionRankingItem> items = new ArrayList<>();
-        int rank = 1;
-        for (String campaign : campaigns) {
-            String campaignKey = prefix + ":campaign:" + campaign;
-            String amount = (String) redisTemplate.opsForHash().get(campaignKey, "bidAmount");
-            String bidder = (String) redisTemplate.opsForHash().get(campaignKey, "bidderUserId");
-            String post = (String) redisTemplate.opsForHash().get(campaignKey, "postId");
-            if (amount != null && bidder != null && post != null) {
-                items.add(new PromotionRankingItem(campaign, bidder,
-                        post, Long.parseLong(amount), rank));
-                rank++;
-            }
-        }
-        return items;
-    }
-
-    private long redisDecisionVersion(long auctionWindowId) {
-        String value = redisTemplate.opsForValue().get("promotion:auction:" + auctionWindowId + ":decision_version");
-        return value == null || value.isBlank() ? 0L : Long.parseLong(value);
+                hotSnapshot.decisionVersion(), windowEndAt);
     }
 
     private List<PromotionRankingItem> allocationRanking(long auctionWindowId) {

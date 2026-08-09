@@ -2,9 +2,9 @@
 
 | 字段 | 值 |
 |------|-----|
-| **contract_version** | `0.1.0` |
+| **contract_version** | `0.2.0` |
 | **status** | **active**（本文档首次建立；后续架构/契约变更必须同步修改本文并升版本） |
-| **updated** | 2026-08-06 |
+| **updated** | 2026-08-08 |
 | **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，390 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
 | **roadmap** | OpenSpec 变更与执行顺序见 [`openspec/changes/execution-order.md`](../../openspec/changes/execution-order.md)；本仓为单体演进、微服务拆分仅作约束（见该文件阶段 0） |
 | **out of scope for this doc** | 前端 `zhiguang_fe/`（当前为空占位目录）、`loadtest/` 压测方案细节、各业务请求/响应 JSON 逐字段表（以代码 DTO 为准） |
@@ -26,19 +26,19 @@
 |----|------|------|------|
 | D1 | 进程拓扑 | **单体 Spring Boot 3.5.10 / Java 21**（`pom.xml` parent `spring-boot-starter-parent:3.5.10`、`java.version=21`），单一应用 `ZhiGuangApplication`（`ZhiGuangApplication.java`，`@SpringBootApplication` + `@EnableScheduling`），包根 `com.tongji` | 引入第二个应用/服务进程承载本仓领域逻辑 |
 | D2 | 模块分层 | 每域模块 = `api`（Controller+DTO）→ `service`(+`impl`) → `manager`/`mapper`/`event`/`consumer`/`model`；跨模块调用走 **service 接口** 或 **Kafka 事件**（详见 §3.3 模块依赖） | controller 直连 mapper；跨模块直读他人表 |
-| D3 | HTTP 错误契约 | 全局 `@RestControllerAdvice`（`common/web/GlobalExceptionHandler.java`）：`BusinessException`→400 + `{code,message}`；`@Valid` 失败→400 + `BAD_REQUEST`；兜底 `Exception`→500 + `{code:"INTERNAL_ERROR", message:"服务异常，请稍后重试"}`；业务码枚举 `common/exception/ErrorCode.java`（27 值） | 各 controller 自造错误体 |
-| D4 | ID 生成 | 统一 `IdService.nextId(IdNamespace)`（`common/id/`）：**Snowflake** 为默认（41+5+5+12 位，EPOCH 2024-01-01，时钟回拨抛 `ClockBackwardException`），**Segment**（`leaf_alloc` 表双缓冲，50% 阈值预加载）仅用于 `reconciliation_task/admin_operation/audit_log`；命名空间见 `IdNamespace.java` | 各模块自造随机/自增 ID |
+| D3 | HTTP 错误契约 | 全局 `@RestControllerAdvice`（`common/web/GlobalExceptionHandler.java`）：`BusinessException`→400 + `{code,message}`；`@Valid` 失败→400 + `BAD_REQUEST`；无匹配资源→404 + `{code:"NOT_FOUND",message:"请求资源不存在"}`；兜底 `Exception`→500 + `{code:"INTERNAL_ERROR", message:"服务异常，请稍后重试"}`；业务码枚举 `common/exception/ErrorCode.java`（27 值） | 各 controller 自造错误体 |
+| D4 | ID 生成 | 统一 `IdService.nextId(IdNamespace)`（`common/id/`）：**Snowflake** 为默认（41+5+5+12 位，EPOCH 2024-01-01，时钟回拨抛 `ClockBackwardException`），推广历史 command 与保证金分别使用 `PROMOTION_COMMAND`、`PROMOTION_ESCROW`；**Segment**（`leaf_alloc` 表双缓冲，50% 阈值预加载）仅用于 `reconciliation_task/admin_operation/audit_log`；命名空间见 `IdNamespace.java` | 各模块自造随机/自增 ID |
 | D5 | 异步一致性 | **outbox 表 + Canal CDC + Kafka `canal-outbox` 主题** 为跨模块事件总线（`CanalKafkaBridge.java` 监听 `zhiguang.outbox`，仅转发 INSERT/UPDATE 的 payload 列）；业务事务内写 outbox，事务提交后被转发；**at-least-once + 消费端幂等** | 业务事务内直发 Kafka |
-| D6 | 存储分工 | **MySQL**：事实源/账务（用户、帖子、评论、发布尝试、outbox、钱包、推广、对账、通知、关系）；**Cassandra**：长文本正文（`post_text_by_post_id`/`comment_text_by_comment_id`）+ 关注流时间线（`feed_inbox`/`feed_author_feed`，TTL 30 天 TWCS）；**Redis**：计数 SDS/位图事实、缓存、热状态、分布式协调（singleflight/锁）；**Elasticsearch**：搜索 `zhiguang_content_index`；**MinIO**：对象（正文 OSS 原文、图片、头像）。见 §5 | 用 Redis 当账务事实源；正文大字段进 MySQL |
+| D6 | 存储分工 | **MySQL**：长期事实/账务（用户、帖子、评论、发布尝试、outbox、钱包总余额、推广保证金授权与投影、对账、通知、关系）；**Redis**：推广窗口运行期间的竞价顺序、排名和已授权保证金占用实时权威，以及计数 SDS/位图事实、缓存、分布式协调（singleflight/锁）；**Kafka**：推广决策在投影前的有界持久事实；**Cassandra**：长文本正文与关注流时间线；**Elasticsearch**：搜索；**MinIO**：对象。见 §5 | 将 Redis 余额占用扩展为可超出 MySQL 预授权总额的账务事实；正文大字段进 MySQL |
 | D7 | 计数模型 | 实体计数（like/fav）三层：**位图分片事实层**（`bm:*`，32768 位/分片）+ **Kafka 事件聚合桶**（`counter-events` → `agg:v1:*`，每秒折叠 SDS）+ **SDS 固定结构**（`cnt:v1:*`，5×uint32 大端）；用户计数 `ucnt:{userId}` 同 SDS 布局（`counter/schema/*.java`） | 计数直接 INCR 单一计数器键 |
 | D8 | 发布语义 | **202 Accepted 只表示 attempt 被受理**：`POST /knowposts/{id}/publish` 恒 202 + `publishAttemptId`；`know_posts.status` 状态机 `draft→publishing→published / publish_failed / rejected / deleted`，全部守卫 UPDATE（`KnowPostMapper.xml`）；`publish_attempt` 独立状态机 + 5 分钟卡死恢复（`PublishAttemptService.java`） | 同步发布返回 200 表示已发布；无守卫状态流转 |
-| D9 | 钱包 | 三态余额 `available/held/escrowed` + **只追加流水** + `(owner_user_id, business_ref)` 幂等 + `wallet_business_ref` 全局 claim 串行化；托管六态状态机（`WalletEscrowStatus`：CREATED/LOCKED/RELEASED/REFUNDED/FORFEITED/CANCELLED）；**无 HTTP 写接口**（`WalletController.java:12` 注释） | 余额绝对值覆盖写；删改流水 |
-| D10 | 推广竞价 | 窗口式 slot 竞价：固定 60 分钟 epoch 对齐窗口（`PromotionAuctionWindowService`），GSP 结算（clearingPrice = max(下一名出价, reserve)），N 窗收单、N+1 窗展示；**bprime 异步决策链路**（`promotion.bprime.enabled` 开关）：命令经 RocketMQ 顺序消息 → Redis Lua 原子决策 → Kafka 决策日志 → 投影结算/STOMP 实时（`promotion/bprime/**`） | HTTP 请求内直接改排名/结算 |
+| D9 | 钱包 | 三态余额 `available/held/escrowed` + **只追加流水** + `(owner_user_id, business_ref)` 幂等 + `wallet_business_ref` 全局 claim 串行化；托管六态状态机不变。推广竞价新增唯一写边界 `POST /api/v1/promotions/campaigns/{id}/escrow`：只在出价前增加 MySQL `held` 与 `promotion_bid_escrow.authorized_amount`，不得进入单条竞价决策路径 | 余额绝对值覆盖写；删改流水；在有序竞价消费者逐条写钱包 |
+| D10 | 推广竞价 | 窗口式 slot 竞价与 GSP 结算不变；**bprime B' 可靠核心 + Eliaaazzz 网关快拒**：保证金预授权事务 → 同窗口 RocketMQ `ESCROW_NOTIFY` → Redis Lua 投影授权；竞价提交只开放兼容 STOMP 与原生 WebSocket，两者共用同一收单及 WS 协议服务，先以进程内单调 campaign 出价水位筛选确定必败候选，再用有界异步微批 Redis pipeline 按 Lua 前置顺序确认窗口仍 OPEN 且 commandId 未命中权威幂等结果，满足全部守卫时才快速返回 `BID_NOT_HIGHER`；其他请求仅读 Redis 路由并 `syncSendOrderly`，broker ACK 后返回 pending，不写 command 表；RocketMQ 窗口顺序消费 → Redis Lua 原子完成幂等、校验、排名和 `current_hold`，`BID_ACCEPTED` 立即以 `max(old,bidAmount)` 推进本地水位 → Kafka `acks=all` 同步确认 → ACK RocketMQ；Kafka batch 投影 MySQL 竞价事实、保证金占用/checkpoint，独立 fanout STOMP。快拒不得判定接受，不得本地裁决 reserve/终场，不得覆盖权威幂等重放；缓存缺失/落后、Redis 预检或微批队列失败、临近窗口结束必须放行至 Redis Lua；快拒不创建 command、不写 MQ/Kafka/MySQL，单独计量。原生 WebSocket 按连接使用有界关键 ACK 队列和单写泵，满载时关闭慢连接而不静默丢 ACK；运行态不得查询或更新 MySQL | 网关判定竞价接受；跳过 Redis 前置守卫直接快拒；用可能下降或非单调缓存拒绝；缓存不确定时拒绝；用无界队列掩盖过载；并发写同一 WebSocket；ACK 队列满后静默丢弃；HTTP 竞价提交；在有序消费者访问 MySQL；Kafka ACK 前确认 RocketMQ 命令；新请求写 `promotion_auction_command` |
 | D11 | 对账补偿 | 独立对账模块：任务表 + checkpoint 扫描 + 10 个 Reconciler + Redisson 锁执行器（指数退避、卡死恢复），事件消费失败与周期扫描双来源建任务（`reconciliation/**`） | 事件丢失不补；手工修数 |
 | D12 | 通知 | 幂等键 `notifications.event_key` 唯一 + 捕获 `DuplicateKeyException`；点赞通知 5 分钟 Redis 窗口聚合、30 秒定时落库（`notification/consumer/*`） | 同事件重复落多条 |
-| D13 | 场景开关 | 外部系统默认关闭、显式开启：`canal.enabled=false`、`recommendation.gorse.enabled=false`、`promotion.bprime.enabled=false`、`moderation.llm.enabled=false`、`counter.rebuild.enabled=false`、`feed.home.mixed-enabled=false`（`application.yml`） | 生产依赖未开启的能力 |
+| D13 | 场景开关 | 外部系统默认关闭、显式开启：`canal.enabled=false`、`recommendation.gorse.enabled=false`、`promotion.bprime.enabled=false`、`moderation.llm.enabled=false`、`counter.rebuild.enabled=false`、`feed.home.mixed-enabled=false`（`application.yml`）；bprime 关闭时 RocketMQ、Kafka decision log 与实时推送均注册 Noop 端口，真实适配器不得被装配 | 生产依赖未开启的能力 |
 | D14 | 大整数序列化 | 所有 Snowflake ID（>2^53）出参一律 **String 序列化** 防 JS 精度丢失（DTO 注释与实现：`NotificationItemResponse`、`KnowPostDraftCreateResponse`、`ModerationReportResponse`、`PromotionRankingItem` 等） | long 直出到 JSON |
-| D15 | 幂等三支柱 | ① 请求幂等：`client_request_id`/`idempotent_key` + 唯一键 + `DuplicateKeyException` 兜底（评论、发布、推广命令）；② 事件幂等：消费端去重键/唯一键（`dedup:rel:*`、`uk_notification_event_key`、`uk_wallet_ledger_owner_business_ref`、命令表）；③ 对账兜底：事件失败建对账任务（§6.4） | 依赖 at-most-once 投递 |
+| D15 | 幂等三支柱 | ① 请求幂等：评论/发布使用唯一键；推广出价以 `(window,user,idempotencyKey)` 生成确定性 commandId，并由 Redis 保存 `requestHash+decision` 重放，Redis 7.4 `HEXPIRE` 为每个 command 字段独立设置有界 TTL，禁止用活跃房间整体续期造成历史记录永久驻留；保证金授权由 `promotion_bid_escrow uk(window,campaign)` 与钱包 businessRef 判等；② 事件幂等：消费端去重键/唯一键与推广 checkpoint；③ 对账兜底：事件失败建对账任务（§6.4） | 依赖 at-most-once 投递 |
 | D16 | 技术栈绑定 | Spring Boot 3.5.10 / Java 21 / MyBatis 3.0.3 + MySQL 8.4 / Redis 7.4 + Redisson 3.52 / Kafka（spring-kafka）/ RocketMQ 5.3（仅推广命令）/ Cassandra 4.1 / ES（客户端 8.12.2，容器 9.2.1+IK）/ MinIO / Spring AI 1.1.2（DashScope，审核）/ Sentinel core 1.8.10（规则外部下发）/ Caffeine 3.1.8 / Canal client 1.1.8 / WebSocket STOMP（推广实时） | 未 ADR 换主框架 |
 
 ### 1.1 已废弃 / 未采纳
@@ -168,7 +168,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 ## 5. 存储契约
 
-### 5.1 MySQL（`db/schema.sql` 共 26 表；Docker 初始化挂载 `docker-compose.yml` mysql volume；MyBatis `classpath*:mapper/**/*.xml`，`map-underscore-to-camel-case`）
+### 5.1 MySQL（`db/schema.sql` 共 27 表；Docker 初始化挂载 `docker-compose.yml` mysql volume；MyBatis `classpath*:mapper/**/*.xml`，`map-underscore-to-camel-case`）
 
 | 域 | 表 | 关键约束/说明 |
 |----|----|----|
@@ -183,7 +183,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 通知 | `notifications` | `uk_notification_event_key` 幂等；聚合窗口列 |
 | 审核 | `moderation_reports` | `uk(reporter, target_type, target_id)` 去重；LLM/重试/处置列 |
 | 钱包 | `wallet_account` / `wallet_ledger` / `wallet_escrow` / `wallet_business_ref` | 三态余额 CHECK 非负；ledger `uk(owner, business_ref)` + `amount>0`；escrow `uk(business_ref)`；ref claim 表 PK=business_ref |
-| 推广 | `promotion_campaign` / `promotion_auction_window` / `promotion_bid` / `promotion_slot_allocation` / `promotion_auction_command` / `promotion_projection_checkpoint` | bid `uk(campaign, window)` + `uk(wallet_business_ref)` + `uk(command_id)`；window `uk(resource, start, end)`；checkpoint PK=window_id |
+| 推广 | `promotion_campaign` / `promotion_auction_window` / `promotion_bid_escrow` / `promotion_bid` / `promotion_slot_allocation` / `promotion_auction_command` / `promotion_projection_checkpoint` | escrow `uk(window,campaign)`，保存 `authorized_amount/current_hold/status`；bid `uk(campaign, window)` + `uk(command_id)`；window `uk(resource, start, end)`；checkpoint PK=window_id；command 表仅兼容切换前历史命令，不接受新写入 |
 | 对账 | `reconciliation_task` / `reconciliation_checkpoint` / `reconciliation_error_log` | task 活动去重：生成列 `active_dedupe_scope`（仅 pending/running 生效）+ 唯一键 |
 | ID | `leaf_alloc` | `biz_tag` PK；segment 段分配 |
 
@@ -228,7 +228,8 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 缓存 | `feed:timeline:{userId}` | TimelinePage JSON / 300s（仅默认页大小） | `FollowFeedServiceImpl` |
 | 缓存 | `feed:author:{authorId}:head` | List<TimelineItem> JSON / 120s（singleflight `feed-author-head` 重建） | 同上 |
 | 推广 | `promotion:allocation:active:{type}` | JSON 列表 / 300s | `PromotionAllocationCacheService` |
-| 推广 | `promotion:auction:{windowId}:state` / `:commands` / `:ranking` / `:campaign:{cid}` / `:decision_version` / `:close_decision_version` | bprime 热状态（hash/zset/计数器）；ranking score=`bidAmount*10^12 − decidedAtMs` | `PromotionAuctionRedisKeys`+Lua |
+| 推广 | `promotion:auction:{{windowId}}:state` / `:commands` / `:ranking` / `:campaign:{cid}` / `:escrow` / `:close_decision_version` | 同一 Redis Cluster hash slot 的 bprime 权威热状态；state 内含 `decisionVersion/status/reservePrice`，escrow hash 字段为 `{campaignId}:authorizedAmount/currentHold`；ranking score=`bidAmount*10^12 − decidedAtMs`；commands 的 requestHash/decision 字段使用 `HEXPIRE` 独立过期 | `PromotionAuctionRedisKeys`+Lua |
+| 推广 | `promotion:bprime:route:{campaignId}` | 保证金授权后写入的出价路由 JSON（owner/window/post/resource/reserve/status/endAt）/ 覆盖窗口结束后的有界 TTL | `PromotionBidRouteRepository` |
 | 通知 | `notif:like:event:{eventId}` | 去重 / 6h | `LikeNotificationConsumer` |
 | 通知 | `notif:like:bucket:{recipient}:{etype}:{eid}:{windowStart}` (+`bucket:index:` 索引) | hash 聚合桶 / 20min | 同上/`LikeNotificationFlushJob` |
 | 对账 | `recon:lock:{taskId}` | Redisson RLock | `ReconciliationTaskExecutor` |
@@ -261,7 +262,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `comment-events`（`comment.kafka.event-topic`） | `CommentOutboxDispatcher`，key=`aggregateId` | `comment-counter-effects`、`comment-reward-effects`、`comment-feedback-effects` 三个独立组 | `CommentOutboxEvent`，类型为 `COMMENT_CREATED/COMMENT_DELETED/COMMENT_MODERATED` |
 | `comment-feedback`（`comment.kafka.feedback-topic`） | `CommentFeedbackProducer`（best-effort）+ Controller 内联 | `notification-comment-consumer`、`recommendation-comment-feedback-consumer` | `CommentFeedbackEvent(...,action∈{comment,delete,like,unlike})` |
 | `counter-events`（`CounterTopics.EVENTS`） | `CounterEventProducer`（无 key 异步；序列化失败静默） | `counter-agg`（每秒折叠 SDS）、`counter-rebuild`（earliest 回放，`counter.rebuild.enabled` 门控）、`notification-like-consumer`、`recommendation-counter-feedback-consumer` | `CounterEvent(eventId,occurredAt,entityType,entityId,metric,idx,userId,delta)` |
-| `zhiguang.promotion.auction.decisions.v2`（`promotion.bprime.decision-topic`） | `KafkaPromotionDecisionLogPort`（key=auctionWindowId 保序，同步发送） | `zhiguang-promotion-projection-consumer`、`zhiguang-promotion-fanout-consumer`（manual ack） | envelope `{schemaVersion:1,eventType:"AUCTION_DECISION",decision,decisionHash,producedAt}`；消费侧校验 schema/hash/key 一致性（`PromotionDecisionKafkaSupport`） |
+| `zhiguang.promotion.auction.decisions.v2`（`promotion.bprime.decision-topic`） | `KafkaPromotionDecisionLogPort`（key=auctionWindowId 保序，`acks=all` 同步等待 broker ACK） | `zhiguang-promotion-projection-consumer`、`zhiguang-promotion-fanout-consumer`（manual ack） | envelope `{schemaVersion:1,eventType:"AUCTION_DECISION",decision,decisionHash,producedAt}`；消费侧校验 schema/hash/key 一致性；只有 append 成功才允许 RocketMQ listener 返回 |
 
 全局：`auto-offset-reset=earliest`、`enable-auto-commit=false`、`ack-mode=manual`、String 序列化、`admin.auto-create=true`（`application.yml`）。
 
@@ -269,7 +270,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 - 主题 `zhiguang_promotion_auction_commands_v2`（`promotion.bprime.command-topic`）；producer group `zhiguang-promotion-command-producer`；consumer group `zhiguang-promotion-command-consumer`，`ConsumeMode.ORDERLY`。
 - 发送：`syncSendOrderly(topic, msg, auctionWindowId)` —— **按窗口分区保序**（`RocketMqPromotionCommandMessagePort`）；`promotion.bprime.enabled=false` 时 `NoopPromotionCommandMessagePort` 空实现。
-- 消息体 `PromotionAuctionCommand(commandId,idempotencyKey,requestHash,auctionWindowId,campaignId,bidderUserId,postId,resourceType,bidAmount,type="BID",submittedAt)`。
+- 消息体 `PromotionAuctionCommand(...,type,submittedAt)`；`type` 至少包含 `BID` 与 `ESCROW_NOTIFY`。两类命令都使用 `auctionWindowId` 作为 orderingKey，保证授权投影和后续出价具有同一房间顺序。
 
 ### 6.4 幂等 / 失败兜底矩阵
 
@@ -277,7 +278,8 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 |------|------|
 | 评论提交 | `pending_comments uk(creator,client_request_id)` + `DuplicateKeyException` 返回既有 |
 | 发布受理 | `publish_attempt uk(creator,post,idempotent_key)` |
-| 推广命令 | 命令表 `uk(window,bidder,idempotency_key)` + `request_hash`（SHA-256）一致校验 + Redis Lua `{commandId}:hash` 重放 |
+| 推广命令 | 确定性 commandId + `request_hash`（SHA-256）一致校验 + Redis Lua `{commandId}:hash/decision` 重放；WebSocket 只在 RocketMQ broker ACK 后返回 pending ACK |
+| 推广保证金 | `promotion_bid_escrow uk(window,campaign)` + 授权目标金额 businessRef + Redis `authorizedAmount` 仅接受单调增加 |
 | 决策投影 | checkpoint 版本严格连续校验 + 同版本同 decisionId 幂等跳过 |
 | 关系事件 | `dedup:rel:*` SET NX（10m）+ follower 表 upsert |
 | 通知 | `uk_notification_event_key` + 吞 DuplicateKey；点赞另有 `notif:like:event:*` 去重 |
@@ -382,13 +384,13 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 ### 7.8 promotion（含 bprime）
 
-**API**（`/api/v1/promotions`）：`POST campaigns`（resourceType∈feed_top_slot/search_top_slot；校验帖子本人+published+public）、`GET campaigns/{id}`、`POST campaigns/{id}/bids`（`bidAmount>0` + `idempotencyKey`；只落命令返回 `{commandId,status,resultAvailable:false}`；无 OPEN 窗口/活动不覆盖分配期 → `PROMOTION_BID_WINDOW_CLOSED`）、`GET allocations/active?resourceType=`、`GET windows/{id}/snapshot`（SETTLED 读 DB 分配，否则 Redis 热排名 Top30）。
+**API**（`/api/v1/promotions`）：`POST campaigns`、`GET campaigns/{id}`；`POST campaigns/{id}/escrow` 在出价前把授权上限从 available 冻结到 held，返回 window/authorizedAmount。竞价提交不开放 REST，只允许兼容 WebSocket STOMP `/app/promotion-auctions/bids` 与高活动原生 WebSocket `/ws/promotion-auction-native`，两者共用收单和协议服务。进程内水位已能证明必败时异步返回 `{status:"REJECTED",resultAvailable:true,rejectionReason}`；其余请求只做 Redis 路由/授权预检并同步投递 RocketMQ，返回 `{commandId,status:"PUBLISHED",resultAvailable:false,rejectionReason:null}`。STOMP ACK 发往当前用户 `/user/queue/promotion-auction-bid-acks`；原生 WS 在同一连接返回同结构 JSON ACK。未授权/授权不足仍由稳定业务错误或 Redis Lua 给出最终拒绝；另有 active allocation 与窗口 snapshot 读接口。
 
 **窗口生命周期**（`PromotionAuctionWindowService` + `PromotionAuctionScheduler` 3×30s fixedDelay）：epoch 对齐 60 分钟窗口；恒保「当前 OPEN + 下一窗口」；`closeDueWindows` 到期（+30s 延迟）非 bprime 直结 / bprime 追加 `WINDOW_CLOSED` 决策；`refreshAllocations` 周期刷 `promotion:allocation:active:*`。
 
-**bprime 命令链路**（`promotion.bprime.enabled`）：submit（事务内落 `promotion_auction_command` SUBMITTED + afterCommit `syncSendOrderly` 至 RocketMQ + PUBLISHED）→ 顺序消费 → `PromotionCommandProcessingService`：DECIDED 去重 → Redis Lua 原子决策（`promotion-auction-decision.lua`：重放幂等 → 窗口/保留价/加价校验 → 排名 score → 生成 decision + `decision_version INCR`）→ 接受则钱包 `hold`（`promotion-bprime:{commandId}:hold`，增量冻结）→ Kafka 追加决策（key=windowId）→ Redis commit（ranking/campaign/state/commands）→ 命令 DECIDED；Kafka 追加失败 → `releaseHold`（`...:hold-release-after-log-fail`）+ LOG_FAILED。
+**bprime 命令链路**（`promotion.bprime.enabled`）：保证金授权在低频 MySQL 事务内锁定/增加 `promotion_bid_escrow.authorized_amount` 并执行一次钱包 `hold(delta)`，随后把 `ESCROW_NOTIFY` 顺序命令可靠投递到同一窗口；授权成功同时写 Redis campaign→window 路由并预热本进程 campaign 水位。出价 submit 先查询有界 Caffeine 水位：仅当缓存窗口与 owner 匹配、窗口仍 OPEN、未临近结束、bid 不低于 reserve 且不高于该 campaign 已接受最高价时产生快拒候选；缓存缺失、owner 不匹配或无法证明时必须继续。WebSocket 候选进入有界微批队列，一批合并读取窗口状态并逐 commandId 检查权威幂等，异步返回私有 ACK。高活动客户端使用原生 WebSocket 避开 STOMP broker 的逐消息分派；每连接 ACK 队列由共享有界线程池串行排空，慢连接满载时以 `4000/backpressure` 关闭并由客户端重连恢复。任何预检不可用或过载结果均放行到可靠路径，从 Redis 路由构造确定性 commandId 后 `syncSendOrderly`，不创建 command 行。顺序消费者只执行 `promotion-auction-decision.lua`：命令重放 → 状态/保留价/单活动递增校验 → `authorizedAmount` 校验 → 原子更新 campaign bid、Top30 ranking、`currentHold` 和 `decisionVersion`；接受结果在等待 Kafka 前原子 `max` 推进本地水位，再同步 append Kafka。Kafka append 失败时 listener 抛错且 RocketMQ 不 ACK；重投由 Lua 返回完全相同的 decision，不回滚 Redis，也不重复占用资金。旧 command 扫表发布器默认不注册；仅在 clean cutover 排空历史命令时显式开启 `promotion.bprime.legacy-command-recovery-enabled=true`，排空后必须关闭。
 
-**决策投影**（`zhiguang-promotion-projection-consumer`）：envelope 校验（schemaVersion=1、eventType、SHA-256 hash、key 一致）→ 版本严格连续（`previousVersion==last && version==last+1`，缺口抛异常）→ BID 落库（upsertAccepted 重置 clearing_price/slot_index）→ `WINDOW_CLOSED` 结算：GSP 计划（`PromotionAuctionSettlementPlanner`：出价降序、同价 id 升序、取 ≥reserve 前 slotCount 名；`clearingPrice(i)=max(nextBid, reserve)`；winner `captureHoldToPlatform(clearingPrice)` + 差额 `releaseHold`，loser 全额 `releaseHold`；businessRef `promotion-bprime:{windowId}:{campaignId}:{capture|release}`）→ 写 `promotion_slot_allocation`（N+1 窗展示期 `[windowEndAt, windowEndAt+Δ]`）→ 删 `close_decision_version` → checkpoint 前进（含 kafka offset）。fanout 组（`zhiguang-promotion-fanout-consumer`）内存版本顺序强制 + STOMP 推送（公共 `RANKING_UPDATED/WINDOW_CLOSED`、私有 `BID_CONFIRMED/BID_REJECTED`；端点 `/ws/promotion-auction`，Bearer JWT 握手）。
+**决策投影**（`zhiguang-promotion-projection-consumer`）：Kafka batch listener 在一个事务内完成 envelope 校验、版本连续校验并按窗口合并 checkpoint；`ESCROW_APPLIED` 更新授权投影水位，接受 BID upsert `promotion_bid` 并更新 `promotion_bid_escrow.current_hold`，不再调用钱包 hold，也不更新 command 表。`WINDOW_CLOSED` 仍执行 GSP；winner 从已授权总额 capture clearingPrice 并 release 余量，loser release 全部授权额，随后关闭 escrow、写 allocation、推进 checkpoint。projection/fanout 失败不得跳过 Decision Log 记录；STOMP 仍为通知层。
 
 **读路径消费方**：`KnowPostFeedServiceImpl`（page=1 至多 1 条 feed_top_slot）、`HomeFeedMixingService`（混排首条推广）、`SearchServiceImpl`（首屏 search_top_slot）——均经 `PromotionAllocationService`（缓存优先 + DB 时间过滤回源）。
 
@@ -485,7 +487,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `wallet.*` | platform-user-id 0、registration-grant-amount 100 | `WalletProperties` |
 | `content-reward.*` | enabled true、post 10、comment 2 | `ContentRewardProperties` |
 | `promotion.slot-auction.*` | 槽位/保留价/60min 窗口/缓存 300s/批 50/30s | `PromotionProperties` |
-| `promotion.bprime.*` | enabled false、topic/group×3、超时/TTL/lookback/槽位 | `PromotionBPrimeProperties` |
+| `promotion.bprime.*` | enabled false、topic/group×3、超时/TTL/lookback/槽位、fast-reject enabled/容量/TTL/微批、WebSocket 入出站线程与有界队列 | `PromotionBPrimeProperties` |
 | `storage.*` | MinIO endpoint/bucket/公开域名 | `StorageProperties` |
 | `canal.*` | enabled false、host/port/destination/filter=`zhiguang.outbox`/100/1000ms | @Value |
 | `counter.rebuild` | enabled false | — |
@@ -502,7 +504,6 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | # | 事实 | 证据 |
 |---|------|------|
 | G1 | `feed.inbox.ttl-days: 30` 在 Java 代码**无消费点**（时间线 TTL 实际由 init.cql `default_time_to_live=2592000` 承载） | `application.yml:196-197`；grep 无命中 |
-| G2 | `promotion.bprime.hot-state-ttl-seconds`（86400）仅定义+启动校验，**无任何 EXPIRE 应用点**（热状态键无 TTL 管理） | `PromotionBPrimeProperties.java:20`；Lua/commit 无 EXPIRE |
 | G3 | `PROMOTION_DECISION_PROJECTION` 任务类型**无创建点**（仅 Reconciler 与常量）；`FEED_CACHE_INVALIDATE` 类型无 Reconciler、无创建点（若被创建将重试至 dead） | `ReconciliationTaskType.java`；`ReconciliationTaskExecutor.java:79-81` |
 | G4 | `PendingCommentMapper.updateStatusByCreatorAndClientRequestId` 全库**无调用方** | grep 无命中 |
 | G5 | `CounterEventProducer` 发送**无 key**，与 `CounterServiceImpl` 注释「分区按实体维度保证顺序」不符（无实体维度分区有序性） | `CounterEventProducer.java`（send 无 key） |

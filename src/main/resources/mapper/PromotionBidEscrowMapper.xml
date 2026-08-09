@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper">
+
+    <resultMap id="PromotionBidEscrowResultMap"
+               type="com.tongji.promotion.bprime.model.PromotionBidEscrowRecord">
+        <id column="id" property="id"/>
+        <result column="auction_window_id" property="auctionWindowId"/>
+        <result column="campaign_id" property="campaignId"/>
+        <result column="bidder_user_id" property="bidderUserId"/>
+        <result column="authorized_amount" property="authorizedAmount"/>
+        <result column="current_hold" property="currentHold"/>
+        <result column="status" property="status"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.tongji.promotion.bprime.model.PromotionBidEscrowRecord">
+        INSERT INTO promotion_bid_escrow (
+            id, auction_window_id, campaign_id, bidder_user_id, authorized_amount, current_hold,
+            status, expires_at, created_at, updated_at
+        ) VALUES (
+            #{id}, #{auctionWindowId}, #{campaignId}, #{bidderUserId}, #{authorizedAmount}, #{currentHold},
+            #{status}, #{expiresAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="findByWindowAndCampaign" resultMap="PromotionBidEscrowResultMap">
+        SELECT id, auction_window_id, campaign_id, bidder_user_id, authorized_amount, current_hold,
+               status, expires_at, created_at, updated_at
+        FROM promotion_bid_escrow
+        WHERE auction_window_id = #{auctionWindowId}
+          AND campaign_id = #{campaignId}
+        LIMIT 1
+    </select>
+
+    <update id="increaseAuthorization">
+        UPDATE promotion_bid_escrow
+        SET authorized_amount = #{authorizedAmount}, expires_at = #{expiresAt}, updated_at = #{updatedAt}
+        WHERE auction_window_id = #{auctionWindowId}
+          AND campaign_id = #{campaignId}
+          AND status = 'ACTIVE'
+          AND authorized_amount &lt; #{authorizedAmount}
+    </update>
+
+    <update id="updateCurrentHold">
+        UPDATE promotion_bid_escrow
+        SET current_hold = #{currentHold}, updated_at = #{updatedAt}
+        WHERE auction_window_id = #{auctionWindowId}
+          AND campaign_id = #{campaignId}
+          AND status = 'ACTIVE'
+          AND authorized_amount &gt;= #{currentHold}
+    </update>
+
+    <select id="listActiveByWindowId" resultMap="PromotionBidEscrowResultMap">
+        SELECT id, auction_window_id, campaign_id, bidder_user_id, authorized_amount, current_hold,
+               status, expires_at, created_at, updated_at
+        FROM promotion_bid_escrow
+        WHERE auction_window_id = #{auctionWindowId}
+          AND status = 'ACTIVE'
+        ORDER BY campaign_id ASC
+    </select>
+
+    <update id="markClosedByWindowId">
+        UPDATE promotion_bid_escrow
+        SET status = 'CLOSED', current_hold = 0, updated_at = #{updatedAt}
+        WHERE auction_window_id = #{auctionWindowId}
+          AND status = 'ACTIVE'
+    </update>
+</mapper>

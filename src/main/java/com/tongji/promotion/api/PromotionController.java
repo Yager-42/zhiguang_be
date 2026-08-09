@@ -3,14 +3,14 @@ package com.tongji.promotion.api;
 import com.tongji.auth.token.JwtService;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
+import com.tongji.promotion.api.dto.AuthorizePromotionBidEscrowRequest;
 import com.tongji.promotion.api.dto.CreatePromotionCampaignRequest;
 import com.tongji.promotion.api.dto.PromotionAllocationView;
+import com.tongji.promotion.api.dto.PromotionBidEscrowAuthorizationResponse;
 import com.tongji.promotion.api.dto.PromotionCampaignResponse;
-import com.tongji.promotion.api.dto.SubmitPromotionBidCommandResponse;
-import com.tongji.promotion.api.dto.SubmitPromotionBidRequest;
 import com.tongji.promotion.bprime.model.PromotionAuctionSnapshot;
+import com.tongji.promotion.bprime.service.PromotionBidEscrowService;
 import com.tongji.promotion.bprime.service.PromotionSnapshotService;
-import com.tongji.promotion.bprime.service.PromotionCommandSubmissionService;
 import com.tongji.promotion.model.PromotionResourceType;
 import com.tongji.promotion.service.PromotionAllocationService;
 import com.tongji.promotion.service.PromotionCampaignService;
@@ -30,7 +30,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 推广位竞价 API：创建/查询活动、提交出价、查询当前有效位分配。
+ * 推广位竞价 HTTP API：创建/查询活动、授权保证金、查询当前有效位分配。
  */
 @RestController
 @RequestMapping("/api/v1/promotions")
@@ -38,7 +38,7 @@ import java.util.List;
 public class PromotionController {
 
     private final PromotionCampaignService campaignService;
-    private final PromotionCommandSubmissionService commandSubmissionService;
+    private final PromotionBidEscrowService bidEscrowService;
     private final PromotionSnapshotService snapshotService;
     private final PromotionAllocationService allocationService;
     private final JwtService jwtService;
@@ -58,13 +58,13 @@ public class PromotionController {
         return PromotionCampaignResponse.from(campaignService.getCampaign(campaignId));
     }
 
-    @PostMapping("/campaigns/{campaignId}/bids")
-    public SubmitPromotionBidCommandResponse submitBid(@PathVariable long campaignId,
-                                                       @Valid @RequestBody SubmitPromotionBidRequest request,
-                                                       @AuthenticationPrincipal Jwt jwt) {
+    @PostMapping("/campaigns/{campaignId}/escrow")
+    public PromotionBidEscrowAuthorizationResponse authorizeBidEscrow(
+            @PathVariable long campaignId,
+            @Valid @RequestBody AuthorizePromotionBidEscrowRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
         long userId = jwtService.extractUserId(jwt);
-        return commandSubmissionService.submit(userId, campaignId, request.bidAmount(),
-                request.idempotencyKey(), Instant.now());
+        return bidEscrowService.authorize(userId, campaignId, request.amount(), Instant.now());
     }
 
     @GetMapping("/allocations/active")

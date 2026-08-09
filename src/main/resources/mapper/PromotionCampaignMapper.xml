@@ -25,9 +25,17 @@
     </insert>
 
     <select id="findById" parameterType="long" resultMap="PromotionCampaignResultMap">
-        SELECT *
+        SELECT id, creator_user_id, post_id, resource_type, status, start_at, end_at, created_at, updated_at
         FROM promotion_campaign
         WHERE id = #{id}
         LIMIT 1
+    </select>
+
+    <select id="findByIdForUpdate" parameterType="long" resultMap="PromotionCampaignResultMap">
+        SELECT id, creator_user_id, post_id, resource_type, status, start_at, end_at, created_at, updated_at
+        FROM promotion_campaign
+        WHERE id = #{id}
+        LIMIT 1
+        FOR UPDATE
     </select>
 </mapper>
