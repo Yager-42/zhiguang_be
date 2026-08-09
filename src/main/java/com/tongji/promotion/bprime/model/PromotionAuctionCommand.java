@@ -12,6 +12,8 @@ public record PromotionAuctionCommand(
         long postId,
         String resourceType,
         long bidAmount,
+        long reservePrice,
+        String windowStatus,
         String type,
         Instant submittedAt
 ) {}

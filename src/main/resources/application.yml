@@ -150,7 +150,31 @@ promotion:
     fanout-consumer-group: ${PROMOTION_BPRIME_FANOUT_CONSUMER_GROUP:zhiguang-promotion-fanout-consumer}
     kafka-send-timeout-ms: ${PROMOTION_BPRIME_KAFKA_SEND_TIMEOUT_MS:10000}
     hot-state-ttl-seconds: ${PROMOTION_BPRIME_HOT_STATE_TTL_SECONDS:86400}
+    command-idempotency-ttl-seconds: ${PROMOTION_BPRIME_COMMAND_IDEMPOTENCY_TTL_SECONDS:86400}
     settled-compensation-lookback-seconds: ${PROMOTION_BPRIME_SETTLED_COMPENSATION_LOOKBACK_SECONDS:604800}
+    legacy-command-recovery-enabled: ${PROMOTION_BPRIME_LEGACY_COMMAND_RECOVERY_ENABLED:false}
+    command-publish-scan-delay-ms: ${PROMOTION_BPRIME_COMMAND_PUBLISH_SCAN_DELAY_MS:1000}
+    command-publish-claim-timeout-ms: ${PROMOTION_BPRIME_COMMAND_PUBLISH_CLAIM_TIMEOUT_MS:5000}
+    command-decision-timeout-ms: ${PROMOTION_BPRIME_COMMAND_DECISION_TIMEOUT_MS:300000}
+    command-publish-batch-size: ${PROMOTION_BPRIME_COMMAND_PUBLISH_BATCH_SIZE:100}
+    projection-concurrency: ${PROMOTION_BPRIME_PROJECTION_CONCURRENCY:1}
+    command-publisher-core-size: ${PROMOTION_BPRIME_COMMAND_PUBLISHER_CORE_SIZE:6}
+    command-publisher-max-size: ${PROMOTION_BPRIME_COMMAND_PUBLISHER_MAX_SIZE:8}
+    command-publisher-worker-count: ${PROMOTION_BPRIME_COMMAND_PUBLISHER_WORKER_COUNT:8}
+    decision-max-in-flight: ${PROMOTION_BPRIME_DECISION_MAX_IN_FLIGHT:1024}
+    command-publisher-queue-capacity: ${PROMOTION_BPRIME_COMMAND_PUBLISHER_QUEUE_CAPACITY:1024}
+    fast-reject-enabled: ${PROMOTION_BPRIME_FAST_REJECT_ENABLED:true}
+    fast-reject-maximum-campaigns: ${PROMOTION_BPRIME_FAST_REJECT_MAXIMUM_CAMPAIGNS:200000}
+    fast-reject-expire-after-access-seconds: ${PROMOTION_BPRIME_FAST_REJECT_EXPIRE_AFTER_ACCESS_SECONDS:7200}
+    fast-reject-expiry-margin-ms: ${PROMOTION_BPRIME_FAST_REJECT_EXPIRY_MARGIN_MS:1000}
+    fast-reject-precheck-batch-size: ${PROMOTION_BPRIME_FAST_REJECT_PRECHECK_BATCH_SIZE:512}
+    fast-reject-precheck-worker-count: ${PROMOTION_BPRIME_FAST_REJECT_PRECHECK_WORKER_COUNT:2}
+    fast-reject-precheck-queue-capacity: ${PROMOTION_BPRIME_FAST_REJECT_PRECHECK_QUEUE_CAPACITY:65536}
+    fast-reject-precheck-max-wait-micros: ${PROMOTION_BPRIME_FAST_REJECT_PRECHECK_MAX_WAIT_MICROS:200}
+    web-socket-inbound-thread-count: ${PROMOTION_BPRIME_WS_INBOUND_THREAD_COUNT:8}
+    web-socket-outbound-thread-count: ${PROMOTION_BPRIME_WS_OUTBOUND_THREAD_COUNT:8}
+    web-socket-channel-queue-capacity: ${PROMOTION_BPRIME_WS_CHANNEL_QUEUE_CAPACITY:65536}
+    web-socket-native-session-queue-capacity: ${PROMOTION_BPRIME_WS_NATIVE_SESSION_QUEUE_CAPACITY:4096}
     feed-slot-count: ${PROMOTION_FEED_TOP_SLOT_COUNT:1}
     search-slot-count: ${PROMOTION_SEARCH_TOP_SLOT_COUNT:1}
     feed-reserve-price: ${PROMOTION_FEED_RESERVE_PRICE:1}

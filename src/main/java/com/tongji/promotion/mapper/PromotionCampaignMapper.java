@@ -11,4 +11,6 @@ public interface PromotionCampaignMapper {
     int insert(PromotionCampaign campaign);
 
     PromotionCampaign findById(@Param("id") long id);
+
+    PromotionCampaign findByIdForUpdate(@Param("id") long id);
 }

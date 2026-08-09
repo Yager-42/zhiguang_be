@@ -1,14 +1,19 @@
 package com.tongji.promotion.bprime.realtime;
 
 import com.tongji.auth.token.JwtService;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 
@@ -16,14 +21,23 @@ import java.security.Principal;
 import java.util.Map;
 
 @Configuration
+@EnableWebSocket
 @EnableWebSocketMessageBroker
 @ConditionalOnProperty(name = "promotion.bprime.enabled", havingValue = "true")
-public class PromotionAuctionWebSocketConfig implements WebSocketMessageBrokerConfigurer {
+public class PromotionAuctionWebSocketConfig
+        implements WebSocketMessageBrokerConfigurer, WebSocketConfigurer {
 
     private final JwtService jwtService;
+    private final PromotionBPrimeProperties properties;
+    private final PromotionNativeBidWebSocketHandler nativeBidWebSocketHandler;
 
-    public PromotionAuctionWebSocketConfig(JwtService jwtService) {
+    public PromotionAuctionWebSocketConfig(
+            JwtService jwtService,
+            PromotionBPrimeProperties properties,
+            PromotionNativeBidWebSocketHandler nativeBidWebSocketHandler) {
         this.jwtService = jwtService;
+        this.properties = properties;
+        this.nativeBidWebSocketHandler = nativeBidWebSocketHandler;
     }
 
     @Override
@@ -34,9 +48,34 @@ public class PromotionAuctionWebSocketConfig implements WebSocketMessageBrokerCo
     }
 
     @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(nativeBidWebSocketHandler, PromotionAuctionRealtimeChannels.NATIVE_ENDPOINT)
+                .setHandshakeHandler(new PromotionAuctionHandshakeHandler(jwtService))
+                .setAllowedOriginPatterns("*");
+    }
+
+    @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         registry.enableSimpleBroker("/topic", "/queue");
+        registry.setApplicationDestinationPrefixes(PromotionAuctionRealtimeChannels.APPLICATION_PREFIX);
         registry.setUserDestinationPrefix("/user");
+    }
+
+    @Override
+    public void configureClientInboundChannel(ChannelRegistration registration) {
+        configureChannelExecutor(registration, properties.getWebSocketInboundThreadCount());
+    }
+
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        configureChannelExecutor(registration, properties.getWebSocketOutboundThreadCount());
+    }
+
+    private void configureChannelExecutor(ChannelRegistration registration, int threadCount) {
+        registration.taskExecutor()
+                .corePoolSize(threadCount)
+                .maxPoolSize(threadCount)
+                .queueCapacity(properties.getWebSocketChannelQueueCapacity());
     }
 
     static class PromotionAuctionHandshakeHandler extends DefaultHandshakeHandler {

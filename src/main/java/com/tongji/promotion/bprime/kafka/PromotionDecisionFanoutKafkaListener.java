@@ -2,6 +2,8 @@ package com.tongji.promotion.bprime.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecisionLogEnvelope;
+import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
+import com.tongji.promotion.bprime.metrics.PromotionPerformanceMetrics;
 import com.tongji.promotion.bprime.service.PromotionDecisionFanoutService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -16,20 +18,27 @@ public class PromotionDecisionFanoutKafkaListener {
     private final ObjectMapper objectMapper;
     private final PromotionDecisionKafkaSupport support;
     private final PromotionDecisionFanoutService fanoutService;
+    private final PromotionPerformanceMetrics performanceMetrics;
 
     public PromotionDecisionFanoutKafkaListener(ObjectMapper objectMapper,
                                                 PromotionDecisionKafkaSupport support,
-                                                PromotionDecisionFanoutService fanoutService) {
+                                                PromotionDecisionFanoutService fanoutService,
+                                                PromotionPerformanceMetrics performanceMetrics) {
         this.objectMapper = objectMapper;
         this.support = support;
         this.fanoutService = fanoutService;
+        this.performanceMetrics = performanceMetrics;
     }
 
     @KafkaListener(topics = "${promotion.bprime.decision-topic:zhiguang.promotion.auction.decisions.v2}",
-            groupId = "${promotion.bprime.fanout-consumer-group:zhiguang-promotion-fanout-consumer}")
+            groupId = "${promotion.bprime.fanout-consumer-group:zhiguang-promotion-fanout-consumer}",
+            containerFactory = "promotionDecisionKafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
-        fanoutService.publishDecision(support.requireDecision(record.key(),
-                objectMapper.readValue(record.value(), PromotionAuctionDecisionLogEnvelope.class)));
+        PromotionAuctionDecision decision = support.requireDecision(record.key(),
+                objectMapper.readValue(record.value(), PromotionAuctionDecisionLogEnvelope.class));
+        if (fanoutService.publishDecision(decision)) {
+            performanceMetrics.recordRealtimeComplete(decision);
+        }
         ack.acknowledge();
     }
 }

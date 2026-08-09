@@ -2,8 +2,12 @@ package com.tongji.promotion.bprime.service;
 
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
 import com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
+import com.tongji.promotion.bprime.model.PromotionDecisionProjectionItem;
+import com.tongji.promotion.bprime.model.PromotionProjectionCheckpointRecord;
+import com.tongji.promotion.bprime.redis.PromotionAuctionRedisKeys;
 import com.tongji.promotion.bprime.model.PromotionWalletEffect;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
@@ -22,13 +26,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 @Service
 public class PromotionDecisionProjectionService {
 
     private final PromotionProjectionCheckpointMapper checkpointMapper;
+    private final PromotionBidEscrowMapper escrowMapper;
     private final PromotionBidMapper bidMapper;
     private final PromotionAuctionWindowMapper windowMapper;
     private final PromotionSlotAllocationMapper allocationMapper;
@@ -38,6 +45,7 @@ public class PromotionDecisionProjectionService {
     private final StringRedisTemplate redisTemplate;
 
     public PromotionDecisionProjectionService(PromotionProjectionCheckpointMapper checkpointMapper,
+                                              PromotionBidEscrowMapper escrowMapper,
                                               PromotionBidMapper bidMapper,
                                               PromotionAuctionWindowMapper windowMapper,
                                               PromotionSlotAllocationMapper allocationMapper,
@@ -46,6 +54,7 @@ public class PromotionDecisionProjectionService {
                                               IdService idService,
                                               StringRedisTemplate redisTemplate) {
         this.checkpointMapper = checkpointMapper;
+        this.escrowMapper = escrowMapper;
         this.bidMapper = bidMapper;
         this.windowMapper = windowMapper;
         this.allocationMapper = allocationMapper;
@@ -57,18 +66,54 @@ public class PromotionDecisionProjectionService {
 
     @Transactional
     public void project(PromotionAuctionDecision decision) {
-        project(decision, null, null, null);
+        projectBatch(List.of(new PromotionDecisionProjectionItem(decision, null, null, null)));
     }
 
     @Transactional
     public void project(PromotionAuctionDecision decision, String kafkaTopic, Integer kafkaPartition, Long kafkaOffset) {
-        if (isDuplicate(decision, kafkaTopic, kafkaPartition, kafkaOffset)) {
-            return;
+        projectBatch(List.of(new PromotionDecisionProjectionItem(
+                decision, kafkaTopic, kafkaPartition, kafkaOffset)));
+    }
+
+    /**
+     * Projects one Kafka poll in a single transaction and persists one final checkpoint per auction window.
+     *
+     * @param items validated decisions in Kafka delivery order; must not be {@code null}
+     */
+    @Transactional
+    public List<PromotionAuctionDecision> projectBatch(List<PromotionDecisionProjectionItem> items) {
+        if (items.isEmpty()) {
+            return List.of();
         }
-        requireNextVersion(decision);
+        Map<Long, ProjectionState> states = new LinkedHashMap<>();
+        List<PromotionAuctionDecision> projectedDecisions = new ArrayList<>(items.size());
+        for (PromotionDecisionProjectionItem item : items) {
+            PromotionAuctionDecision decision = item.decision();
+            ProjectionState state = states.computeIfAbsent(decision.auctionWindowId(), this::loadProjectionState);
+            if (!isDuplicate(decision, state)) {
+                requireNextVersion(decision, state.lastDecisionVersion);
+                applyDecision(decision);
+                projectedDecisions.add(decision);
+                state.lastDecisionId = decision.decisionId();
+                state.lastDecisionVersion = decision.decisionVersion();
+            }
+            state.kafkaTopic = item.kafkaTopic();
+            state.kafkaPartition = item.kafkaPartition();
+            state.kafkaOffset = item.kafkaOffset();
+        }
+        states.forEach((auctionWindowId, state) -> checkpointMapper.upsert(
+                auctionWindowId, state.lastDecisionId, state.lastDecisionVersion,
+                state.kafkaTopic, state.kafkaPartition, state.kafkaOffset));
+        return List.copyOf(projectedDecisions);
+    }
+
+    private void applyDecision(PromotionAuctionDecision decision) {
         if ("WINDOW_CLOSED".equals(decision.decisionType())) {
             settleWindow(decision);
+        } else if ("ESCROW_APPLIED".equals(decision.decisionType())) {
+            return;
         } else if (decision.accepted()) {
+            projectEscrowHold(decision);
             bidMapper.upsertAccepted(PromotionBid.builder()
                     .id(idService.nextId(IdNamespace.ADMIN_OPERATION))
                     .campaignId(decision.campaignId())
@@ -85,13 +130,20 @@ public class PromotionDecisionProjectionService {
                     .postId(decision.postId())
                     .build());
         }
-        checkpointMapper.upsert(decision.auctionWindowId(), decision.decisionId(),
-                decision.decisionVersion(), kafkaTopic, kafkaPartition, kafkaOffset);
     }
 
-    private void requireNextVersion(PromotionAuctionDecision decision) {
-        long lastVersion = java.util.Optional.ofNullable(
-                checkpointMapper.findLastDecisionVersion(decision.auctionWindowId())).orElse(0L);
+    private void projectEscrowHold(PromotionAuctionDecision decision) {
+        if (!decision.payload().containsKey("authorizedAmount")) {
+            return;
+        }
+        if (escrowMapper.updateCurrentHold(decision.auctionWindowId(), decision.campaignId(),
+                decision.bidAmount(), decision.decidedAt()) != 1) {
+            throw new IllegalStateException("promotion bid escrow projection failed: auctionWindowId="
+                    + decision.auctionWindowId() + ", campaignId=" + decision.campaignId());
+        }
+    }
+
+    private void requireNextVersion(PromotionAuctionDecision decision, long lastVersion) {
         if (decision.previousVersion() != lastVersion || decision.decisionVersion() != lastVersion + 1) {
             throw new IllegalStateException("promotion decision version gap: auctionWindowId="
                     + decision.auctionWindowId() + ", last=" + lastVersion
@@ -100,19 +152,26 @@ public class PromotionDecisionProjectionService {
         }
     }
 
-    private boolean isDuplicate(PromotionAuctionDecision decision, String kafkaTopic,
-                                Integer kafkaPartition, Long kafkaOffset) {
-        Long lastVersion = checkpointMapper.findLastDecisionVersion(decision.auctionWindowId());
-        if (lastVersion == null || decision.decisionVersion() != lastVersion) {
-            return false;
+    private boolean isDuplicate(PromotionAuctionDecision decision, ProjectionState state) {
+        if (decision.decisionVersion() < state.lastDecisionVersion) {
+            return true;
         }
-        if (!java.util.Objects.equals(
-                checkpointMapper.findLastDecisionId(decision.auctionWindowId()), decision.decisionId())) {
-            return false;
+        return decision.decisionVersion() == state.lastDecisionVersion
+                && java.util.Objects.equals(decision.decisionId(), state.lastDecisionId);
+    }
+
+    private ProjectionState loadProjectionState(long auctionWindowId) {
+        PromotionProjectionCheckpointRecord checkpoint = checkpointMapper.findByAuctionWindowId(auctionWindowId);
+        if (checkpoint == null) {
+            return new ProjectionState();
         }
-        checkpointMapper.upsert(decision.auctionWindowId(), decision.decisionId(),
-                decision.decisionVersion(), kafkaTopic, kafkaPartition, kafkaOffset);
-        return true;
+        ProjectionState state = new ProjectionState();
+        state.lastDecisionId = checkpoint.getLastDecisionId();
+        state.lastDecisionVersion = checkpoint.getLastDecisionVersion();
+        state.kafkaTopic = checkpoint.getLastKafkaTopic();
+        state.kafkaPartition = checkpoint.getLastKafkaPartition();
+        state.kafkaOffset = checkpoint.getLastKafkaOffset();
+        return state;
     }
 
     private void settleWindow(PromotionAuctionDecision decision) {
@@ -137,8 +196,11 @@ public class PromotionDecisionProjectionService {
                 .createdAt(decision.decidedAt())
                 .build()));
         walletEffects(payload).forEach(this::applyWalletEffect);
+        escrowMapper.markClosedByWindowId(decision.auctionWindowId(), decision.decidedAt());
         windowMapper.markSettled(decision.auctionWindowId(), decision.decidedAt());
-        redisTemplate.delete("promotion:auction:" + decision.auctionWindowId() + ":close_decision_version");
+        String prefix = PromotionAuctionRedisKeys.prefix(decision.auctionWindowId());
+        redisTemplate.opsForHash().put(prefix + ":state", "status", "SETTLED");
+        redisTemplate.delete(prefix + ":close_decision_version");
         cacheService.refreshActiveAllocations(resourceType, decision.decidedAt());
     }
 
@@ -209,10 +271,14 @@ public class PromotionDecisionProjectionService {
     }
 
     private String holdBusinessRef(PromotionAuctionDecision decision) {
-        return decision.walletEffects().stream()
-                .filter(effect -> "HOLD".equals(effect.effectType()))
-                .map(com.tongji.promotion.bprime.model.PromotionWalletEffect::businessRef)
-                .findFirst()
-                .orElse("promotion-bprime:" + decision.commandId() + ":hold");
+        return "promotion-bprime:escrow:" + decision.auctionWindowId() + ":" + decision.campaignId();
+    }
+
+    private static final class ProjectionState {
+        private String lastDecisionId;
+        private long lastDecisionVersion;
+        private String kafkaTopic;
+        private Integer kafkaPartition;
+        private Long kafkaOffset;
     }
 }

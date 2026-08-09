@@ -1,13 +1,12 @@
 package com.tongji.promotion.bprime.mapper;
 
+import com.tongji.promotion.bprime.model.PromotionProjectionCheckpointRecord;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 @Mapper
 public interface PromotionProjectionCheckpointMapper {
-    Long findLastDecisionVersion(@Param("auctionWindowId") long auctionWindowId);
-
-    String findLastDecisionId(@Param("auctionWindowId") long auctionWindowId);
+    PromotionProjectionCheckpointRecord findByAuctionWindowId(@Param("auctionWindowId") long auctionWindowId);
 
     int upsert(@Param("auctionWindowId") long auctionWindowId,
                @Param("lastDecisionId") String lastDecisionId,

@@ -12,7 +12,7 @@ import java.util.Objects;
 public class PromotionDecisionKafkaSupport {
 
     private static final Set<String> SUPPORTED_DECISION_TYPES = Set.of(
-            "BID_ACCEPTED", "BID_REJECTED", "WINDOW_CLOSED");
+            "BID_ACCEPTED", "BID_REJECTED", "ESCROW_APPLIED", "WINDOW_CLOSED");
 
     public PromotionAuctionDecision requireDecision(PromotionAuctionDecisionLogEnvelope envelope) {
         if (envelope == null) {

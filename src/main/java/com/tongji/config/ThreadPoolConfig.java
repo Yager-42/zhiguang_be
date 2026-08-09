@@ -37,6 +37,35 @@ public class ThreadPoolConfig {
         return buildExecutor(2, 4, 100, 60, "reconciliation-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
     }
 
+    @Bean(name = "promotionCommandExecutor")
+    public TaskExecutor promotionCommandExecutor(
+            @Value("${promotion.bprime.command-publisher-core-size:6}") int coreSize,
+            @Value("${promotion.bprime.command-publisher-max-size:8}") int maxSize,
+            @Value("${promotion.bprime.command-publisher-queue-capacity:1024}") int queueCapacity) {
+        return buildExecutor(coreSize, maxSize, queueCapacity, 60, "promotion-command-",
+                new ThreadPoolExecutor.AbortPolicy(), 60);
+    }
+
+    @Bean(name = "promotionDecisionCompletionExecutor")
+    public TaskExecutor promotionDecisionCompletionExecutor() {
+        return buildExecutor(4, 8, 1024, 60, "promotion-decision-completion-",
+                new ThreadPoolExecutor.CallerRunsPolicy(), 60);
+    }
+
+    @Bean(name = "promotionBidSubmissionExecutor")
+    public TaskExecutor promotionBidSubmissionExecutor() {
+        return buildExecutor(4, 8, 4096, 60, "promotion-bid-submission-",
+                new ThreadPoolExecutor.AbortPolicy(), 60);
+    }
+
+    @Bean(name = "promotionBidWebSocketOutboundExecutor")
+    public TaskExecutor promotionBidWebSocketOutboundExecutor(
+            @Value("${promotion.bprime.web-socket-outbound-thread-count:8}") int threadCount,
+            @Value("${promotion.bprime.web-socket-channel-queue-capacity:65536}") int queueCapacity) {
+        return buildExecutor(threadCount, threadCount, queueCapacity, 60, "promotion-bid-ws-outbound-",
+                new ThreadPoolExecutor.AbortPolicy(), 60);
+    }
+
     @Bean(name = "commentReadExecutor")
     public TaskExecutor commentReadExecutor(
             @Value("${comment.executor.read.core-size:8}") int coreSize,

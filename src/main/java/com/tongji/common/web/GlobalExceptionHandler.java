@@ -10,6 +10,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -63,6 +64,20 @@ public class GlobalExceptionHandler {
         body.put("code", ErrorCode.BAD_REQUEST.getCode());
         body.put("message", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    /**
+     * 无匹配 HTTP 资源时返回稳定的 404 响应，不将路由缺失误报为服务端故障。
+     *
+     * @param ex Spring 的资源未找到异常
+     * @return 不包含内部路由细节的 code/message 响应
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoResourceFoundException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("code", "NOT_FOUND");
+        body.put("message", "请求资源不存在");
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
     }
 
     /**
