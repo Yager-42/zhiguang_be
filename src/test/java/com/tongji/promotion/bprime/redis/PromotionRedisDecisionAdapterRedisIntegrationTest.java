@@ -80,7 +80,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         PromotionAuctionDecision decision = adapter.decide(
                 bid("cmd-2", "hash-2", 244L, 43L, 130L), NOW.plusMillis(1));
 
-        assertThat(decision.ranking()).extracting("bidderUserId").containsExactly("43", "42");
+        assertThat(decision.ranking()).isEmpty();
         assertThat(redis.opsForZSet().reverseRange(PREFIX + ":ranking", 0, 29))
                 .containsExactly("244", "243");
         assertThat(redis.opsForHash().get(PREFIX + ":campaign:243", "bidAmount")).isEqualTo("120");

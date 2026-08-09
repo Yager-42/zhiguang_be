@@ -1,4 +1,4 @@
-// User-driven auction workload: observe a room price, react, bid above that observed price,
+// User-driven native WebSocket workload: observe room deltas, react, bid above the visible price,
 // and wait for the final private outcome before considering another bid.
 import http from 'k6/http';
 import ws from 'k6/ws';
@@ -42,6 +42,7 @@ const rejectedFeedbacks = new Counter('promotion_user_rejected_feedbacks');
 const outcomeTimeouts = new Counter('promotion_user_outcome_timeouts');
 const inactiveBidders = new Counter('promotion_user_inactive_bidders');
 const valuationDropouts = new Counter('promotion_user_valuation_dropouts');
+const publicVersionResyncs = new Counter('promotion_user_public_version_resyncs');
 const connectionFailures = new Counter('promotion_ws_connection_failure');
 const protocolErrors = new Rate('promotion_ws_protocol_error');
 const ingressAckDuration = new Trend('promotion_user_ingress_ack_duration', true);
@@ -79,6 +80,7 @@ export function setup() {
     tokens,
     auctionWindowId,
     runId: String(Date.now()),
+    initialRanking: snapshot.ranking || [],
     initialPrice: highestBid(snapshot.ranking),
     initialDecisionVersion: Number(snapshot.decisionVersion || 0),
   };
@@ -94,12 +96,11 @@ export default function (setupData) {
     inactiveBidders.add(1);
   }
 
-  const wsUrl = BASE_URL.replace(/^http/, 'ws') + '/ws/promotion-auction';
-  const ackSubscription = `bid-ack-${vu.idInTest}`;
-  const outcomeSubscription = `bid-outcome-${vu.idInTest}`;
-  const roomSubscription = `room-${vu.idInTest}`;
+  const wsUrl = BASE_URL.replace(/^http/, 'ws') + '/ws/promotion-auction-native';
+  const visibleRanking = rankingByCampaign(setupData.initialRanking);
   let visiblePrice = setupData.initialPrice;
   let visibleVersion = setupData.initialDecisionVersion;
+  let lastPublicEventVersion = 0;
   let pending = null;
   let scheduled = false;
   let stopped = false;
@@ -112,18 +113,17 @@ export default function (setupData) {
   let measureStoppedAt = 0;
   let completedCommandIds = {};
   let completedCommandOrder = [];
-  let subscriptionsStarted = false;
-  let subscriptionReceipts = {};
+  let subscriptionStarted = false;
 
   const response = ws.connect(wsUrl, {
     headers: { Authorization: `Bearer ${token}` },
     tags: { name: 'promotion.ws.user-feedback' },
   }, (socket) => {
-    function startAfterSubscriptions() {
-      if (subscriptionsStarted) {
+    function startAfterSubscription() {
+      if (subscriptionStarted) {
         return;
       }
-      subscriptionsStarted = true;
+      subscriptionStarted = true;
       startedAt = Date.now();
       measureStartedAt = startedAt + warmupSeconds * 1000;
       measureStoppedAt = measureStartedAt + measureSeconds * 1000;
@@ -174,10 +174,7 @@ export default function (setupData) {
         sentAt: now,
         versionSeen,
       };
-      socket.send(stompFrame('SEND', {
-        destination: '/app/promotion-auctions/bids',
-        'content-type': 'application/json',
-      }, JSON.stringify({ campaignId: String(campaignId), bidAmount, idempotencyKey })));
+      socket.send(JSON.stringify({ campaignId: String(campaignId), bidAmount, idempotencyKey }));
       if (measured) {
         measuredAttempts.add(1);
       }
@@ -228,11 +225,7 @@ export default function (setupData) {
       }
     }
 
-    function recordAck(socket, body) {
-      const ack = parseJson(body);
-      if (ack === null) {
-        return;
-      }
+    function recordAck(socket, ack) {
       if (pending === null || ack.idempotencyKey !== pending.idempotencyKey) {
         if (ack.commandId && completedCommandIds[ack.commandId]) {
           return;
@@ -261,11 +254,7 @@ export default function (setupData) {
       protocolErrors.add(true);
     }
 
-    function recordOutcome(socket, body) {
-      const outcome = parseJson(body);
-      if (outcome === null) {
-        return;
-      }
+    function recordOutcome(socket, outcome) {
       if (Number(outcome.bidderUserId) !== userId) {
         protocolErrors.add(true);
         return;
@@ -280,22 +269,32 @@ export default function (setupData) {
       }
     }
 
-    function recordRoomUpdate(body) {
-      const event = parseJson(body);
-      if (event === null) {
-        return;
-      }
+    function recordRoomUpdate(event) {
       if (String(event.auctionWindowId) !== setupData.auctionWindowId
-          || event.eventType !== 'RANKING_UPDATED') {
+          || (event.eventType !== 'RANKING_DELTA' && event.eventType !== 'WINDOW_CLOSED')) {
         return;
       }
       protocolErrors.add(false);
-      const eventVersion = Number(event.eventVersion || event.decisionVersion || 0);
-      if (eventVersion <= visibleVersion) {
+      const eventVersion = Number(event.eventVersion || 0);
+      if (eventVersion === lastPublicEventVersion) {
         return;
       }
-      visibleVersion = eventVersion;
-      visiblePrice = Math.max(visiblePrice, highestBid(event.ranking));
+      if (lastPublicEventVersion > 0 && eventVersion !== lastPublicEventVersion + 1) {
+        const snapshot = loadSnapshot(token, setupData.auctionWindowId);
+        replaceRanking(visibleRanking, snapshot.ranking || []);
+        visibleVersion = Number(snapshot.decisionVersion || visibleVersion);
+        visiblePrice = highestBidValues(visibleRanking);
+        publicVersionResyncs.add(1);
+      }
+      lastPublicEventVersion = eventVersion;
+      visibleVersion = Math.max(visibleVersion, Number(event.decisionVersion || 0));
+      for (const delta of event.bidDeltas || []) {
+        visibleRanking[String(delta.campaignId)] = Number(delta.bidAmount || 0);
+      }
+      if (Array.isArray(event.ranking) && event.ranking.length > 0) {
+        replaceRanking(visibleRanking, event.ranking);
+      }
+      visiblePrice = Math.max(visiblePrice, highestBidValues(visibleRanking));
       const occurredAt = Date.parse(event.occurredAt);
       if (Number.isFinite(occurredAt)) {
         priceDeliveryDuration.add(Math.max(0, Date.now() - occurredAt));
@@ -307,59 +306,32 @@ export default function (setupData) {
         return;
       }
       intentionalClose = true;
-      socket.send(stompFrame('DISCONNECT', {}));
       socket.close();
     }
 
     socket.on('open', () => {
-      socket.send(stompFrame('CONNECT', {
-        'accept-version': '1.2',
-        host: 'localhost',
-        'heart-beat': '0,0',
+      socket.send(JSON.stringify({
+        type: 'SUBSCRIBE',
+        auctionWindowId: setupData.auctionWindowId,
       }));
+      socket.setTimeout(startAfterSubscription, subscriptionReadyMs);
     });
 
     socket.on('message', (raw) => {
-      for (const frame of parseStompFrames(raw)) {
-        if (frame.command === 'CONNECTED') {
-          socket.send(stompFrame('SUBSCRIBE', {
-            id: ackSubscription,
-            destination: '/user/queue/promotion-auction-bid-acks',
-            ack: 'auto',
-            receipt: `ready-${ackSubscription}`,
-          }));
-          socket.send(stompFrame('SUBSCRIBE', {
-            id: outcomeSubscription,
-            destination: '/user/queue/promotion-auction-outcomes',
-            ack: 'auto',
-            receipt: `ready-${outcomeSubscription}`,
-          }));
-          socket.send(stompFrame('SUBSCRIBE', {
-            id: roomSubscription,
-            destination: `/topic/promotion-auctions/${setupData.auctionWindowId}`,
-            ack: 'auto',
-            receipt: `ready-${roomSubscription}`,
-          }));
-          socket.setTimeout(startAfterSubscriptions, subscriptionReadyMs);
-        } else if (frame.command === 'RECEIPT') {
-          const receiptId = frame.headers['receipt-id'];
-          if (receiptId && receiptId.startsWith('ready-')) {
-            subscriptionReceipts[receiptId] = true;
-            if (Object.keys(subscriptionReceipts).length === 3) {
-              startAfterSubscriptions();
-            }
-          }
-        } else if (frame.command === 'MESSAGE') {
-          if (frame.headers.subscription === ackSubscription) {
-            recordAck(socket, frame.body);
-          } else if (frame.headers.subscription === outcomeSubscription) {
-            recordOutcome(socket, frame.body);
-          } else if (frame.headers.subscription === roomSubscription) {
-            recordRoomUpdate(frame.body);
-          }
-        } else if (frame.command === 'ERROR') {
-          protocolErrors.add(true);
-        }
+      const message = parseJson(raw);
+      if (message === null) {
+        return;
+      }
+      if (message.eventType === 'SUBSCRIBED') {
+        startAfterSubscription();
+      } else if (message.status === 'PUBLISHED' || message.status === 'REJECTED') {
+        recordAck(socket, message);
+      } else if (message.eventType === 'BID_CONFIRMED' || message.eventType === 'BID_REJECTED') {
+        recordOutcome(socket, message);
+      } else if (message.eventType === 'RANKING_DELTA' || message.eventType === 'WINDOW_CLOSED') {
+        recordRoomUpdate(message);
+      } else {
+        protocolErrors.add(true);
       }
     });
 
@@ -432,42 +404,23 @@ function parseJson(body) {
   }
 }
 
-function stompFrame(command, headers, body = '') {
-  const lines = [command];
-  for (const [name, value] of Object.entries(headers)) {
-    lines.push(`${name}:${value}`);
-  }
-  if (body.length > 0 && headers['content-length'] === undefined) {
-    lines.push(`content-length:${body.length}`);
-  }
-  lines.push('', body);
-  return `${lines.join('\n')}\u0000`;
+function rankingByCampaign(ranking) {
+  const values = {};
+  replaceRanking(values, ranking);
+  return values;
 }
 
-function parseStompFrames(raw) {
-  const frames = [];
-  for (const value of String(raw).split('\u0000')) {
-    const text = value.replace(/^\n+/, '');
-    if (!text) {
-      continue;
-    }
-    const separator = text.indexOf('\n\n');
-    const headerBlock = separator >= 0 ? text.slice(0, separator) : text;
-    const headerLines = headerBlock.split('\n').map((line) => line.replace(/\r$/, ''));
-    const headers = {};
-    for (const line of headerLines.slice(1)) {
-      const colon = line.indexOf(':');
-      if (colon > 0) {
-        headers[line.slice(0, colon)] = line.slice(colon + 1);
-      }
-    }
-    frames.push({
-      command: headerLines[0],
-      headers,
-      body: separator >= 0 ? text.slice(separator + 2) : '',
-    });
+function replaceRanking(values, ranking) {
+  for (const campaignId of Object.keys(values)) {
+    delete values[campaignId];
   }
-  return frames;
+  for (const item of ranking || []) {
+    values[String(item.campaignId)] = Number(item.bidAmount || 0);
+  }
+}
+
+function highestBidValues(values) {
+  return Object.values(values).reduce((highest, bidAmount) => Math.max(highest, bidAmount), 0);
 }
 
 function validateConfiguration() {

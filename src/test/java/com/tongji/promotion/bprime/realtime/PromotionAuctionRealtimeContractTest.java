@@ -1,6 +1,5 @@
 package com.tongji.promotion.bprime.realtime;
 
-import com.tongji.promotion.bprime.model.PromotionRankingItem;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -27,20 +26,22 @@ class PromotionAuctionRealtimeContractTest {
     }
 
     @Test
-    void publicEventCarriesVersionedRankingOrWindowState() {
+    void publicEventCarriesVersionedBidDeltasWithoutFullRanking() {
         PromotionAuctionRealtimeEvent event = new PromotionAuctionRealtimeEvent(
                 "decision-d-1:public",
-                PromotionAuctionRealtimeEvent.RANKING_UPDATED,
+                PromotionAuctionRealtimeEvent.RANKING_DELTA,
                 301L,
                 "d-1",
                 2L,
                 2L,
                 "OPEN",
-                List.of(new PromotionRankingItem("201", "42", "1001", 120L, 1)),
+                List.of(),
+                List.of(new PromotionBidDelta("201", "42", "1001", 120L)),
                 Instant.parse("2026-06-20T10:05:00Z"));
 
         assertThat(event.decisionVersion()).isEqualTo(2L);
-        assertThat(event.ranking()).hasSize(1);
+        assertThat(event.ranking()).isEmpty();
+        assertThat(event.bidDeltas()).hasSize(1);
     }
 
     @Test

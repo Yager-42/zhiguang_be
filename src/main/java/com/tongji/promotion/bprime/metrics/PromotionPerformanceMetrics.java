@@ -26,6 +26,10 @@ public class PromotionPerformanceMetrics {
     private final Counter fastRejectPrecheckUnavailable;
     private final Counter webSocketAckRejected;
     private final Counter webSocketAckPublished;
+    private final Counter publicUpdateBatches;
+    private final Counter publicUpdateDeltas;
+    private final Counter publicUpdateOverwrites;
+    private final Counter webSocketBackpressureCloses;
     private final Timer decisionLatency;
     private final Timer projectionEndToEndLatency;
     private final Timer realtimeEndToEndLatency;
@@ -41,6 +45,12 @@ public class PromotionPerformanceMetrics {
                 "result", "unavailable");
         this.webSocketAckRejected = registry.counter("promotion.bprime.websocket.bid.ack", "status", "rejected");
         this.webSocketAckPublished = registry.counter("promotion.bprime.websocket.bid.ack", "status", "published");
+        this.publicUpdateBatches = registry.counter("promotion.bprime.websocket.public.update", "result", "batch");
+        this.publicUpdateDeltas = registry.counter("promotion.bprime.websocket.public.update", "result", "delta");
+        this.publicUpdateOverwrites = registry.counter(
+                "promotion.bprime.websocket.public.update", "result", "overwritten");
+        this.webSocketBackpressureCloses = registry.counter(
+                "promotion.bprime.websocket.connection.close", "reason", "backpressure");
         this.decisionLatency = registry.timer("promotion.bprime.decision.latency");
         this.projectionEndToEndLatency = registry.timer("promotion.bprime.end.to.end", "target", "projection");
         this.realtimeEndToEndLatency = registry.timer("promotion.bprime.end.to.end", "target", "websocket");
@@ -94,7 +104,7 @@ public class PromotionPerformanceMetrics {
         recordElapsed(projectionEndToEndLatency, submittedAt(decision));
     }
 
-    /** Records one decision after the realtime publisher returned successfully. */
+    /** Records one decision after the realtime delivery layer accepted it, not after a client received it. */
     public void recordRealtimeComplete(PromotionAuctionDecision decision) {
         registry.counter("promotion.bprime.realtime", "result", result(decision)).increment();
         recordElapsed(realtimeEndToEndLatency, submittedAt(decision));
@@ -103,6 +113,22 @@ public class PromotionPerformanceMetrics {
     public void updatePublisherState(int queueDepth, int activeWorkers) {
         publisherQueueDepth.set(Math.max(0, queueDepth));
         publisherActiveWorkers.set(Math.max(0, activeWorkers));
+    }
+
+    /** Records one coalesced public update and the number of campaign deltas it contains. */
+    public void recordPublicUpdateBatch(int deltaCount) {
+        publicUpdateBatches.increment();
+        publicUpdateDeltas.increment(Math.max(0, deltaCount));
+    }
+
+    /** Records replacement of an unsent recoverable public update for a slow native connection. */
+    public void recordPublicUpdateOverwrite() {
+        publicUpdateOverwrites.increment();
+    }
+
+    /** Records a native connection closed because its critical feedback queue reached capacity. */
+    public void recordWebSocketBackpressureClose() {
+        webSocketBackpressureCloses.increment();
     }
 
     private String result(PromotionAuctionDecision decision) {

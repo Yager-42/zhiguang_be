@@ -41,7 +41,7 @@ class PromotionCommandProcessingServiceTest {
     }
 
     @Test
-    void appendsRedisDecisionSynchronouslyBeforeRecordingDurability() {
+    void appendsRedisDecisionBatchBeforeRecordingDurability() {
         PromotionAuctionCommand command = command();
         PromotionAuctionDecision decision = decision();
         when(redisDecisionAdapter.decide(eq(command), any())).thenReturn(decision);
@@ -51,7 +51,7 @@ class PromotionCommandProcessingServiceTest {
         InOrder ordered = inOrder(redisDecisionAdapter, fastRejectFilter, decisionLogPort, performanceMetrics);
         ordered.verify(redisDecisionAdapter).decide(eq(command), any());
         ordered.verify(fastRejectFilter).observeDecision(decision);
-        ordered.verify(decisionLogPort).append(decision);
+        ordered.verify(decisionLogPort).appendBatch(List.of(decision));
         ordered.verify(performanceMetrics).recordDecisionDurable(decision);
     }
 
@@ -60,7 +60,8 @@ class PromotionCommandProcessingServiceTest {
         PromotionAuctionCommand command = command();
         PromotionAuctionDecision decision = decision();
         when(redisDecisionAdapter.decide(eq(command), any())).thenReturn(decision);
-        doThrow(new IllegalStateException("kafka unavailable")).when(decisionLogPort).append(decision);
+        doThrow(new IllegalStateException("kafka unavailable"))
+                .when(decisionLogPort).appendBatch(List.of(decision));
 
         assertThatThrownBy(() -> service.process(command)).isInstanceOf(IllegalStateException.class);
 

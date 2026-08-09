@@ -63,7 +63,7 @@ class KafkaPromotionDecisionLogPortTest {
 
         assertThatThrownBy(() -> port.append(decision()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Failed to append promotion decision to Kafka");
+                .hasMessageContaining("Failed to append promotion decision batch to Kafka");
     }
 
     private PromotionAuctionDecision decision() {
