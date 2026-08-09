@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecisionLogEnvelope;
 import com.tongji.promotion.bprime.model.PromotionDecisionHasher;
+import com.tongji.promotion.bprime.metrics.PromotionPerformanceMetrics;
 import com.tongji.promotion.bprime.service.PromotionDecisionFanoutService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import java.util.Map;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class PromotionDecisionFanoutKafkaListenerTest {
 
@@ -23,16 +25,19 @@ class PromotionDecisionFanoutKafkaListenerTest {
     void fanoutConsumesEnvelopeAndAcknowledges() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         PromotionDecisionFanoutService fanoutService = mock(PromotionDecisionFanoutService.class);
+        PromotionPerformanceMetrics performanceMetrics = mock(PromotionPerformanceMetrics.class);
         Acknowledgment ack = mock(Acknowledgment.class);
         PromotionDecisionFanoutKafkaListener listener = new PromotionDecisionFanoutKafkaListener(
-                objectMapper, new PromotionDecisionKafkaSupport(), fanoutService);
+                objectMapper, new PromotionDecisionKafkaSupport(), fanoutService, performanceMetrics);
         PromotionAuctionDecision decision = decision();
+        when(fanoutService.publishDecision(decision)).thenReturn(true);
         String payload = objectMapper.writeValueAsString(PromotionAuctionDecisionLogEnvelope.auctionDecision(
                 decision, PromotionDecisionHasher.hash(decision), Instant.parse("2026-06-20T10:05:01Z")));
 
         listener.onMessage(new ConsumerRecord<>("decisions.v2", 0, 7L, "301", payload), ack);
 
         verify(fanoutService).publishDecision(decision);
+        verify(performanceMetrics).recordRealtimeComplete(decision);
         verify(ack).acknowledge();
     }
 
@@ -42,7 +47,8 @@ class PromotionDecisionFanoutKafkaListenerTest {
         PromotionDecisionFanoutService fanoutService = mock(PromotionDecisionFanoutService.class);
         Acknowledgment ack = mock(Acknowledgment.class);
         PromotionDecisionFanoutKafkaListener listener = new PromotionDecisionFanoutKafkaListener(
-                objectMapper, new PromotionDecisionKafkaSupport(), fanoutService);
+                objectMapper, new PromotionDecisionKafkaSupport(), fanoutService,
+                mock(PromotionPerformanceMetrics.class));
         PromotionAuctionDecision decision = decision();
         String payload = objectMapper.writeValueAsString(PromotionAuctionDecisionLogEnvelope.auctionDecision(
                 decision, PromotionDecisionHasher.hash(decision), Instant.parse("2026-06-20T10:05:01Z")));

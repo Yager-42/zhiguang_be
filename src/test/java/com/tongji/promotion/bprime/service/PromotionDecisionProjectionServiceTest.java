@@ -2,8 +2,11 @@ package com.tongji.promotion.bprime.service;
 
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
 import com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
+import com.tongji.promotion.bprime.model.PromotionDecisionProjectionItem;
+import com.tongji.promotion.bprime.model.PromotionProjectionCheckpointRecord;
 import com.tongji.promotion.bprime.model.PromotionWalletEffect;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
@@ -18,6 +21,7 @@ import com.tongji.wallet.service.WalletService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Instant;
@@ -30,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -37,6 +42,7 @@ import static org.mockito.Mockito.when;
 class PromotionDecisionProjectionServiceTest {
 
     private PromotionProjectionCheckpointMapper checkpointMapper;
+    private PromotionBidEscrowMapper escrowMapper;
     private PromotionBidMapper bidMapper;
     private PromotionAuctionWindowMapper windowMapper;
     private PromotionSlotAllocationMapper allocationMapper;
@@ -44,11 +50,13 @@ class PromotionDecisionProjectionServiceTest {
     private IdService idService;
     private WalletService walletService;
     private StringRedisTemplate redisTemplate;
+    private HashOperations<String, Object, Object> hashOperations;
     private PromotionDecisionProjectionService service;
 
     @BeforeEach
     void setUp() {
         checkpointMapper = mock(PromotionProjectionCheckpointMapper.class);
+        escrowMapper = mock(PromotionBidEscrowMapper.class);
         bidMapper = mock(PromotionBidMapper.class);
         windowMapper = mock(PromotionAuctionWindowMapper.class);
         allocationMapper = mock(PromotionSlotAllocationMapper.class);
@@ -56,8 +64,10 @@ class PromotionDecisionProjectionServiceTest {
         idService = mock(IdService.class);
         walletService = mock(WalletService.class);
         redisTemplate = mock(StringRedisTemplate.class);
-        service = new PromotionDecisionProjectionService(checkpointMapper, bidMapper, windowMapper,
-                allocationMapper, walletService, cacheService, idService, redisTemplate);
+        hashOperations = mock(HashOperations.class);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        service = new PromotionDecisionProjectionService(checkpointMapper, escrowMapper,
+                bidMapper, windowMapper, allocationMapper, walletService, cacheService, idService, redisTemplate);
     }
 
     @Test
@@ -69,23 +79,29 @@ class PromotionDecisionProjectionServiceTest {
         ArgumentCaptor<PromotionBid> bidCaptor = ArgumentCaptor.forClass(PromotionBid.class);
         verify(bidMapper).upsertAccepted(bidCaptor.capture());
         assertThat(bidCaptor.getValue().getCommandId()).isEqualTo("cmd-1");
-        assertThat(bidCaptor.getValue().getWalletBusinessRef()).isEqualTo("promotion-bprime:cmd-1:hold");
+        assertThat(bidCaptor.getValue().getWalletBusinessRef()).isEqualTo("promotion-bprime:escrow:301:201");
         verify(checkpointMapper).upsert(301L, "d-1", 1L, null, null, null);
+        verify(checkpointMapper, times(1)).findByAuctionWindowId(301L);
     }
 
     @Test
-    void acceptedDecisionUsesLoggedHoldEffectBusinessRefForProjectedBid() {
+    void acceptedDecisionProjectsEscrowHoldFromLoggedPayload() {
         when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(1L);
+        when(escrowMapper.updateCurrentHold(301L, 201L, 120L,
+                Instant.parse("2026-06-20T10:05:00Z"))).thenReturn(1);
 
-        service.project(new PromotionAuctionDecision("d-1", "cmd-1", "hash", 301L, 201L, 42L, 1001L,
+        service.project(new PromotionAuctionDecision("d-1", "cmd-1", "hash", 301L, 1L, 0L, 201L, 42L, 1001L,
                 "FEED_TOP_SLOT", "BID_ACCEPTED", true, null, 120L, List.of(),
                 List.of(new com.tongji.promotion.bprime.model.PromotionWalletEffect(
                         42L, 120L, "HOLD", "promotion-bprime:cmd-1:hold:retry")),
+                Map.of("authorizedAmount", 500L, "currentHold", 120L),
                 Instant.parse("2026-06-20T10:05:00Z")));
 
         ArgumentCaptor<PromotionBid> bidCaptor = ArgumentCaptor.forClass(PromotionBid.class);
         verify(bidMapper).upsertAccepted(bidCaptor.capture());
-        assertThat(bidCaptor.getValue().getWalletBusinessRef()).isEqualTo("promotion-bprime:cmd-1:hold:retry");
+        assertThat(bidCaptor.getValue().getWalletBusinessRef()).isEqualTo("promotion-bprime:escrow:301:201");
+        verify(escrowMapper).updateCurrentHold(301L, 201L, 120L,
+                Instant.parse("2026-06-20T10:05:00Z"));
     }
 
     @Test
@@ -109,7 +125,7 @@ class PromotionDecisionProjectionServiceTest {
     @Test
     void windowClosedDecisionProjectsFinalAllocationFromKafkaPayloadWithoutPriorMysqlBidRows() {
         when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(7001L);
-        when(checkpointMapper.findLastDecisionVersion(301L)).thenReturn(5L);
+        when(checkpointMapper.findByAuctionWindowId(301L)).thenReturn(checkpoint("d-5", 5L));
         PromotionAuctionDecision closeDecision = closeDecisionWithPayload();
 
         assertThatCode(() -> service.project(closeDecision)).doesNotThrowAnyException();
@@ -128,7 +144,9 @@ class PromotionDecisionProjectionServiceTest {
                 WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION,
                 "promotion-bprime:301:202:release");
         verify(windowMapper).markSettled(301L, Instant.parse("2026-06-20T11:00:00Z"));
-        verify(redisTemplate).delete("promotion:auction:301:close_decision_version");
+        verify(escrowMapper).markClosedByWindowId(301L, Instant.parse("2026-06-20T11:00:00Z"));
+        verify(hashOperations).put("promotion:auction:{301}:state", "status", "SETTLED");
+        verify(redisTemplate).delete("promotion:auction:{301}:close_decision_version");
         verify(cacheService).refreshActiveAllocations(PromotionResourceType.FEED_TOP_SLOT,
                 Instant.parse("2026-06-20T11:00:00Z"));
         verify(checkpointMapper).upsert(301L, "close-1", 6L, null, null, null);
@@ -137,7 +155,7 @@ class PromotionDecisionProjectionServiceTest {
     @Test
     void windowClosedDecisionUsesPayloadWalletEffectsAsSettlementFacts() {
         when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(7001L);
-        when(checkpointMapper.findLastDecisionVersion(301L)).thenReturn(5L);
+        when(checkpointMapper.findByAuctionWindowId(301L)).thenReturn(checkpoint("d-5", 5L));
         PromotionAuctionDecision closeDecision = new PromotionAuctionDecision("close-1", "close-cmd", "hash",
                 301L, 6L, 5L, 0L, 0L, 0L, "FEED_TOP_SLOT", "WINDOW_CLOSED", false, null, 0L,
                 List.of(),
@@ -175,7 +193,7 @@ class PromotionDecisionProjectionServiceTest {
 
     @Test
     void rejectsOutOfOrderOrSkippedDecisionVersionBeforeProjectionSideEffects() {
-        when(checkpointMapper.findLastDecisionVersion(301L)).thenReturn(1L);
+        when(checkpointMapper.findByAuctionWindowId(301L)).thenReturn(checkpoint("d-1", 1L));
 
         assertThatThrownBy(() -> service.project(new PromotionAuctionDecision("d-gap", "cmd-gap", "hash",
                 301L, 3L, 2L, 201L, 42L, 1001L, "FEED_TOP_SLOT", "BID_ACCEPTED", true,
@@ -189,13 +207,36 @@ class PromotionDecisionProjectionServiceTest {
 
     @Test
     void duplicateDecisionRefreshesCheckpointPositionWithoutBusinessSideEffects() {
-        when(checkpointMapper.findLastDecisionVersion(301L)).thenReturn(1L);
-        when(checkpointMapper.findLastDecisionId(301L)).thenReturn("d-1");
+        when(checkpointMapper.findByAuctionWindowId(301L)).thenReturn(checkpoint("d-1", 1L));
 
         service.project(decision(true), "decisions.v2", 3, 101L);
 
         verify(bidMapper, never()).upsertAccepted(any());
         verify(checkpointMapper).upsert(301L, "d-1", 1L, "decisions.v2", 3, 101L);
+    }
+
+    @Test
+    void batchLoadsAndWritesOneCheckpointPerWindow() {
+        PromotionAuctionDecision first = decision(false);
+        PromotionAuctionDecision second = new PromotionAuctionDecision("d-2", "cmd-2", "hash-2",
+                301L, 2L, 1L, 202L, 43L, 1002L, "FEED_TOP_SLOT", "BID_REJECTED", false,
+                "BID_NOT_HIGHER", 110L, List.of(), List.of(), Map.of(),
+                Instant.parse("2026-06-20T10:05:01Z"));
+
+        service.projectBatch(List.of(
+                new PromotionDecisionProjectionItem(first, "decisions.v2", 0, 10L),
+                new PromotionDecisionProjectionItem(second, "decisions.v2", 0, 11L)));
+
+        verify(checkpointMapper, times(1)).findByAuctionWindowId(301L);
+        verify(checkpointMapper).upsert(301L, "d-2", 2L, "decisions.v2", 0, 11L);
+    }
+
+    private PromotionProjectionCheckpointRecord checkpoint(String decisionId, long decisionVersion) {
+        PromotionProjectionCheckpointRecord checkpoint = new PromotionProjectionCheckpointRecord();
+        checkpoint.setAuctionWindowId(301L);
+        checkpoint.setLastDecisionId(decisionId);
+        checkpoint.setLastDecisionVersion(decisionVersion);
+        return checkpoint;
     }
 
     private PromotionAuctionDecision decision(boolean accepted) {

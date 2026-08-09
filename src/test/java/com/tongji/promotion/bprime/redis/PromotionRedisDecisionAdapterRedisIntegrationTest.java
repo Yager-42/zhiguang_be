@@ -1,6 +1,7 @@
 package com.tongji.promotion.bprime.redis;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +19,9 @@ import org.springframework.test.context.TestPropertySource;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.time.Instant;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -30,6 +34,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIf("redisReachable")
 class PromotionRedisDecisionAdapterRedisIntegrationTest {
 
+    private static final Instant NOW = Instant.parse("2026-06-20T10:05:00Z");
+    private static final String PREFIX = "promotion:auction:{301}";
+
     @Autowired
     private StringRedisTemplate redis;
     @Autowired
@@ -37,70 +44,72 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
 
     @BeforeEach
     void cleanUp() {
-        redis.delete("promotion:auction:301:state");
-        redis.delete("promotion:auction:301:commands");
-        redis.delete("promotion:auction:301:ranking");
-        redis.delete("promotion:auction:301:campaign:243");
-        redis.delete("promotion:auction:301:campaign:244");
+        Set<String> keys = redis.keys(PREFIX + "*");
+        if (keys != null && !keys.isEmpty()) {
+            redis.delete(keys);
+        }
     }
 
     @Test
-    void acceptsAndReplaysAndRejectsInvalidCommands() {
-        Instant now = Instant.parse("2026-06-20T10:05:00Z");
-        PromotionAuctionDecision accepted = adapter.decide(command("cmd-1", "hash-1", 42L, 120L), 100L, "OPEN", now);
-        PromotionAuctionDecision replay = adapter.decide(command("cmd-1", "hash-1", 42L, 120L), 100L, "OPEN", now);
-        PromotionAuctionDecision conflict = adapter.decide(command("cmd-1", "hash-2", 42L, 120L), 100L, "OPEN", now);
-        PromotionAuctionDecision belowReserve = adapter.decide(command("cmd-2", "hash-3", 43L, 90L), 100L, "OPEN", now);
-        PromotionAuctionDecision closed = adapter.decide(command("cmd-3", "hash-4", 43L, 150L), 100L, "CLOSED", now);
+    void escrowAuthorizationEnablesAtomicAcceptReplayAndConflictDecision() {
+        authorize("escrow-1", 243L, 42L, 500L);
+
+        PromotionAuctionDecision accepted = adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 120L), NOW);
+        PromotionAuctionDecision replay = adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 120L), NOW);
+        PromotionAuctionDecision conflict = adapter.decide(bid("cmd-1", "hash-2", 243L, 42L, 120L), NOW);
+        PromotionAuctionDecision belowReserve = adapter.decide(bid("cmd-2", "hash-3", 243L, 42L, 90L), NOW);
 
         assertThat(accepted.accepted()).isTrue();
-        assertThat(accepted.walletEffects()).hasSize(1);
+        assertThat(accepted.walletEffects()).isEmpty();
         assertThat(replay.decisionId()).isEqualTo(accepted.decisionId());
         assertThat(conflict.rejectionReason()).isEqualTo("IDEMPOTENCY_CONFLICT");
         assertThat(belowReserve.rejectionReason()).isEqualTo("BELOW_RESERVE");
-        assertThat(closed.rejectionReason()).isEqualTo("WINDOW_CLOSED");
+        assertThat(redis.opsForHash().get(PREFIX + ":escrow", "243:currentHold")).isEqualTo("120");
+        var expirations = redis.opsForHash().getTimeToLive(PREFIX + ":commands", TimeUnit.SECONDS,
+                List.of("cmd-1:hash", "cmd-1:decision"));
+        assertThat(expirations.ttlOf("cmd-1:hash").getSeconds()).isPositive();
+        assertThat(expirations.ttlOf("cmd-1:decision").getSeconds()).isPositive();
     }
 
     @Test
-    void ranksHigherBidFirst() {
-        Instant now = Instant.parse("2026-06-20T10:05:00Z");
-        adapter.commit(adapter.decide(command("cmd-1", "hash-1", 42L, 120L), 100L, "OPEN", now));
-        PromotionAuctionDecision decision = adapter.decide(command("cmd-2", "hash-2", 43L, 130L), 100L, "OPEN", now.plusMillis(1));
+    void acceptedDecisionUpdatesRankingAndCampaignInsideTheDecisionScript() {
+        authorize("escrow-1", 243L, 42L, 500L);
+        authorize("escrow-2", 244L, 43L, 500L);
+        adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 120L), NOW);
+
+        PromotionAuctionDecision decision = adapter.decide(
+                bid("cmd-2", "hash-2", 244L, 43L, 130L), NOW.plusMillis(1));
 
         assertThat(decision.ranking()).extracting("bidderUserId").containsExactly("43", "42");
+        assertThat(redis.opsForZSet().reverseRange(PREFIX + ":ranking", 0, 29))
+                .containsExactly("244", "243");
+        assertThat(redis.opsForHash().get(PREFIX + ":campaign:243", "bidAmount")).isEqualTo("120");
     }
 
     @Test
-    void decideDoesNotExposeUncommittedBidToRedisHotState() {
-        Instant now = Instant.parse("2026-06-20T10:05:00Z");
+    void rejectsBidAboveAuthorizationAndLowerOrEqualRebid() {
+        authorize("escrow-1", 243L, 42L, 120L);
+        adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 120L), NOW);
 
-        PromotionAuctionDecision decision = adapter.decide(command("cmd-1", "hash-1", 42L, 120L), 100L, "OPEN", now);
+        PromotionAuctionDecision aboveAuthorization = adapter.decide(
+                bid("cmd-2", "hash-2", 243L, 42L, 130L), NOW.plusMillis(1));
+        PromotionAuctionDecision equal = adapter.decide(
+                bid("cmd-3", "hash-3", 243L, 42L, 120L), NOW.plusMillis(2));
 
-        assertThat(decision.accepted()).isTrue();
-        assertThat(redis.opsForZSet().reverseRange("promotion:auction:301:ranking", 0, 29)).isEmpty();
-        assertThat(redis.opsForHash().entries("promotion:auction:301:campaign:243")).isEmpty();
-
-        adapter.commit(decision);
-
-        assertThat(redis.opsForZSet().reverseRange("promotion:auction:301:ranking", 0, 29)).containsExactly("243");
-        assertThat(redis.opsForHash().get("promotion:auction:301:campaign:243", "bidAmount")).isEqualTo("120");
-    }
-
-    @Test
-    void rejectsSameBidderLowerOrEqualRebid() {
-        Instant now = Instant.parse("2026-06-20T10:05:00Z");
-        adapter.commit(adapter.decide(command("cmd-1", "hash-1", 42L, 120L), 100L, "OPEN", now));
-
-        PromotionAuctionDecision lower = adapter.decide(command("cmd-2", "hash-2", 42L, 110L), 100L, "OPEN", now.plusMillis(1));
-        PromotionAuctionDecision equal = adapter.decide(command("cmd-3", "hash-3", 42L, 120L), 100L, "OPEN", now.plusMillis(2));
-
-        assertThat(lower.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
+        assertThat(aboveAuthorization.rejectionReason()).isEqualTo("ESCROW_INSUFFICIENT");
         assertThat(equal.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
     }
 
-    private PromotionAuctionCommand command(String commandId, String hash, long bidder, long amount) {
-        return new PromotionAuctionCommand(commandId, "idem", hash, 301L, 201L + bidder, bidder, 1000L + bidder,
-                "FEED_TOP_SLOT", amount, "BID", Instant.parse("2026-06-20T10:05:00Z"));
+    private PromotionAuctionDecision authorize(String commandId, long campaignId, long bidder, long amount) {
+        PromotionAuctionCommand command = new PromotionAuctionCommand(commandId, "escrow:" + amount,
+                "hash:" + commandId, 301L, campaignId, bidder, 1000L + bidder, "FEED_TOP_SLOT", amount,
+                100L, "OPEN", "ESCROW_NOTIFY", NOW);
+        return adapter.decide(command, NOW);
+    }
+
+    private PromotionAuctionCommand bid(String commandId, String hash, long campaignId, long bidder, long amount) {
+        return new PromotionAuctionCommand(commandId, "idem", hash, 301L, campaignId, bidder, 1000L + bidder,
+                "FEED_TOP_SLOT", amount, 100L, "OPEN", "BID", NOW);
     }
 
     static boolean redisReachable() {
@@ -113,7 +122,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
     }
 
     @Configuration
-    @ImportAutoConfiguration({RedisAutoConfiguration.class})
+    @ImportAutoConfiguration(RedisAutoConfiguration.class)
     static class TestConfig {
         @Bean
         ObjectMapper objectMapper() {
@@ -121,8 +130,14 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         }
 
         @Bean
-        PromotionRedisDecisionAdapter adapter(StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
-            return new PromotionRedisDecisionAdapter(redisTemplate, objectMapper);
+        PromotionBPrimeProperties promotionBPrimeProperties() {
+            return new PromotionBPrimeProperties();
+        }
+
+        @Bean
+        PromotionRedisDecisionAdapter adapter(StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
+                                              PromotionBPrimeProperties properties) {
+            return new PromotionRedisDecisionAdapter(redisTemplate, objectMapper, properties);
         }
     }
 }

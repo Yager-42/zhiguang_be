@@ -1,6 +1,9 @@
 package com.tongji.promotion.bprime.service;
 
 import com.tongji.promotion.bprime.model.PromotionAuctionSnapshot;
+import com.tongji.promotion.bprime.model.PromotionAuctionHotSnapshot;
+import com.tongji.promotion.bprime.model.PromotionRankingItem;
+import com.tongji.promotion.bprime.redis.PromotionRedisSnapshotAdapter;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionSlotAllocationMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
@@ -8,14 +11,9 @@ import com.tongji.promotion.model.PromotionAuctionWindowStatus;
 import com.tongji.promotion.model.PromotionResourceType;
 import com.tongji.promotion.model.PromotionSlotAllocation;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.core.HashOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.data.redis.core.ZSetOperations;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -27,26 +25,15 @@ class PromotionSnapshotServiceTest {
     void snapshotPrefersRedisHotRankingWhenAvailable() {
         PromotionAuctionWindowMapper windowMapper = mock(PromotionAuctionWindowMapper.class);
         PromotionSlotAllocationMapper allocationMapper = mock(PromotionSlotAllocationMapper.class);
-        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        @SuppressWarnings("unchecked")
-        ZSetOperations<String, String> zSet = mock(ZSetOperations.class);
-        @SuppressWarnings("unchecked")
-        HashOperations<String, String, String> hash = mock(HashOperations.class);
-        @SuppressWarnings("unchecked")
-        ValueOperations<String, String> values = mock(ValueOperations.class);
+        PromotionRedisSnapshotAdapter redisSnapshotAdapter = mock(PromotionRedisSnapshotAdapter.class);
         when(windowMapper.findById(301L)).thenReturn(PromotionAuctionWindow.builder()
                 .id(301L)
                 .status(PromotionAuctionWindowStatus.OPEN)
                 .build());
-        when(redisTemplate.opsForZSet()).thenReturn(zSet);
-        when(redisTemplate.<String, String>opsForHash()).thenReturn(hash);
-        when(redisTemplate.opsForValue()).thenReturn(values);
-        when(zSet.reverseRange("promotion:auction:301:ranking", 0, 29)).thenReturn(Set.of("201"));
-        when(hash.get("promotion:auction:301:campaign:201", "bidAmount")).thenReturn("120");
-        when(hash.get("promotion:auction:301:campaign:201", "bidderUserId")).thenReturn("42");
-        when(hash.get("promotion:auction:301:campaign:201", "postId")).thenReturn("1001");
-        when(values.get("promotion:auction:301:decision_version")).thenReturn("7");
-        PromotionSnapshotService service = new PromotionSnapshotService(windowMapper, allocationMapper, redisTemplate);
+        when(redisSnapshotAdapter.snapshot(301L)).thenReturn(new PromotionAuctionHotSnapshot(7L,
+                List.of(new PromotionRankingItem("201", "42", "1001", 120L, 1))));
+        PromotionSnapshotService service = new PromotionSnapshotService(
+                windowMapper, allocationMapper, redisSnapshotAdapter);
 
         PromotionAuctionSnapshot snapshot = service.snapshot(301L);
 
@@ -62,10 +49,8 @@ class PromotionSnapshotServiceTest {
     void closedSnapshotReadsMysqlAllocation() {
         PromotionAuctionWindowMapper windowMapper = mock(PromotionAuctionWindowMapper.class);
         PromotionSlotAllocationMapper allocationMapper = mock(PromotionSlotAllocationMapper.class);
-        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        @SuppressWarnings("unchecked")
-        ValueOperations<String, String> values = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(values);
+        PromotionRedisSnapshotAdapter redisSnapshotAdapter = mock(PromotionRedisSnapshotAdapter.class);
+        when(redisSnapshotAdapter.snapshot(301L)).thenReturn(new PromotionAuctionHotSnapshot(7L, List.of()));
         when(windowMapper.findById(301L)).thenReturn(PromotionAuctionWindow.builder()
                 .id(301L)
                 .status(PromotionAuctionWindowStatus.SETTLED)
@@ -79,7 +64,8 @@ class PromotionSnapshotServiceTest {
                 .bidderUserId(42L)
                 .clearingPrice(100L)
                 .build()));
-        PromotionSnapshotService service = new PromotionSnapshotService(windowMapper, allocationMapper, redisTemplate);
+        PromotionSnapshotService service = new PromotionSnapshotService(
+                windowMapper, allocationMapper, redisSnapshotAdapter);
 
         PromotionAuctionSnapshot snapshot = service.snapshot(301L);
 

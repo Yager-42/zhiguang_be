@@ -16,7 +16,8 @@ class PromotionCommandRocketMqListenerTest {
         PromotionCommandProcessingService processingService = mock(PromotionCommandProcessingService.class);
         PromotionCommandRocketMqListener listener = new PromotionCommandRocketMqListener(processingService);
         PromotionAuctionCommand command = new PromotionAuctionCommand("cmd-1", "idem-1", "hash", 301L,
-                201L, 42L, 1001L, "FEED_TOP_SLOT", 120L, "BID", Instant.parse("2026-06-20T10:05:00Z"));
+                201L, 42L, 1001L, "FEED_TOP_SLOT", 120L, 100L, "OPEN", "BID",
+                Instant.parse("2026-06-20T10:05:00Z"));
 
         listener.onMessage(command);
 
