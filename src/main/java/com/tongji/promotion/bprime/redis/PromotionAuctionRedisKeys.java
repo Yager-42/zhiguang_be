@@ -12,6 +12,11 @@ public final class PromotionAuctionRedisKeys {
         return "promotion:auction:active-streams";
     }
 
+    /** 关窗索引：member=windowId，score=windowEndAtEpochMs（Go auction:active 同构）。 */
+    public static String closingIndex() {
+        return "promotion:auction:closing";
+    }
+
     public static String prefix(long auctionWindowId) {
         return "promotion:auction:{" + auctionWindowId + "}";
     }
@@ -43,29 +48,25 @@ public final class PromotionAuctionRedisKeys {
         return "promotion:auction:{*}:pub";
     }
 
-    public static String commandBucket(long auctionWindowId, long minuteBucket) {
-        return prefix(auctionWindowId) + ":commands:" + minuteBucket;
+    /** 幂等命令记录：单 key Hash，字段级 TTL（HSETEX），无时间桶。 */
+    public static String commandBucket(long auctionWindowId) {
+        return prefix(auctionWindowId) + ":commands";
     }
 
     public static String campaign(long auctionWindowId, long campaignId) {
         return prefix(auctionWindowId) + ":campaign:" + campaignId;
     }
 
-    public static List<String> decisionKeys(long auctionWindowId, long campaignId,
-                                            long currentCommandBucket, int previousCommandBucketCount) {
-        List<String> keys = new ArrayList<>(8 + previousCommandBucketCount);
-        keys.add(state(auctionWindowId));
-        keys.add(commandBucket(auctionWindowId, currentCommandBucket));
-        keys.add(ranking(auctionWindowId));
-        keys.add(campaign(auctionWindowId, campaignId));
-        keys.add(escrow(auctionWindowId));
-        keys.add(events(auctionWindowId));
-        keys.add(publicationChannel(auctionWindowId));
-        keys.add(publicationWakeup(auctionWindowId));
-        for (int offset = 1; offset <= previousCommandBucketCount; offset++) {
-            keys.add(commandBucket(auctionWindowId, currentCommandBucket - offset));
-        }
-        return keys;
+    public static List<String> decisionKeys(long auctionWindowId, long campaignId) {
+        return List.of(
+                state(auctionWindowId),
+                commandBucket(auctionWindowId),
+                ranking(auctionWindowId),
+                campaign(auctionWindowId, campaignId),
+                escrow(auctionWindowId),
+                events(auctionWindowId),
+                publicationChannel(auctionWindowId),
+                publicationWakeup(auctionWindowId));
     }
 
     public static List<String> initializationKeys(long auctionWindowId) {

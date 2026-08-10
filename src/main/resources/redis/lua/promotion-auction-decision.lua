@@ -1,16 +1,12 @@
 -- Redis is the live decision authority. Every key contains the same {windowId} hash tag.
 local stateKey = KEYS[1]
-local currentCommandBucketKey = KEYS[2]
+local commandKey = KEYS[2]
 local rankingKey = KEYS[3]
 local campaignKey = KEYS[4]
 local escrowKey = KEYS[5]
 local eventsKey = KEYS[6]
 local publicationChannel = KEYS[7]
 local publicationWakeupKey = KEYS[8]
-local commandBucketKeys = {currentCommandBucketKey}
-for keyIndex = 9, #KEYS do
-    commandBucketKeys[#commandBucketKeys + 1] = KEYS[keyIndex]
-end
 
 local commandId = ARGV[1]
 local requestHash = ARGV[2]
@@ -20,7 +16,7 @@ local auctionWindowId = ARGV[5]
 local campaignId = ARGV[6]
 local postId = ARGV[7]
 local resourceType = ARGV[8]
-local commandBucketTtlSeconds = tonumber(ARGV[9])
+local commandTtlSeconds = tonumber(ARGV[9])
 local hotStateTtlSeconds = tonumber(ARGV[10])
 local submittedAt = ARGV[11]
 local publicationWakeupTtlSeconds = tonumber(ARGV[12])
@@ -39,12 +35,10 @@ end
 
 local expectedTypes = {
     {stateKey, 'hash'},
-    {currentCommandBucketKey, 'hash'},
+    {commandKey, 'hash'},
     {rankingKey, 'zset'},
-    {campaignKey, 'hash'},
     {escrowKey, 'hash'},
-    {eventsKey, 'stream'},
-    {publicationWakeupKey, 'string'}
+    {eventsKey, 'stream'}
 }
 local keyTypes = {}
 for index, entry in ipairs(expectedTypes) do
@@ -54,19 +48,11 @@ for index, entry in ipairs(expectedTypes) do
         return unavailable('REDIS_KEY_TYPE_MISMATCH')
     end
 end
-for keyIndex = 2, #commandBucketKeys do
-    local actual = redis_type(commandBucketKeys[keyIndex])
-    if actual ~= 'none' and actual ~= 'hash' then
-        return unavailable('REDIS_KEY_TYPE_MISMATCH')
-    end
-end
-if keyTypes[1] ~= 'hash' or keyTypes[5] ~= 'hash' then
+if keyTypes[1] ~= 'hash' or keyTypes[4] ~= 'hash' then
     return unavailable('REDIS_STATE_NOT_INITIALIZED')
 end
-local currentCommandBucketWasMissing = keyTypes[2] == 'none'
 local rankingWasMissing = keyTypes[3] == 'none'
-local campaignWasMissing = keyTypes[4] == 'none'
-local eventsWasMissing = keyTypes[6] == 'none'
+local eventsWasMissing = keyTypes[5] == 'none'
 
 local stateValues = redis.call('HMGET', stateKey,
         'decisionVersion', 'windowEndAtEpochMs', 'reservePrice', 'status', 'resourceType')
@@ -86,22 +72,13 @@ end
 local stateVersion = tonumber(stateVersionValue)
 local streamVersion = 0
 if not eventsWasMissing then
-    local streamInfo = redis.call('XINFO', 'STREAM', eventsKey)
-    local lastGeneratedId = nil
-    for index = 1, #streamInfo, 2 do
-        if streamInfo[index] == 'last-generated-id' then
-            lastGeneratedId = streamInfo[index + 1]
-            break
+    local lastEntry = redis.call('XREVRANGE', eventsKey, '+', '-', 'COUNT', 1)
+    if lastEntry[1] then
+        local separator = string.find(lastEntry[1][1], '-', 1, true)
+        if separator then
+            streamVersion = tonumber(string.sub(lastEntry[1][1], 1, separator - 1))
         end
     end
-    if not lastGeneratedId then
-        return unavailable('REDIS_STREAM_VERSION_MISMATCH')
-    end
-    local separator = string.find(lastGeneratedId, '-', 1, true)
-    if not separator then
-        return unavailable('REDIS_STREAM_VERSION_MISMATCH')
-    end
-    streamVersion = tonumber(string.sub(lastGeneratedId, 1, separator - 1))
 end
 if not streamVersion or stateVersion ~= streamVersion then
     return unavailable('REDIS_STREAM_VERSION_MISMATCH')
@@ -166,13 +143,7 @@ local function decode_record(record)
     return fields
 end
 
-local replayRecord = nil
-for _, commandBucketKey in ipairs(commandBucketKeys) do
-    replayRecord = redis.call('HGET', commandBucketKey, commandId)
-    if replayRecord then
-        break
-    end
-end
+local replayRecord = redis.call('HGET', commandKey, commandId)
 if replayRecord then
     local replay = decode_record(replayRecord)
     if not replay then
@@ -197,11 +168,9 @@ if replayRecord then
 end
 
 local function store_record(accepted, reason, version, previousVersion, authorizedAmount)
-    redis.call('HSET', currentCommandBucketKey, commandId,
+    redis.call('HSET', commandKey, commandId,
             encode_record(accepted, reason, version, previousVersion, nowEpochMs, authorizedAmount))
-    if currentCommandBucketWasMissing then
-        redis.call('EXPIRE', currentCommandBucketKey, commandBucketTtlSeconds)
-    end
+    redis.call('HEXPIRE', commandKey, commandTtlSeconds, 'FIELDS', 1, commandId)
 end
 
 local function store_rejection(reason)
@@ -218,9 +187,9 @@ if bidAmount < tonumber(reservePriceValue) then
     return store_rejection('BELOW_RESERVE')
 end
 
-local campaignValues = redis.call('HMGET', campaignKey, 'bidAmount', 'rankingMember')
+local campaignValues = redis.call('HMGET', campaignKey, 'bidAmount')
 local existingBidAmount = tonumber(campaignValues[1] or '0')
-local rankingMember = campaignValues[2]
+local campaignWasMissing = campaignValues[1] == nil
 if existingBidAmount >= bidAmount then
     return store_rejection('BID_NOT_HIGHER')
 end
@@ -233,19 +202,12 @@ end
 local decisionVersion = stateVersion + 1
 local result = decision('BID_ACCEPTED', true, nil, decisionVersion, stateVersion,
         nowEpochMs, submittedAt, authorizedAmount, nil)
-if not rankingMember then
-    local versionText = tostring(decisionVersion)
-    rankingMember = string.rep('0', math.max(0, 20 - string.len(versionText)))
-            .. versionText .. ':' .. campaignId
-    redis.call('ZREM', rankingKey, campaignId)
-end
 redis.call('HSET', campaignKey,
         'bidAmount', tostring(bidAmount),
         'bidderUserId', bidderUserId,
         'postId', postId,
-        'rankingMember', rankingMember,
         'updatedAt', tostring(nowEpochMs))
-redis.call('ZADD', rankingKey, -bidAmount, rankingMember)
+redis.call('ZADD', rankingKey, 'LT', -bidAmount, tostring(campaignId))
 redis.call('HSET', escrowKey, campaignId .. ':currentHold', tostring(bidAmount))
 redis.call('HSET', stateKey,
         'decisionVersion', tostring(decisionVersion),

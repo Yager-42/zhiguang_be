@@ -16,6 +16,7 @@ public class PromotionBPrimeProperties {
     private boolean enabled;
     private long hotStateTtlSeconds = 86_400L;
     private long commandIdempotencyTtlSeconds = 300L;
+    /** 幂等字段 TTL 余量（HSETEX 字段 TTL = commandIdempotencyTtlSeconds + 本值，保持原桶 300-360s 有效窗口）。 */
     private long commandIdempotencyBucketSeconds = 60L;
     private long streamSweepIntervalMs = 2_000L;
     private int streamReadBatchSize = 1_000;
@@ -33,13 +34,15 @@ public class PromotionBPrimeProperties {
     private int publicUpdateAdaptiveSubscriberCeiling = 500;
     private int publicUpdateSchedulerThreadCount = 2;
     private long publicUpdateMaximumWindows = 10_000L;
+    private boolean fastRejectEnabled = true;
+    private long fastRejectMarginSeconds = 2L;
+    private long fastRejectPriceCacheMaximumSize = 1_000_000L;
+    private int closingScanBatchSize = 100;
 
     @PostConstruct
     void validate() {
         if (hotStateTtlSeconds <= 0 || commandIdempotencyTtlSeconds <= 0
-                || commandIdempotencyBucketSeconds <= 0
-                || commandIdempotencyBucketSeconds > commandIdempotencyTtlSeconds
-                || Math.ceilDiv(commandIdempotencyTtlSeconds, commandIdempotencyBucketSeconds) > 60L
+                || commandIdempotencyBucketSeconds < 0
                 || streamSweepIntervalMs <= 0 || streamReadBatchSize <= 0 || streamReadBatchSize > 1_000
                 || streamRetainEvents < 100_000L || settledCompensationLookbackSeconds <= 0
                 || bidSubmissionThreadCount <= 0 || bidSubmissionQueueCapacity <= 0
@@ -49,8 +52,9 @@ public class PromotionBPrimeProperties {
                 || publicUpdateFlushIntervalMs <= 0
                 || publicUpdateMaximumFlushIntervalMs < publicUpdateFlushIntervalMs
                 || publicUpdateAdaptiveSubscriberCeiling <= 0 || publicUpdateSchedulerThreadCount <= 0
-                || publicUpdateMaximumWindows <= 0) {
-            throw new IllegalStateException("promotion.bprime numeric config is invalid");
+                || publicUpdateMaximumWindows <= 0
+                || fastRejectMarginSeconds < 0 || fastRejectPriceCacheMaximumSize <= 0
+                || closingScanBatchSize <= 0) {
         }
     }
 }

@@ -33,13 +33,8 @@ public class PromotionRedisDecisionAdapter {
 
     public PromotionAuctionDecision decide(PromotionAuctionCommand command) {
         long commandBucketSeconds = properties.getCommandIdempotencyBucketSeconds();
-        long currentCommandBucket = Math.floorDiv(
-                System.currentTimeMillis() / 1_000L, commandBucketSeconds);
-        int previousCommandBucketCount = Math.toIntExact(Math.ceilDiv(
-                properties.getCommandIdempotencyTtlSeconds(), commandBucketSeconds));
         List<String> keys = PromotionAuctionRedisKeys.decisionKeys(
-                command.auctionWindowId(), command.campaignId(),
-                currentCommandBucket, previousCommandBucketCount);
+                command.auctionWindowId(), command.campaignId());
         long commandBucketTtlSeconds = Math.addExact(
                 properties.getCommandIdempotencyTtlSeconds(), commandBucketSeconds);
         long wakeupTtlSeconds = Math.max(1L, (properties.getStreamSweepIntervalMs() * 2L + 999L) / 1_000L);

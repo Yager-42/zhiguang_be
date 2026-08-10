@@ -56,6 +56,7 @@ public class PromotionRedisStreamProjector implements MessageListener {
     private final PromotionDecisionFanoutService fanoutService;
     private final PromotionPerformanceMetrics metrics;
     private final PromotionBPrimeProperties properties;
+    private final PromotionBidPriceCache priceCache;
     private final DefaultRedisScript<Long> trimScript;
     private final Map<Long, ReentrantLock> windowLocks = new ConcurrentHashMap<>();
     private final AtomicBoolean registryRecovered = new AtomicBoolean();
@@ -67,7 +68,8 @@ public class PromotionRedisStreamProjector implements MessageListener {
                                          PromotionDecisionProjectionService projectionService,
                                          PromotionDecisionFanoutService fanoutService,
                                          PromotionPerformanceMetrics metrics,
-                                         PromotionBPrimeProperties properties) {
+                                         PromotionBPrimeProperties properties,
+                                         PromotionBidPriceCache priceCache) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.checkpointMapper = checkpointMapper;
@@ -76,6 +78,7 @@ public class PromotionRedisStreamProjector implements MessageListener {
         this.fanoutService = fanoutService;
         this.metrics = metrics;
         this.properties = properties;
+        this.priceCache = priceCache;
         this.trimScript = new DefaultRedisScript<>();
         this.trimScript.setLocation(new ClassPathResource("redis/lua/promotion-auction-trim.lua"));
         this.trimScript.setResultType(Long.class);
@@ -127,6 +130,11 @@ public class PromotionRedisStreamProjector implements MessageListener {
                     .map(window -> String.valueOf(window.getId()))
                     .toArray(String[]::new);
             redisTemplate.opsForSet().add(PromotionAuctionRedisKeys.activeStreams(), windowIds);
+            // T3：同步重建关窗索引（score=windowEndAtEpochMs），丢失的 ZSET 成员在启动后一个扫描周期内自愈。
+            for (PromotionAuctionWindow window : activeWindows) {
+                redisTemplate.opsForZSet().add(PromotionAuctionRedisKeys.closingIndex(),
+                        String.valueOf(window.getId()), window.getWindowEndAt().toEpochMilli());
+            }
         } catch (RuntimeException exception) {
             registryRecovered.set(false);
             throw exception;
@@ -173,8 +181,12 @@ public class PromotionRedisStreamProjector implements MessageListener {
                 return projectedAny;
             }
             items.forEach(item -> {
-                if (fanoutService.publishDecision(item.decision())) {
-                    metrics.recordRealtimeComplete(item.decision());
+                PromotionAuctionDecision decision = item.decision();
+                if ("BID_ACCEPTED".equals(decision.type()) && decision.accepted()) {
+                    priceCache.update(decision.auctionWindowId(), decision.campaignId(), decision.bidAmount());
+                }
+                if (fanoutService.publishDecision(decision)) {
+                    metrics.recordRealtimeComplete(decision);
                 }
             });
             List<PromotionAuctionDecision> projected = projectionService.projectBatch(items);

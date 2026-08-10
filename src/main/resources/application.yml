@@ -161,6 +161,11 @@ promotion:
     search-slot-count: ${PROMOTION_SEARCH_TOP_SLOT_COUNT:1}
     feed-reserve-price: ${PROMOTION_FEED_RESERVE_PRICE:1}
     search-reserve-price: ${PROMOTION_SEARCH_RESERVE_PRICE:1}
+    fast-reject-enabled: ${PROMOTION_BPRIME_FAST_REJECT_ENABLED:true}
+    fast-reject-margin-seconds: ${PROMOTION_BPRIME_FAST_REJECT_MARGIN_SECONDS:2}
+    fast-reject-price-cache-maximum-size: ${PROMOTION_BPRIME_FAST_REJECT_PRICE_CACHE_MAXIMUM_SIZE:1000000}
+    closing-scan-interval-ms: ${PROMOTION_BPRIME_CLOSING_SCAN_INTERVAL_MS:1000}
+    closing-scan-batch-size: ${PROMOTION_BPRIME_CLOSING_SCAN_BATCH_SIZE:100}
 
 storage:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

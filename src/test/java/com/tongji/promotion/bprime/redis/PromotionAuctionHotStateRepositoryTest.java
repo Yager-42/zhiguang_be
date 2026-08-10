@@ -4,7 +4,9 @@ import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Instant;
@@ -13,6 +15,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -23,6 +26,11 @@ class PromotionAuctionHotStateRepositoryTest {
     void initializesAllWindowKeysInOneClusterSlot() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenReturn("OK");
+        @SuppressWarnings("unchecked")
+        SetOperations<String, String> setOps = mock(SetOperations.class);
+        when(setOps.add(anyString(), any(String[].class))).thenReturn(1L);
+        when(redisTemplate.opsForSet()).thenReturn(setOps);
+        when(redisTemplate.opsForZSet()).thenReturn(mock(ZSetOperations.class));
         PromotionAuctionHotStateRepository repository =
                 new PromotionAuctionHotStateRepository(redisTemplate, new PromotionBPrimeProperties());
 
