@@ -9,12 +9,12 @@ SET @realistic_post_n := __POST_N__;
 
 INSERT INTO promotion_auction_window (
     id, resource_type, window_start_at, window_end_at, slot_count, reserve_price,
-    status, settled_at, created_at, updated_at
+    decision_path, status, settled_at, created_at, updated_at
 )
 VALUES (
     @realistic_window_id, 'FEED_TOP_SLOT', NOW(3) - INTERVAL 1 MINUTE,
     NOW(3) + INTERVAL __PROMOTION_WINDOW_MINUTES__ MINUTE,
-    10, 1, 'OPEN', NULL, NOW(3), NOW(3)
+    10, 1, 'REDIS_STREAM', 'OPEN', NULL, NOW(3), NOW(3)
 )
 ON DUPLICATE KEY UPDATE
     resource_type = 'FEED_TOP_SLOT',
@@ -22,6 +22,7 @@ ON DUPLICATE KEY UPDATE
     window_end_at = NOW(3) + INTERVAL __PROMOTION_WINDOW_MINUTES__ MINUTE,
     slot_count = 10,
     reserve_price = 1,
+    decision_path = 'REDIS_STREAM',
     status = 'OPEN',
     settled_at = NULL,
     updated_at = NOW(3);

@@ -9,7 +9,6 @@ DELETE FROM wallet_ledger WHERE owner_user_id >= @lo AND owner_user_id < @hi;
 DELETE FROM wallet_escrow WHERE payer_user_id >= @lo AND payer_user_id < @hi;
 DELETE FROM promotion_slot_allocation WHERE bidder_user_id >= @lo AND bidder_user_id < @hi;
 DELETE FROM promotion_bid WHERE bidder_user_id >= @lo AND bidder_user_id < @hi;
-DELETE FROM promotion_auction_command WHERE bidder_user_id >= @lo AND bidder_user_id < @hi;
 DELETE FROM promotion_auction_window WHERE id = 3000002;
 DELETE FROM promotion_campaign WHERE id = 3000001;
 DELETE FROM publish_attempt WHERE creator_id >= @lo AND creator_id < @hi;

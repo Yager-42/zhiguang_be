@@ -1,5 +1,5 @@
 // User-driven native WebSocket workload: observe room deltas, react, bid above the visible price,
-// and wait for the final private outcome before considering another bid.
+// and wait for the authoritative Redis ACK before considering another bid.
 import http from 'k6/http';
 import ws from 'k6/ws';
 import { check, fail } from 'k6';
@@ -8,7 +8,6 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 import {
   BASE_URL,
   PASSWORD,
-  USER_ID_BASE,
   USER_POOL,
 } from './common.js';
 
@@ -19,7 +18,7 @@ const expectedWindowId = String(__ENV.PROMOTION_EXPECTED_WINDOW_ID || '8800004')
 const escrowAmount = Number(__ENV.PROMOTION_ESCROW_AMOUNT || 100000);
 const warmupSeconds = Number(__ENV.WARMUP_SECONDS || 10);
 const measureSeconds = Number(__ENV.MEASURE_SECONDS || 30);
-const outcomeDrainSeconds = Number(__ENV.OUTCOME_DRAIN_SECONDS || 30);
+const finalAckDrainSeconds = Number(__ENV.FINAL_ACK_DRAIN_SECONDS || 5);
 const subscriptionReadyMs = Number(__ENV.SUBSCRIPTION_READY_MS || 1000);
 const reactionMinMs = Number(__ENV.REACTION_MIN_MS || 80);
 const reactionMaxMs = Number(__ENV.REACTION_MAX_MS || 240);
@@ -33,13 +32,14 @@ const loginBatchSize = Number(__ENV.LOGIN_BATCH_SIZE || 20);
 const totalActiveSeconds = warmupSeconds + measureSeconds;
 
 const measuredAttempts = new Counter('promotion_user_bid_attempts');
-const measuredPublishedAcks = new Counter('promotion_user_published_acks');
+const measuredAcceptedAcks = new Counter('promotion_user_accepted_acks');
 const measuredFastRejects = new Counter('promotion_user_fast_reject_feedbacks');
+const measuredUnavailableAcks = new Counter('promotion_user_unavailable_acks');
 const measuredFeedbacks = new Counter('promotion_user_final_feedbacks');
 const feedbacksInWindow = new Counter('promotion_user_feedbacks_in_measurement_window');
 const confirmedFeedbacks = new Counter('promotion_user_confirmed_feedbacks');
 const rejectedFeedbacks = new Counter('promotion_user_rejected_feedbacks');
-const outcomeTimeouts = new Counter('promotion_user_outcome_timeouts');
+const finalAckTimeouts = new Counter('promotion_user_final_ack_timeouts');
 const inactiveBidders = new Counter('promotion_user_inactive_bidders');
 const valuationDropouts = new Counter('promotion_user_valuation_dropouts');
 const publicVersionResyncs = new Counter('promotion_user_public_version_resyncs');
@@ -57,14 +57,16 @@ export const options = {
       executor: 'per-vu-iterations',
       vus: bidderVus,
       iterations: 1,
-      maxDuration: `${totalActiveSeconds + outcomeDrainSeconds + 20}s`,
+      maxDuration: `${totalActiveSeconds + finalAckDrainSeconds + 20}s`,
     },
   },
   thresholds: {
-    promotion_user_outcome_timeouts: ['count<1'],
+    promotion_user_final_ack_timeouts: ['count<1'],
+    promotion_user_final_feedbacks: ['count>40095'],
+    promotion_user_public_version_resyncs: ['count<1'],
     promotion_ws_connection_failure: ['count<1'],
     promotion_ws_protocol_error: ['rate<0.01'],
-    promotion_user_final_feedback_duration: ['p(95)<5000', 'p(99)<10000'],
+    promotion_user_final_feedback_duration: ['p(95)<404', 'p(99)<841'],
   },
 };
 
@@ -89,7 +91,6 @@ export function setup() {
 export default function (setupData) {
   const bidderIndex = (vu.idInTest - 1) % setupData.tokens.length;
   const token = setupData.tokens[bidderIndex];
-  const userId = USER_ID_BASE + bidderIndex + 1;
   const campaignId = campaignBase + (bidderIndex % campaignPoolSize) + 1;
   const profile = bidderProfile(bidderIndex);
   if (!profile.active) {
@@ -100,13 +101,12 @@ export default function (setupData) {
   const visibleRanking = rankingByCampaign(setupData.initialRanking);
   let visiblePrice = setupData.initialPrice;
   let visibleVersion = setupData.initialDecisionVersion;
-  let lastPublicEventVersion = 0;
   let pending = null;
   let scheduled = false;
   let stopped = false;
   let intentionalClose = false;
   let connectionFailureRecorded = false;
-  let outcomeTimeoutRecorded = false;
+  let finalAckTimeoutRecorded = false;
   let sequence = 0;
   let startedAt = 0;
   let measureStartedAt = 0;
@@ -199,7 +199,7 @@ export default function (setupData) {
       if (pending.measured) {
         measuredFeedbacks.add(1);
         finalFeedbackDuration.add(completedAt - pending.sentAt);
-        if (status === 'CONFIRMED') {
+        if (status === 'ACCEPTED') {
           confirmedFeedbacks.add(1);
         } else {
           rejectedFeedbacks.add(1, { reason: String(rejectionReason || 'unknown') });
@@ -233,15 +233,22 @@ export default function (setupData) {
         protocolErrors.add(true);
         return;
       }
+      const finalStatus = ack.status === 'ACCEPTED' || ack.status === 'REJECTED';
+      const valid = (finalStatus || ack.status === 'UNAVAILABLE')
+        && ack.resultAvailable === finalStatus;
+      if (!valid) {
+        protocolErrors.add(true);
+        return;
+      }
       protocolErrors.add(false);
       if (pending.measured) {
         ingressAckDuration.add(Date.now() - pending.sentAt);
       }
-      if (ack.status === 'PUBLISHED') {
-        pending.commandId = ack.commandId;
+      if (ack.status === 'ACCEPTED') {
         if (pending.measured) {
-          measuredPublishedAcks.add(1);
+          measuredAcceptedAcks.add(1);
         }
+        completeFeedback(socket, 'ACCEPTED', null, ack.commandId);
         return;
       }
       if (ack.status === 'REJECTED') {
@@ -251,22 +258,18 @@ export default function (setupData) {
         completeFeedback(socket, 'REJECTED', ack.rejectionReason, ack.commandId);
         return;
       }
-      protocolErrors.add(true);
-    }
-
-    function recordOutcome(socket, outcome) {
-      if (Number(outcome.bidderUserId) !== userId) {
-        protocolErrors.add(true);
-        return;
+      if (pending.measured) {
+        measuredUnavailableAcks.add(1);
       }
-      protocolErrors.add(false);
-      if (outcome.eventType === 'BID_CONFIRMED') {
-        completeFeedback(socket, 'CONFIRMED', null, outcome.commandId);
-      } else if (outcome.eventType === 'BID_REJECTED') {
-        completeFeedback(socket, 'REJECTED', outcome.rejectionReason, outcome.commandId);
-      } else {
-        protocolErrors.add(true);
-      }
+      socket.setTimeout(() => {
+        if (pending !== null && !stopped) {
+          socket.send(JSON.stringify({
+            campaignId: String(campaignId),
+            bidAmount: pending.bidAmount,
+            idempotencyKey: pending.idempotencyKey,
+          }));
+        }
+      }, Math.round(jitteredReactionMs(profile.reactionMs)));
     }
 
     function recordRoomUpdate(event) {
@@ -274,26 +277,33 @@ export default function (setupData) {
           || (event.eventType !== 'RANKING_DELTA' && event.eventType !== 'WINDOW_CLOSED')) {
         return;
       }
-      protocolErrors.add(false);
-      const eventVersion = Number(event.eventVersion || 0);
-      if (eventVersion === lastPublicEventVersion) {
+      const fromDecisionVersion = Number(event.fromDecisionVersion || event.decisionVersion || 0);
+      const toDecisionVersion = Number(event.toDecisionVersion || event.decisionVersion || 0);
+      if (fromDecisionVersion <= 0 || toDecisionVersion < fromDecisionVersion) {
+        protocolErrors.add(true);
         return;
       }
-      if (lastPublicEventVersion > 0 && eventVersion !== lastPublicEventVersion + 1) {
+      protocolErrors.add(false);
+      if (toDecisionVersion <= visibleVersion) {
+        return;
+      }
+      if (visibleVersion > 0 && fromDecisionVersion > visibleVersion + 1) {
         const snapshot = loadSnapshot(token, setupData.auctionWindowId);
         replaceRanking(visibleRanking, snapshot.ranking || []);
         visibleVersion = Number(snapshot.decisionVersion || visibleVersion);
         visiblePrice = highestBidValues(visibleRanking);
         publicVersionResyncs.add(1);
+        if (toDecisionVersion <= visibleVersion) {
+          return;
+        }
       }
-      lastPublicEventVersion = eventVersion;
-      visibleVersion = Math.max(visibleVersion, Number(event.decisionVersion || 0));
       for (const delta of event.bidDeltas || []) {
         visibleRanking[String(delta.campaignId)] = Number(delta.bidAmount || 0);
       }
       if (Array.isArray(event.ranking) && event.ranking.length > 0) {
         replaceRanking(visibleRanking, event.ranking);
       }
+      visibleVersion = Math.max(visibleVersion, toDecisionVersion);
       visiblePrice = Math.max(visiblePrice, highestBidValues(visibleRanking));
       const occurredAt = Date.parse(event.occurredAt);
       if (Number.isFinite(occurredAt)) {
@@ -324,10 +334,9 @@ export default function (setupData) {
       }
       if (message.eventType === 'SUBSCRIBED') {
         startAfterSubscription();
-      } else if (message.status === 'PUBLISHED' || message.status === 'REJECTED') {
+      } else if (message.status === 'ACCEPTED' || message.status === 'REJECTED'
+          || message.status === 'UNAVAILABLE') {
         recordAck(socket, message);
-      } else if (message.eventType === 'BID_CONFIRMED' || message.eventType === 'BID_REJECTED') {
-        recordOutcome(socket, message);
       } else if (message.eventType === 'RANKING_DELTA' || message.eventType === 'WINDOW_CLOSED') {
         recordRoomUpdate(message);
       } else {
@@ -349,13 +358,13 @@ export default function (setupData) {
     });
     socket.setTimeout(() => {
       stopped = true;
-      if (pending !== null && pending.measured && !outcomeTimeoutRecorded) {
-        outcomeTimeouts.add(1);
-        outcomeTimeoutRecorded = true;
+      if (pending !== null && pending.measured && !finalAckTimeoutRecorded) {
+        finalAckTimeouts.add(1);
+        finalAckTimeoutRecorded = true;
       }
       intentionalClose = true;
       socket.close();
-    }, (subscriptionReadyMs / 1000 + totalActiveSeconds + outcomeDrainSeconds) * 1000);
+    }, (subscriptionReadyMs / 1000 + totalActiveSeconds + finalAckDrainSeconds) * 1000);
   });
 
   const upgraded = response && (response.status === 101 || response.status === 0);
@@ -364,9 +373,9 @@ export default function (setupData) {
     connectionFailures.add(1);
     connectionFailureRecorded = true;
   }
-  if (pending !== null && pending.measured && !outcomeTimeoutRecorded) {
-    outcomeTimeouts.add(1);
-    outcomeTimeoutRecorded = true;
+  if (pending !== null && pending.measured && !finalAckTimeoutRecorded) {
+    finalAckTimeouts.add(1);
+    finalAckTimeoutRecorded = true;
   }
 }
 

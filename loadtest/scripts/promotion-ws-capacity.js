@@ -26,8 +26,9 @@ const loginBatchSize = Number(__ENV.LOGIN_BATCH_SIZE || 20);
 const measuredRequests = new Counter('promotion_bid_measured_requests');
 const measuredFailures = new Rate('promotion_bid_measured_failures');
 const measuredDuration = new Trend('promotion_bid_measured_duration', true);
-const measuredPublished = new Counter('promotion_bid_measured_published');
+const measuredAccepted = new Counter('promotion_bid_measured_accepted');
 const measuredFastRejected = new Counter('promotion_bid_measured_fast_rejected');
+const measuredUnavailable = new Counter('promotion_bid_measured_unavailable');
 const missingAcks = new Counter('promotion_bid_measured_missing_ack');
 const connectionFailures = new Counter('promotion_ws_connection_failure');
 const protocolErrors = new Rate('promotion_ws_protocol_error');
@@ -131,8 +132,10 @@ function runClosedLoop(data, durationSeconds, measured) {
         return;
       }
 
+      const finalStatus = ack.status === 'ACCEPTED' || ack.status === 'REJECTED';
       const valid = ack.idempotencyKey === pendingKey
-        && (ack.status === 'PUBLISHED' || ack.status === 'REJECTED');
+        && (finalStatus || ack.status === 'UNAVAILABLE')
+        && ack.resultAvailable === finalStatus;
       if (measured) {
         protocolErrors.add(!valid);
         measuredFailures.add(!valid);
@@ -144,10 +147,12 @@ function runClosedLoop(data, durationSeconds, measured) {
       if (measured) {
         measuredRequests.add(1);
         measuredDuration.add(Date.now() - sentAt);
-        if (ack.status === 'PUBLISHED') {
-          measuredPublished.add(1);
+        if (ack.status === 'ACCEPTED') {
+          measuredAccepted.add(1);
         } else if (ack.rejectionReason === 'BID_NOT_HIGHER') {
           measuredFastRejected.add(1);
+        } else if (ack.status === 'UNAVAILABLE') {
+          measuredUnavailable.add(1);
         }
       }
       pendingKey = null;
