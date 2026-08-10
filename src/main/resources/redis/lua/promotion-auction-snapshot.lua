@@ -18,5 +18,27 @@ for rank, rankingMember in ipairs(members) do
     end
 end
 
+-- 英式升价快照（Go store.go Snapshot 同构）：共享当前价/当前赢家/倒计时/规则，加性扩展。
 local version = redis.call('HGET', stateKey, 'decisionVersion') or '0'
-return '{"decisionVersion":' .. version .. ',"ranking":[' .. table.concat(items, ',') .. ']}'
+local status = redis.call('HGET', stateKey, 'status') or ''
+local currentPriceCents = redis.call('HGET', stateKey, 'currentPriceCents') or '0'
+local winnerCampaignId = redis.call('HGET', stateKey, 'winnerCampaignId') or ''
+local windowEndAtEpochMs = redis.call('HGET', stateKey, 'windowEndAtEpochMs') or '0'
+local bidCount = redis.call('HGET', stateKey, 'bidCount') or '0'
+local incrementCents = redis.call('HGET', stateKey, 'incrementCents') or '0'
+local capPriceCents = redis.call('HGET', stateKey, 'capPriceCents') or '0'
+local reservePrice = redis.call('HGET', stateKey, 'reservePrice') or '0'
+local maxExtensions = redis.call('HGET', stateKey, 'maxExtensions') or '0'
+local extendWindowSec = tonumber(redis.call('HGET', stateKey, 'extendWindowSec') or '0')
+return '{"decisionVersion":' .. version
+        .. ',"status":"' .. status .. '"'
+        .. ',"currentPriceCents":' .. currentPriceCents
+        .. ',"winnerCampaignId":"' .. winnerCampaignId .. '"'
+        .. ',"windowEndAtEpochMs":' .. windowEndAtEpochMs
+        .. ',"bidCount":' .. bidCount
+        .. ',"rules":{"stepCents":' .. incrementCents
+        .. ',"capCents":' .. capPriceCents
+        .. ',"reserveCents":' .. reservePrice
+        .. ',"maxExtensions":' .. maxExtensions
+        .. ',"antiSnipeWindowMs":' .. (extendWindowSec * 1000) .. '}'
+        .. ',"ranking":[' .. table.concat(items, ',') .. ']}'

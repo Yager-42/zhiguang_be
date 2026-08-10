@@ -21,6 +21,10 @@ local hotStateTtlSeconds = tonumber(ARGV[10])
 local submittedAt = ARGV[11]
 local publicationWakeupTtlSeconds = tonumber(ARGV[12])
 
+-- 2^53-1: above this a float64 (Lua number / Redis ZSET score) loses integer
+-- precision (Go place_bid.lua MAX_MONEY 同构).
+local MAX_MONEY = 9007199254740991
+
 local function redis_type(key)
     local value = redis.call('TYPE', key)
     if type(value) == 'table' then
@@ -54,15 +58,30 @@ end
 local rankingWasMissing = keyTypes[3] == 'none'
 local eventsWasMissing = keyTypes[5] == 'none'
 
+-- 英式升价参数以 state 为权威（Go place_bid.lua HMGET state 同构；initialize.lua
+-- HSETNX 回填 + 此处完整性检查双保险，防旧热状态缺字段导致 required=0 全收）。
 local stateValues = redis.call('HMGET', stateKey,
-        'decisionVersion', 'windowEndAtEpochMs', 'reservePrice', 'status', 'resourceType')
+        'decisionVersion', 'windowEndAtEpochMs', 'reservePrice', 'status', 'resourceType',
+        'currentPriceCents', 'winnerCampaignId', 'incrementCents', 'capPriceCents',
+        'extendWindowSec', 'extendSec', 'maxExtensions', 'extendCount', 'bidCount')
 local stateVersionValue = stateValues[1]
 local windowEndAtValue = stateValues[2]
 local reservePriceValue = stateValues[3]
 local windowStatus = stateValues[4]
 local stateResourceType = stateValues[5]
+local currentPriceValue = stateValues[6]
+local winnerCampaignIdValue = stateValues[7]
+local incrementValue = stateValues[8]
+local capPriceValue = stateValues[9]
+local extendWindowValue = stateValues[10]
+local extendValue = stateValues[11]
+local maxExtensionsValue = stateValues[12]
+local extendCountValue = stateValues[13]
+local bidCountValue = stateValues[14]
 if not stateVersionValue or not windowEndAtValue or not reservePriceValue or not windowStatus
-        or not stateResourceType then
+        or not stateResourceType or not currentPriceValue or not winnerCampaignIdValue
+        or not incrementValue or not capPriceValue or not extendWindowValue or not extendValue
+        or not maxExtensionsValue or not extendCountValue or not bidCountValue then
     return unavailable('REDIS_STATE_INCOMPLETE')
 end
 if stateResourceType ~= resourceType then
@@ -88,10 +107,15 @@ local redisTime = redis.call('TIME')
 local nowEpochMs = (tonumber(redisTime[1]) * 1000) + math.floor(tonumber(redisTime[2]) / 1000)
 
 local function decision(decisionType, accepted, reason, version, previousVersion,
-                        decidedAtEpochMs, originalSubmittedAt, authorizedAmount, decisionId)
+                        decidedAtEpochMs, originalSubmittedAt, authorizedAmount, decisionId, extraPayload)
     local payload = {submittedAt = originalSubmittedAt}
     if authorizedAmount then
         payload.authorizedAmount = authorizedAmount
+    end
+    if extraPayload then
+        for extraKey, extraValue in pairs(extraPayload) do
+            payload[extraKey] = extraValue
+        end
     end
     return cjson.encode({
         decisionId = decisionId or (commandId .. ':v' .. tostring(version)),
@@ -173,9 +197,18 @@ local function store_record(accepted, reason, version, previousVersion, authoriz
     redis.call('HEXPIRE', commandKey, commandTtlSeconds, 'FIELDS', 1, commandId)
 end
 
-local function store_rejection(reason)
+-- Go place_bid.lua ERR_TOO_LOW(amount, required) 同构：requiredAmount=0 表示金额本身非法
+-- （<=0 或 > MAX_MONEY），否则为 min(current+increment, cap)。
+local function store_rejection(reason, requiredAmount, currentPriceCents)
+    local extraPayload = {}
+    if requiredAmount then
+        extraPayload.requiredAmount = requiredAmount
+    end
+    if currentPriceCents then
+        extraPayload.currentPriceCents = currentPriceCents
+    end
     local result = decision('BID_REJECTED', false, reason, stateVersion, stateVersion,
-            nowEpochMs, submittedAt, nil, nil)
+            nowEpochMs, submittedAt, nil, nil, extraPayload)
     store_record(false, reason, stateVersion, stateVersion, nil)
     return result
 end
@@ -183,21 +216,37 @@ end
 if windowStatus ~= 'OPEN' or nowEpochMs >= tonumber(windowEndAtValue) then
     return store_rejection('WINDOW_CLOSED')
 end
-if bidAmount < tonumber(reservePriceValue) then
-    return store_rejection('BELOW_RESERVE')
-end
 
-local campaignValues = redis.call('HMGET', campaignKey, 'bidAmount')
-local existingBidAmount = tonumber(campaignValues[1] or '0')
-local campaignWasMissing = campaignValues[1] == nil
-if existingBidAmount >= bidAmount then
-    return store_rejection('BID_NOT_HIGHER')
+local currentPriceCents = tonumber(currentPriceValue)
+local incrementCents = tonumber(incrementValue)
+local capPriceCents = tonumber(capPriceValue)
+local extendWindowSec = tonumber(extendWindowValue)
+local extendSec = tonumber(extendValue)
+local maxExtensions = tonumber(maxExtensionsValue)
+local extendCount = tonumber(extendCountValue)
+
+-- 金额校验链（Go place_bid.lua L80-86）：金额范围 -> required 台阶 -> cap 上限。
+if bidAmount <= 0 or bidAmount > MAX_MONEY then
+    return store_rejection('BID_NOT_HIGHER', 0, currentPriceCents)
+end
+local required = currentPriceCents + incrementCents
+if capPriceCents > 0 and required > capPriceCents then
+    required = capPriceCents
+end
+if bidAmount < required then
+    return store_rejection('BID_NOT_HIGHER', required, currentPriceCents)
+end
+if capPriceCents > 0 and bidAmount > capPriceCents then
+    return store_rejection('BID_NOT_HIGHER', required, currentPriceCents)
 end
 
 local authorizedAmount = tonumber(redis.call('HGET', escrowKey, campaignId .. ':authorizedAmount') or '0')
 if authorizedAmount < bidAmount then
     return store_rejection('ESCROW_INSUFFICIENT')
 end
+
+local campaignValues = redis.call('HMGET', campaignKey, 'bidAmount')
+local campaignWasMissing = campaignValues[1] == nil
 
 local decisionVersion = stateVersion + 1
 local result = decision('BID_ACCEPTED', true, nil, decisionVersion, stateVersion,
@@ -211,9 +260,43 @@ redis.call('ZADD', rankingKey, 'LT', -bidAmount, tostring(campaignId))
 redis.call('HSET', escrowKey, campaignId .. ':currentHold', tostring(bidAmount))
 redis.call('HSET', stateKey,
         'decisionVersion', tostring(decisionVersion),
+        'currentPriceCents', tostring(bidAmount),
+        'winnerCampaignId', tostring(campaignId),
         'updatedAt', tostring(nowEpochMs))
+redis.call('HINCRBY', stateKey, 'bidCount', 1)
 redis.call('XADD', eventsKey, tostring(decisionVersion) .. '-0', 'decision', result)
 store_record(true, nil, decisionVersion, stateVersion, authorizedAmount)
+
+-- 反狙击 / cap-hit（Go place_bid.lua L104-110/L147-162）：cap-hit 优先；第二事件
+-- 消耗独立版本，Stream ID 连续无洞（AUCTION_EXTENDED / AUCTION_SOLD）。
+local capHit = capPriceCents > 0 and bidAmount >= capPriceCents
+local extend = (not capHit) and extendWindowSec > 0 and extendSec > 0
+        and (tonumber(windowEndAtValue) - nowEpochMs) <= extendWindowSec * 1000
+        and (maxExtensions <= 0 or extendCount < maxExtensions)
+if extend then
+    local extendedEndAtMs = tonumber(windowEndAtValue) + extendSec * 1000
+    local extendVersion = decisionVersion + 1
+    redis.call('HSET', stateKey,
+            'windowEndAtEpochMs', tostring(extendedEndAtMs),
+            'decisionVersion', tostring(extendVersion),
+            'extendCount', tostring(extendCount + 1))
+    local extResult = decision('AUCTION_EXTENDED', true, nil, extendVersion, decisionVersion,
+            nowEpochMs, submittedAt, nil, nil,
+            {endAtEpochMs = extendedEndAtMs, extendCount = extendCount + 1})
+    redis.call('XADD', eventsKey, tostring(extendVersion) .. '-0', 'decision', extResult)
+end
+if capHit then
+    local soldVersion = decisionVersion + 1
+    redis.call('HSET', stateKey,
+            'status', 'SOLD',
+            'decisionVersion', tostring(soldVersion))
+    local soldResult = decision('AUCTION_SOLD', true, nil, soldVersion, decisionVersion,
+            nowEpochMs, submittedAt, nil, nil,
+            {winnerCampaignId = tostring(campaignId), winningAmount = bidAmount,
+             actualEndAtEpochMs = nowEpochMs})
+    redis.call('XADD', eventsKey, tostring(soldVersion) .. '-0', 'decision', soldResult)
+end
+
 if rankingWasMissing then
     redis.call('EXPIRE', rankingKey, hotStateTtlSeconds)
 end
