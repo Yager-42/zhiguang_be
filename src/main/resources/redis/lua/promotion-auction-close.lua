@@ -26,8 +26,16 @@ local stateVersion = tonumber(redis.call('HGET', stateKey, 'decisionVersion') or
 local windowEndAtEpochMs = tonumber(redis.call('HGET', stateKey, 'windowEndAtEpochMs') or '-1')
 local status = redis.call('HGET', stateKey, 'status')
 local resourceType = redis.call('HGET', stateKey, 'resourceType')
+local currentPriceCents = tonumber(redis.call('HGET', stateKey, 'currentPriceCents') or '0')
+local winnerCampaignId = redis.call('HGET', stateKey, 'winnerCampaignId') or ''
 if stateVersion < 0 or windowEndAtEpochMs < 0 or not status or not resourceType then
     return unavailable('REDIS_STATE_INCOMPLETE')
+end
+
+-- Go close_auction.lua L30 同构：非 OPEN（cap-hit SOLD / 已 NO_BID / 已 CLOSED）
+-- 直接幂等 no-op，早于 NOT_DUE 判定；Java 侧成功后 ZREM closingIndex，不再重试。
+if status ~= 'OPEN' then
+    return cjson.encode({status = 'ALREADY_TERMINAL'})
 end
 
 local lastEntries = redis.call('XREVRANGE', eventsKey, '+', '-', 'COUNT', 1)
@@ -42,14 +50,27 @@ local nowEpochMs = (tonumber(redisTime[1]) * 1000) + math.floor(tonumber(redisTi
 if nowEpochMs < windowEndAtEpochMs then
     return cjson.encode({status = 'NOT_DUE'})
 end
-if status ~= 'OPEN' then
-    return unavailable('REDIS_WINDOW_STATE_MISMATCH')
-end
 
 local auctionWindowId = ARGV[1]
 local hotStateTtlSeconds = tonumber(ARGV[2])
 local decisionVersion = stateVersion + 1
 local commandId = 'close:' .. auctionWindowId
+local terminalType
+local terminalStatus
+local terminalPayload
+if winnerCampaignId ~= '' then
+    terminalType = 'AUCTION_SOLD'
+    terminalStatus = 'SOLD'
+    terminalPayload = {
+        winnerCampaignId = winnerCampaignId,
+        winningAmount = currentPriceCents,
+        actualEndAtEpochMs = nowEpochMs
+    }
+else
+    terminalType = 'AUCTION_NO_BID'
+    terminalStatus = 'NO_BID'
+    terminalPayload = {actualEndAtEpochMs = nowEpochMs}
+end
 local result = cjson.encode({
     decisionId = commandId .. ':v' .. tostring(decisionVersion),
     commandId = commandId,
@@ -57,20 +78,20 @@ local result = cjson.encode({
     auctionWindowId = auctionWindowId,
     decisionVersion = decisionVersion,
     previousVersion = stateVersion,
-    campaignId = '0',
+    campaignId = winnerCampaignId,
     bidderUserId = '0',
     postId = '0',
     resourceType = resourceType,
-    type = 'WINDOW_CLOSED',
+    type = terminalType,
     accepted = true,
     bidAmount = 0,
     ranking = cjson.decode('[]'),
     walletEffects = cjson.decode('[]'),
-    payload = {},
+    payload = terminalPayload,
     decidedAtEpochMs = nowEpochMs
 })
 redis.call('HSET', stateKey,
-        'status', 'CLOSED',
+        'status', terminalStatus,
         'decisionVersion', tostring(decisionVersion),
         'updatedAt', tostring(nowEpochMs),
         'closeResult', result)
