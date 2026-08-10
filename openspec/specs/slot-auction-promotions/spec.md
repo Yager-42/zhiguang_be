@@ -5,7 +5,7 @@ TBD - created by archiving change add-slot-auction-promotions. Update Purpose af
 ## Requirements
 ### Requirement: Slot auction promotions SHALL model zhiguang promotion resources
 
-The system SHALL model slot auction promotions around zhiguang fixed advertising-slot resources. Supported first-phase resources SHALL include `feed_top_slot` and `search_top_slot`; each resource SHALL define a fixed `slotCount`, reserve price, bidding window, and allocation window. In auction terms, the platform sells the slot resource, and the winning creator places their post through the resulting allocation.
+The system SHALL model slot auction promotions around zhiguang fixed advertising-slot resources. Supported first-phase resources SHALL include `feed_top_slot` and `search_top_slot`; each resource SHALL define a fixed `slotCount`, start price (reserve), bidding window, and allocation window. In auction terms, the platform sells the slot resource, and the winning creator places their post through the resulting allocation.
 
 #### Scenario: Promotion campaign targets feed slot
 - **WHEN** creator submits slot promotion for a post
@@ -23,30 +23,64 @@ The system SHALL collect bids into explicit auction windows through the B' order
 - **THEN** system reads current cached feed slot allocation for applicable window
 - **AND** system does not execute auction ranking inside request path
 
-### Requirement: Slot auctions SHALL use multi-slot GSP pricing
+### Requirement: Slot auctions SHALL run shared-price English ascending auction
 
-The system SHALL allocate top M effective bids to M fixed positions and SHALL settle each winning position at the next effective bid or configured reserve price, whichever is higher. Ranking input SHALL come from the B' decision/projection chain rather than ad hoc MySQL sorting in the request path.
+The system SHALL run each slot auction window as an English ascending-price auction over a single shared price ladder. The window starts with `currentPriceCents` equal to the configured start price (`reservePrice`); every accepted bid SHALL clear `currentPriceCents + incrementCents` (or reach the optional buy-now cap), and acceptance SHALL raise the shared current price to the accepted amount. The bidder holding the highest accepted bid when the window ends wins the single slot and pays their own final bid (first-price settlement). No second-price or multi-slot ranking applies.
 
-#### Scenario: Two-slot window settles
-- **WHEN** auction window for two slots closes with ranked effective bids
-- **THEN** top two bids win slot allocations
-- **AND** each winner pays GSP settlement price derived from next ranked bid or reserve floor
-- **AND** settlement is projected idempotently from logged auction decisions
+#### Scenario: Bid below the shared ladder is rejected
+- **WHEN** creator submits a bid below `currentPriceCents + incrementCents` while the window is open
+- **THEN** the bid is rejected with `BID_NOT_HIGHER`
+- **AND** the rejection payload includes the minimum required amount (`requiredAmount`) and the current shared price
+
+#### Scenario: Accepted bid raises the shared price
+- **WHEN** a bid clears the shared price ladder while the window is open
+- **THEN** the bidder becomes the current winner
+- **AND** the shared current price is raised to the accepted amount
+- **AND** subsequent bids must clear the raised price plus the configured increment
+
+#### Scenario: Anti-snipe extension
+- **WHEN** an accepted bid arrives within `extendWindowSec` of the window end
+- **AND** the configured extension budget (`maxExtensions`) is not exhausted
+- **THEN** the window end is extended by `extendSec`
+- **AND** an `AUCTION_EXTENDED` realtime event notifies clients of the new end time
+- **AND** the allocation period start remains the original window end (fixed allocation-window contract)
+
+#### Scenario: Buy-now cap is reached
+- **WHEN** `capPriceCents` is configured
+- **AND** a bid reaches the cap
+- **THEN** the auction ends immediately in `AUCTION_SOLD`
+- **AND** the reaching bidder wins and pays the cap price
+
+#### Scenario: Window closes with a winner
+- **WHEN** the auction window ends with at least one accepted bid
+- **THEN** the current winner is awarded the single slot
+- **AND** pays their own final bid (`currentPriceCents`, first-price settlement)
+- **AND** a single slot allocation is projected idempotently from logged auction decisions
+
+#### Scenario: Window closes without bids
+- **WHEN** the auction window ends with no accepted bid
+- **THEN** the window terminates as `AUCTION_NO_BID`
+- **AND** no slot allocation is produced
 
 ### Requirement: Promotion bids SHALL reserve wallet funds up to submitted bid
 
-The system SHALL reserve bidder funds when accepting a promotion bid decision. On settlement projection, system SHALL deduct final clearing price and release any excess reservation. Rejected, below-reserve, or losing bids SHALL release their held funds through idempotent wallet references.
+The system SHALL reserve bidder funds when accepting a promotion bid decision. On settlement projection, system SHALL deduct the winner's final bid (first price) and release any excess reservation; every losing campaign SHALL release the full authorized amount through idempotent wallet references. Windows ending with no bid SHALL release all reservations and produce no allocation.
 
-#### Scenario: Winning bid clears below reserved max
+#### Scenario: Winner settles at own final bid
 - **WHEN** creator reserved funds at submitted max bid
-- **AND** final GSP clearing price is lower than reserved amount
-- **THEN** system deducts clearing price
-- **AND** system releases remaining held amount back to available balance
+- **AND** the auction ends with a winner
+- **THEN** system deducts the winner's final bid amount (equal to the terminal shared current price)
+- **AND** system releases the remaining held amount back to available balance
 
 #### Scenario: Losing bid is projected
-- **WHEN** auction window closes and a bid is outside configured slot count
-- **THEN** system marks bid as lost
+- **WHEN** auction window closes and a campaign is not the winner
+- **THEN** system marks the bid as lost
 - **AND** system releases the full held bid amount back to available balance
+
+#### Scenario: No-bid window releases all reservations
+- **WHEN** auction window closes with no accepted bid
+- **THEN** all held amounts are released back to available balance
+- **AND** no slot allocation is created
 
 ### Requirement: Slot allocations SHALL drive feed and search insertion
 
@@ -82,13 +116,13 @@ The system SHALL NOT treat slot auction promotion as paid boost, paid ranking we
 
 ### Requirement: Slot auction UI SHALL expose realtime auction state
 
-The system SHALL expose creator-facing realtime state for active slot auction windows when a realtime connection is available. Realtime state SHALL describe the auction window, current ranking, private bid outcome notifications, and lifecycle status.
+The system SHALL expose creator-facing realtime state for active slot auction windows when a realtime connection is available. Realtime state SHALL describe the auction window, shared current price, current ranking, private bid outcome notifications, and lifecycle status.
 
 #### Scenario: Creator watches active slot auction
 - **WHEN** creator opens an active slot auction window
 - **THEN** client reads the current auction snapshot
 - **AND** subscribes to realtime auction events for that window
-- **AND** displays ranking from snapshot plus subsequent public events
+- **AND** displays shared current price and ranking from snapshot plus subsequent public events
 - **AND** displays bid confirmation or rejection from private outcome events
 
 #### Scenario: Realtime unavailable

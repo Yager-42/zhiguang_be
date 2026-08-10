@@ -23,17 +23,17 @@ The system SHALL use Redis Lua as the hot decision authority for active position
 - **THEN** Redis Lua returns the original decision
 - **AND** no duplicate rank or wallet hot-state effect is created
 
-#### Scenario: Higher bid updates ranking
-- **WHEN** a valid bid command exceeds current bidder amount and satisfies reserve/increment rules
+#### Scenario: Higher bid raises the shared ladder
+- **WHEN** a valid bid command clears the shared current price plus the configured increment (or reaches the buy-now cap)
 - **THEN** Redis Lua accepts the command
-- **AND** updates the window ranking atomically
+- **AND** updates the shared current price, the current winner, and the window ranking atomically
 - **AND** returns the new ranking snapshot for decision logging
 
 ### Requirement: Position auction decisions SHALL be appended to Kafka before user-visible confirmation
 
 The system SHALL append accepted, rejected, and terminal promotion auction decisions to a Kafka decision log before treating the decision as user-visible confirmation. Kafka decision log SHALL be the confirmation boundary for realtime fanout and final MySQL projection. MySQL SHALL NOT be the high-frequency store for every bid decision payload.
 
-All promotion auction decision types SHALL share topic `zhiguang.promotion.auction.decisions.v2` and Kafka key `auctionWindowId`. The common envelope SHALL follow the bytedance B' shape: `schemaVersion`, outer `eventType=AUCTION_DECISION`, nested `decision`, `decisionHash`, and `producedAt`. Business type SHALL be carried by nested `decision.type`, not by topic, partition, or outer event type. The system SHALL NOT move `WINDOW_CLOSED` to a separate topic or partition scheme.
+All promotion auction decision types SHALL share topic `zhiguang.promotion.auction.decisions.v2` and Kafka key `auctionWindowId`. The common envelope SHALL follow the bytedance B' shape: `schemaVersion`, outer `eventType=AUCTION_DECISION`, nested `decision`, `decisionHash`, and `producedAt`. Business type SHALL be carried by nested `decision.type`, not by topic, partition, or outer event type. The system SHALL NOT move terminal decision types (`AUCTION_SOLD` / `AUCTION_NO_BID`) to a separate topic or partition scheme.
 
 #### Scenario: Decision log append succeeds
 - **WHEN** command processing produces an accepted decision
@@ -88,7 +88,7 @@ The system SHALL run final MySQL projection and realtime fanout as separate cons
 
 ### Requirement: Closed position auction SHALL project only final results to MySQL
 
-The system SHALL project final promotion auction results to MySQL when a `WINDOW_CLOSED` decision is consumed. Final projection SHALL include winners, slot allocation, settlement/wallet effects, final window status, and projection checkpoint. Rejected bid decisions and transient ranking updates SHALL remain in Kafka and Redis hot state, not per-decision MySQL rows.
+The system SHALL project final promotion auction results to MySQL when a terminal decision (`AUCTION_SOLD` or `AUCTION_NO_BID`) is consumed. Final projection SHALL include the single winner, slot allocation, settlement/wallet effects, final window status, and projection checkpoint. Rejected bid decisions and transient ranking updates SHALL remain in Kafka and Redis hot state, not per-decision MySQL rows.
 
 #### Scenario: Accepted decision is projected
 - **WHEN** a `BID_ACCEPTED` decision is consumed by projection
@@ -98,9 +98,9 @@ The system SHALL project final promotion auction results to MySQL when a `WINDOW
 - **AND** does not create slot allocation or feed/search-visible commercial placement before window close
 
 #### Scenario: Window close decision is projected
-- **WHEN** a `WINDOW_CLOSED` decision is consumed by projection
-- **AND** the decision payload contains final ranking, winners, clearing prices, wallet effects, allocation window, and final window status
-- **THEN** system writes final slot allocation for the winning campaigns
+- **WHEN** a terminal decision (`AUCTION_SOLD` or `AUCTION_NO_BID`) is consumed by projection
+- **AND** the decision payload contains the winner campaign, winning amount (first price), actual end time, wallet effects, allocation window, and final window status
+- **THEN** system writes the single slot allocation for the winning campaign (`AUCTION_SOLD` only)
 - **AND** writes final settlement or wallet effects needed by the business
 - **AND** records final window status and projection checkpoint
 - **AND** does not read Redis hot ranking as final settlement authority

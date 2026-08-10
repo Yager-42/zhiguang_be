@@ -37,12 +37,17 @@ The wallet domain SHALL support three balance states: available balance, held ba
 
 #### Scenario: Position auction winner is captured
 - **WHEN** B' position auction projection settles a winning bid
-- **THEN** wallet captures the GSP clearing price from held balance to platform ledger subject
-- **AND** wallet releases any held amount above the clearing price
+- **THEN** wallet captures the winner's final bid (first-price settlement amount) from held balance to platform ledger subject
+- **AND** wallet releases any held amount above the captured amount
 
 #### Scenario: Position auction loser is released
 - **WHEN** B' position auction projection marks bid as losing or rejected
 - **THEN** wallet releases the held bid amount back to available balance
+
+#### Scenario: No-bid position auction releases all
+- **WHEN** B' position auction projection settles a window with no accepted bid
+- **THEN** wallet releases every held bid amount back to available balance
+- **AND** no capture is created
 
 ### Requirement: Wallet ledger SHALL be append-only
 

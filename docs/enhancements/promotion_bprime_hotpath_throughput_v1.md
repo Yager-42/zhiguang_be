@@ -67,19 +67,19 @@
 **设计**：
 
 ```text
-Caffeine 缓存：{auctionWindowId, campaignId} -> currentBidAmount（只升不降）
-更新源：PromotionRedisStreamProjector 读 Stream 时（单消费者、天然有序）
-判据：bidAmount <= cachedBidAmount -> 本地返回 REJECTED(BID_NOT_HIGHER)，零 Redis 往返
+Caffeine 缓存：{auctionWindowId} -> currentPriceCents（窗口级共享当前价，只升不降）
+更新源：PromotionRedisStreamProjector 读 Stream 时（单消费者、天然有序；`BID_ACCEPTED` 的 bidAmount 即新当前价）
+判据：bidAmount <= cachedCurrentPrice -> 本地返回 REJECTED(BID_NOT_HIGHER)，零 Redis 往返；终态决策（AUCTION_SOLD/AUCTION_NO_BID）invalidate 该窗口缓存
 ```
 
 **locked 守卫**（正确性不变量）：
 
 1. **幂等优先**：`commandId` 曾在桶中出现过（重试）必须放行进 Lua 重放原裁决——本地缓存无法判断幂等，守卫是"只在缓存命中且该 commandId 未被本进程处理过时预拒"；实现时以"预拒前检查最近 commandId 集合"或"Lua 重放优先级"为准，**禁止预拒任何重试**。
 2. **时间边界**：`windowEndAt` 前 `margin`（默认 2s，配置化）内禁用预拒，让 Lua 的 Redis TIME 做最终裁决。
-3. **终态禁用**：收到 `WINDOW_CLOSED` 或窗口 `SETTLED` 后清空/禁用该窗口缓存。
+3. **终态禁用**：收到终态决策（`AUCTION_SOLD`/`AUCTION_NO_BID`）或窗口 `SETTLED` 后清空/禁用该窗口缓存。
 4. **错误码一致**：本地预拒返回的 ACK 必须与 Lua 返回**字节级语义一致**（`status=REJECTED, rejectionReason=BID_NOT_HIGHER`），客户端无感。
 5. **只升不降**：缓存值随接受的决策单调上升；投影失败/回滚时不得下降缓存（宁可陈旧误拒低频，不可接受后缓存落后——陈旧由时间边界守卫兜底）。
-6. **明确不做**：escrow 本地预拒（route 缓存 `authorizedAmount` 追加授权后旧值会误拒新出价，风险 > 收益）；多 campaign 无全局价格，不做 Go 式"全局当前价"预拒。
+6. **明确不做**：escrow 本地预拒（route 缓存 `authorizedAmount` 追加授权后旧值会误拒新出价，风险 > 收益）。窗口级共享当前价预拒与英式升价迁移（`docs/plans/promotion_english_auction_migration_v1.md`）一致，见 §3 边界 3。
 
 **配套**：metrics 新增 `promotion.bprime.ingress.fast-rejected`（计数，按 rejectionReason 标签）；loadtest 脚本的 `*_bid_fast_rejected` 计数器语义改为"服务端本地预拒"（当前按 ACK 的 reason 统计，无法区分来源，需加服务端指标或 ack 字段区分——**不改 WS 协议字段**，用服务端 metrics 区分）。
 
@@ -147,7 +147,7 @@ Caffeine 缓存：{auctionWindowId, campaignId} -> currentBidAmount（只升不�
 
 1. **不改对外契约**：HTTP API、STOMP/原生 WS 协议、`PromotionWebSocketBidAck` 字段、错误码（含 `BID_NOT_HIGHER` 语义）、`UNAVAILABLE` 语义全部保持。
 2. **不引入**：多网关 fanout、网关侧 escrow 预拒、应用层 429/503、新增中间件/节点、无限队列。
-3. **不复制 Go 业务语义**：不引入 increment 步长、anti-snipe 延长、cap 一口价、卖家自购拦截、sealed/hybrid 模式——本 enhancement 仅吸收性能机制，业务模型保持现状（每 campaign 独立价格、统一清算价）。
+3. **Go 业务语义边界（已随英式迁移更新）**：初稿原声明「不引入 increment 步长、anti-snipe 延长、cap 一口价」，该边界已被 `docs/plans/promotion_english_auction_migration_v1.md`（GSP → Go 式英式升价迁移）整体推翻——迁移后窗口为共享当前价英式拍卖，T1 fast-reject 相应改为窗口级当前价预拒（Go `bidN <= cached currentPrice` 同构）；卖家自购拦截、sealed/hybrid 模式仍不引入。本 enhancement 其余性能机制（Lua 瘦身、秒级关窗、单 key 幂等）不受影响。
 4. **单机验收**：1 Spring Boot App + 1 Redis + 1 MySQL，不得用扩容获得验收结果。
 5. T1 的本地预拒**只针对价格判据**；escrow、窗口状态、资源类型等校验仍全部由 Lua 裁决。
 
@@ -162,4 +162,4 @@ Caffeine 缓存：{auctionWindowId, campaignId} -> currentBidAmount（只升不�
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
-| `0.1.0` | 2026-08-10 | 初稿：基于 Go 参考实现逐行对比 + 2026-08-09 压测基线，定义 T1-T5 五项 enhancement 任务 |
+| `0.2.0` | 2026-08-10 | 英式升价迁移（`promotion_english_auction_migration_v1`）生效：T1 缓存 key 由 `{windowId,campaignId}` 改为 `{windowId}` 窗口级共享当前价（终态决策 invalidate）；§3 边界 3「不引入 increment/anti-snipe/cap」废弃；T3 关窗终态改由 `AUCTION_SOLD`/`AUCTION_NO_BID` 决策驱动（客户端实时事件名 `WINDOW_CLOSED` 保留） |
