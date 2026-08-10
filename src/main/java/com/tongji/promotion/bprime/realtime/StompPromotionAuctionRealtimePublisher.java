@@ -25,9 +25,13 @@ public class StompPromotionAuctionRealtimePublisher implements PromotionAuctionR
     }
 
     @Override
-    public void publishOutcome(PromotionAuctionOutcomeEvent event) {
-        nativeWebSocketHandler.publishOutcome(event);
-        messagingTemplate.convertAndSendToUser(String.valueOf(event.bidderUserId()),
-                PromotionAuctionRealtimeChannels.PRIVATE_OUTCOME_QUEUE, event);
+    public int publicSubscriberCount(long auctionWindowId) {
+        return nativeWebSocketHandler.subscriberCount(auctionWindowId);
     }
+
+    @Override
+    public int pendingPublicMessageCount(long auctionWindowId) {
+        return nativeWebSocketHandler.pendingPublicMessageCount(auctionWindowId);
+    }
+
 }

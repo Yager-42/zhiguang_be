@@ -37,6 +37,14 @@
         LIMIT 1
     </select>
 
+    <select id="findById" resultMap="PromotionBidEscrowResultMap">
+        SELECT id, auction_window_id, campaign_id, bidder_user_id, authorized_amount, current_hold,
+               status, expires_at, created_at, updated_at
+        FROM promotion_bid_escrow
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
     <update id="increaseAuthorization">
         UPDATE promotion_bid_escrow
         SET authorized_amount = #{authorizedAmount}, expires_at = #{expiresAt}, updated_at = #{updatedAt}
@@ -61,6 +69,14 @@
         FROM promotion_bid_escrow
         WHERE auction_window_id = #{auctionWindowId}
           AND status = 'ACTIVE'
+        ORDER BY campaign_id ASC
+    </select>
+
+    <select id="listByWindowId" resultMap="PromotionBidEscrowResultMap">
+        SELECT id, auction_window_id, campaign_id, bidder_user_id, authorized_amount, current_hold,
+               status, expires_at, created_at, updated_at
+        FROM promotion_bid_escrow
+        WHERE auction_window_id = #{auctionWindowId}
         ORDER BY campaign_id ASC
     </select>
 

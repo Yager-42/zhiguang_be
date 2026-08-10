@@ -19,7 +19,7 @@ import static org.mockito.Mockito.verify;
 class PromotionPublicUpdateCoalescerTest {
 
     @Test
-    void keepsLatestBidPerCampaignAndAdvancesPublicVersionPerFlush() {
+    void keepsLatestBidPerCampaignAndPublishesCoveredDecisionRanges() {
         PromotionAuctionRealtimePublisher publisher = mock(PromotionAuctionRealtimePublisher.class);
         PromotionPerformanceMetrics metrics = mock(PromotionPerformanceMetrics.class);
         PromotionPublicUpdateCoalescer coalescer = new PromotionPublicUpdateCoalescer(
@@ -36,13 +36,17 @@ class PromotionPublicUpdateCoalescerTest {
         PromotionAuctionRealtimeEvent first = events.getAllValues().get(0);
         PromotionAuctionRealtimeEvent second = events.getAllValues().get(1);
         assertThat(first.eventType()).isEqualTo(PromotionAuctionRealtimeEvent.RANKING_DELTA);
-        assertThat(first.eventVersion()).isEqualTo(1L);
+        assertThat(first.eventVersion()).isEqualTo(2L);
+        assertThat(first.fromDecisionVersion()).isEqualTo(1L);
+        assertThat(first.toDecisionVersion()).isEqualTo(2L);
         assertThat(first.ranking()).isEmpty();
         assertThat(first.bidDeltas()).singleElement().satisfies(delta -> {
             assertThat(delta.campaignId()).isEqualTo("201");
             assertThat(delta.bidAmount()).isEqualTo(130L);
         });
-        assertThat(second.eventVersion()).isEqualTo(2L);
+        assertThat(second.eventVersion()).isEqualTo(3L);
+        assertThat(second.fromDecisionVersion()).isEqualTo(3L);
+        assertThat(second.toDecisionVersion()).isEqualTo(3L);
         assertThat(second.bidDeltas()).extracting(PromotionBidDelta::campaignId).containsExactly("202");
         verify(metrics, times(2)).recordPublicUpdateBatch(1);
     }

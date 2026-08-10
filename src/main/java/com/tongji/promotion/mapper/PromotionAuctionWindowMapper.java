@@ -32,6 +32,8 @@ public interface PromotionAuctionWindowMapper {
     /** 已到期（window_end_at <= now）且仍 OPEN 的窗口，按到期时间升序，限量结算。 */
     List<PromotionAuctionWindow> listClosableWindows(@Param("now") Instant now,
                                                      @Param("batchSize") int batchSize);
+    /** 启动恢复所需的 REDIS_STREAM 活跃窗口。 */
+    List<PromotionAuctionWindow> listActiveRedisStreamWindows();
 
     /** 已结算窗口游标，用于对账按 settled_at + id 稳定推进。 */
     List<PromotionAuctionWindow> listSettledWindowsCursor(@Param("lastSettledAt") Instant lastSettledAt,

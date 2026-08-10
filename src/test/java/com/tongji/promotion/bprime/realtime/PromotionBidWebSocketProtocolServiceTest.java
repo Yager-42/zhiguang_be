@@ -41,13 +41,13 @@ class PromotionBidWebSocketProtocolServiceTest {
         PromotionWebSocketBidRequest request = new PromotionWebSocketBidRequest("201", 120L, "idem-1");
         when(submissionService.submitAsync(eq(42L), eq(201L), eq(120L), eq("idem-1"), any(Instant.class)))
                 .thenReturn(CompletableFuture.completedFuture(
-                        new SubmitPromotionBidCommandResponse("cmd-1", "301", "PUBLISHED", false)));
+                        new SubmitPromotionBidCommandResponse("cmd-1", "301", "ACCEPTED", true)));
 
         PromotionWebSocketBidAck response = protocolService.submit(request, principal("42")).join();
 
         assertThat(response.commandId()).isEqualTo("cmd-1");
-        assertThat(response.status()).isEqualTo("PUBLISHED");
-        verify(performanceMetrics).recordWebSocketBidAck("PUBLISHED");
+        assertThat(response.status()).isEqualTo("ACCEPTED");
+        verify(performanceMetrics).recordWebSocketBidAck("ACCEPTED");
     }
 
     @Test
@@ -73,6 +73,21 @@ class PromotionBidWebSocketProtocolServiceTest {
         assertThat(response.status()).isEqualTo("REJECTED");
         assertThat(response.rejectionReason()).isEqualTo("PROMOTION_BID_ESCROW_REQUIRED");
         verify(performanceMetrics).recordWebSocketBidAck("REJECTED");
+    }
+
+    @Test
+    void pausedAuctionIsReturnedAsRetryableUnavailable() {
+        PromotionWebSocketBidRequest request = new PromotionWebSocketBidRequest("201", 120L, "idem-1");
+        when(submissionService.submitAsync(eq(42L), eq(201L), eq(120L), eq("idem-1"), any(Instant.class)))
+                .thenReturn(CompletableFuture.failedFuture(
+                        new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED)));
+
+        PromotionWebSocketBidAck response = protocolService.submit(request, principal("42")).join();
+
+        assertThat(response.status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.resultAvailable()).isFalse();
+        assertThat(response.rejectionReason()).isEqualTo("PROMOTION_AUCTION_PAUSED");
+        verify(performanceMetrics).recordWebSocketBidAck("UNAVAILABLE");
     }
 
     private Principal principal(String name) {

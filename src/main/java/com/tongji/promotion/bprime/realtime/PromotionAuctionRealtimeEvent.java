@@ -17,6 +17,8 @@ public record PromotionAuctionRealtimeEvent(
         String decisionId,
         long decisionVersion,
         long eventVersion,
+        long fromDecisionVersion,
+        long toDecisionVersion,
         String windowStatus,
         List<PromotionRankingItem> ranking,
         List<PromotionBidDelta> bidDeltas,
@@ -44,6 +46,6 @@ public record PromotionAuctionRealtimeEvent(
             List<PromotionRankingItem> ranking,
             Instant occurredAt) {
         this(eventId, eventType, auctionWindowId, decisionId, decisionVersion, eventVersion,
-                windowStatus, ranking, List.of(), occurredAt);
+                eventVersion, eventVersion, windowStatus, ranking, List.of(), occurredAt);
     }
 }

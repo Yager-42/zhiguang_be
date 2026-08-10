@@ -1,21 +1,20 @@
 package com.tongji.promotion.bprime.config;
 
 import jakarta.annotation.PostConstruct;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /**
- * Upgrades existing promotion command tables with immutable decision metadata required by the MySQL-free consumer.
+ * 为推广竞价热链路补齐兼容旧环境的数据库列。
  *
  * @since 2026-08-08
  */
 @Component
-@ConditionalOnProperty(name = "promotion.bprime.enabled", havingValue = "true")
 public class PromotionBPrimeSchemaInitializer {
 
-    private static final String TABLE_NAME = "promotion_auction_command";
+    private static final String WINDOW_TABLE = "promotion_auction_window";
+    private static final String CHECKPOINT_TABLE = "promotion_projection_checkpoint";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -46,56 +45,51 @@ public class PromotionBPrimeSchemaInitializer {
                     )
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """);
-        ensureColumn("reserve_price", "BIGINT NULL");
-        ensureColumn("window_status", "VARCHAR(16) NULL");
+        ensureColumn(WINDOW_TABLE, "decision_path",
+                "VARCHAR(32) NOT NULL DEFAULT 'LEGACY_BROKER'");
+        ensureColumn(CHECKPOINT_TABLE, "last_stream_id", "VARCHAR(32) NULL");
         jdbcTemplate.update("""
-                UPDATE promotion_auction_command command_record
-                LEFT JOIN promotion_auction_window auction_window
-                  ON auction_window.id = command_record.auction_window_id
-                SET command_record.reserve_price = COALESCE(command_record.reserve_price,
-                                                             auction_window.reserve_price, 1),
-                    command_record.window_status = COALESCE(command_record.window_status,
-                                                             auction_window.status, 'OPEN')
-                WHERE command_record.reserve_price IS NULL OR command_record.window_status IS NULL
+                UPDATE promotion_projection_checkpoint
+                SET last_stream_id = CONCAT(last_decision_version, '-0')
+                WHERE last_stream_id IS NULL
                 """);
-        ensureNotNull("reserve_price", "BIGINT");
-        ensureNotNull("window_status", "VARCHAR(16)");
+        ensureNotNull(CHECKPOINT_TABLE, "last_stream_id", "VARCHAR(32)");
     }
 
-    private void ensureColumn(String columnName, String definition) {
-        if (columnExists(columnName)) {
+    private void ensureColumn(String tableName, String columnName, String definition) {
+        if (columnExists(tableName, columnName)) {
             return;
         }
         try {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE_NAME + " ADD COLUMN " + columnName + " " + definition);
+            jdbcTemplate.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + definition);
         } catch (DataAccessException exception) {
-            if (!columnExists(columnName)) {
+            if (!columnExists(tableName, columnName)) {
                 throw exception;
             }
         }
     }
 
-    private boolean columnExists(String columnName) {
+    private boolean columnExists(String tableName, String columnName) {
         Integer count = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                 FROM information_schema.columns
                 WHERE table_schema = DATABASE()
                   AND table_name = ?
                   AND column_name = ?
-                """, Integer.class, TABLE_NAME, columnName);
+                """, Integer.class, tableName, columnName);
         return count != null && count > 0;
     }
 
-    private void ensureNotNull(String columnName, String dataType) {
+    private void ensureNotNull(String tableName, String columnName, String dataType) {
         String nullable = jdbcTemplate.queryForObject("""
                 SELECT is_nullable
                 FROM information_schema.columns
                 WHERE table_schema = DATABASE()
                   AND table_name = ?
                   AND column_name = ?
-                """, String.class, TABLE_NAME, columnName);
+                """, String.class, tableName, columnName);
         if ("YES".equals(nullable)) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE_NAME + " MODIFY " + columnName
+            jdbcTemplate.execute("ALTER TABLE " + tableName + " MODIFY " + columnName
                     + " " + dataType + " NOT NULL");
         }
     }

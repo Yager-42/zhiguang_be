@@ -32,7 +32,7 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -62,37 +62,6 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 10s
-      retries: 20
-
-  rocketmq-namesrv:
-    image: proxy.vvvv.ee/apache/rocketmq:5.3.2
-    container_name: zhiguang-rocketmq-namesrv
-    restart: unless-stopped
-    command: ["sh", "mqnamesrv"]
-    ports:
-      - "9876:9876"
-    healthcheck:
-      test: ["CMD-SHELL", "sh mqadmin clusterList -n localhost:9876 >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 10s
-      retries: 20
-
-  rocketmq-broker:
-    image: proxy.vvvv.ee/apache/rocketmq:5.3.2
-    container_name: zhiguang-rocketmq-broker
-    restart: unless-stopped
-    depends_on:
-      rocketmq-namesrv:
-        condition: service_healthy
-    command: ["sh", "mqbroker", "-c", "/tmp/broker.conf"]
-    volumes:
-      - ./infra/rocketmq/broker.conf:/tmp/broker.conf:ro
-    ports:
-      - "10911:10911"
-    healthcheck:
-      test: ["CMD-SHELL", "sh mqadmin brokerStatus -n rocketmq-namesrv:9876 -b localhost:10911 >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 20
@@ -219,10 +188,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-      rocketmq-namesrv:
-        condition: service_healthy
-      rocketmq-broker:
-        condition: service_healthy
       cassandra:
         condition: service_healthy
       cassandra-init:
@@ -246,17 +211,13 @@ services:
       SPRING_CASSANDRA_LOCAL_DATACENTER: datacenter1
       SPRING_CASSANDRA_KEYSPACE_NAME: zhiguang
       SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
-      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
       STORAGE_ENDPOINT: http://minio:9000
       RECOMMENDATION_GORSE_ENDPOINT: http://gorse:8088
       # 场景开关（可用 .env 或 export 覆盖）
       PROMOTION_BPRIME_ENABLED: ${PROMOTION_BPRIME_ENABLED:-false}
-      PROMOTION_BPRIME_COMMAND_TOPIC: ${PROMOTION_BPRIME_COMMAND_TOPIC:-zhiguang_promotion_auction_commands_v2}
-      PROMOTION_BPRIME_COMMAND_CONSUMER_GROUP: ${PROMOTION_BPRIME_COMMAND_CONSUMER_GROUP:-zhiguang-promotion-command-consumer}
-      PROMOTION_BPRIME_DECISION_TOPIC: ${PROMOTION_BPRIME_DECISION_TOPIC:-zhiguang.promotion.auction.decisions.v2}
-      PROMOTION_BPRIME_PROJECTION_CONSUMER_GROUP: ${PROMOTION_BPRIME_PROJECTION_CONSUMER_GROUP:-zhiguang-promotion-projection-consumer}
-      PROMOTION_BPRIME_FANOUT_CONSUMER_GROUP: ${PROMOTION_BPRIME_FANOUT_CONSUMER_GROUP:-zhiguang-promotion-fanout-consumer}
-      PROMOTION_BPRIME_LEGACY_COMMAND_RECOVERY_ENABLED: ${PROMOTION_BPRIME_LEGACY_COMMAND_RECOVERY_ENABLED:-false}
+      PROMOTION_BPRIME_STREAM_SWEEP_INTERVAL_MS: ${PROMOTION_BPRIME_STREAM_SWEEP_INTERVAL_MS:-2000}
+      PROMOTION_BPRIME_STREAM_READ_BATCH_SIZE: ${PROMOTION_BPRIME_STREAM_READ_BATCH_SIZE:-1000}
+      PROMOTION_BPRIME_STREAM_RETAIN_EVENTS: ${PROMOTION_BPRIME_STREAM_RETAIN_EVENTS:-100000}
       GORSE_ENABLED: ${GORSE_ENABLED:-false}
       SINGLEFLIGHT_MODE: ${SINGLEFLIGHT_MODE:-distributed}
       COMMENT_WRITE_CONCURRENCY: ${COMMENT_WRITE_CONCURRENCY:-4}

@@ -12,7 +12,7 @@ import java.security.Principal;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 复用推广 STOMP 连接接收出价，并把同步快拒或 RocketMQ 受理结果返回当前会话。
+ * 复用推广 STOMP 连接接收出价，并把 Redis 最终裁决返回当前会话。
  *
  * <p>该协议层不实现竞价规则；HTTP 与 WebSocket 均委托同一个收单服务。</p>
  *
@@ -29,7 +29,7 @@ public class PromotionBidWebSocketController {
     }
 
     /**
-     * 提交推广出价；确定必败时同步返回，其他请求在 RocketMQ broker ACK 后返回 pending。
+     * 提交推广出价并返回 ACCEPTED、REJECTED 或可重试 UNAVAILABLE。
      *
      * @param request 已通过格式校验的 WebSocket 请求
      * @param principal 握手阶段从 JWT 建立的用户身份

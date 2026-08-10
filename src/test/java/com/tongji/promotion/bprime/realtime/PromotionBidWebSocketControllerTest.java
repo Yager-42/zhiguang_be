@@ -29,7 +29,7 @@ class PromotionBidWebSocketControllerTest {
         PromotionWebSocketBidRequest request = new PromotionWebSocketBidRequest("201", 120L, "idem-1");
         Principal principal = principal("42");
         PromotionWebSocketBidAck ack = new PromotionWebSocketBidAck(
-                "idem-1", "cmd-1", "301", "PUBLISHED", false, null);
+                "idem-1", "cmd-1", "301", "ACCEPTED", true, null);
         when(protocolService.submit(request, principal)).thenReturn(CompletableFuture.completedFuture(ack));
 
         PromotionWebSocketBidAck response = controller.submit(request, principal).join();

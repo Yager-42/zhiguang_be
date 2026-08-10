@@ -11,7 +11,5 @@ public interface PromotionProjectionCheckpointMapper {
     int upsert(@Param("auctionWindowId") long auctionWindowId,
                @Param("lastDecisionId") String lastDecisionId,
                @Param("lastDecisionVersion") long lastDecisionVersion,
-               @Param("lastKafkaTopic") String lastKafkaTopic,
-               @Param("lastKafkaPartition") Integer lastKafkaPartition,
-               @Param("lastKafkaOffset") Long lastKafkaOffset);
+               @Param("lastStreamId") String lastStreamId);
 }

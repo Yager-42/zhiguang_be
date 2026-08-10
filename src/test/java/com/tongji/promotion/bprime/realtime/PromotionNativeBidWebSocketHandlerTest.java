@@ -50,7 +50,7 @@ class PromotionNativeBidWebSocketHandlerTest {
     @Test
     void nativeFrameUsesSharedProtocolAndSerializedWriterPump() throws Exception {
         PromotionWebSocketBidAck ack = new PromotionWebSocketBidAck(
-                "idem-1", "cmd-1", "301", "PUBLISHED", false, null);
+                "idem-1", "cmd-1", "301", "ACCEPTED", true, null);
         when(protocolService.submit(any(), any())).thenReturn(CompletableFuture.completedFuture(ack));
 
         handler.handleMessage(session, new TextMessage(
@@ -104,39 +104,4 @@ class PromotionNativeBidWebSocketHandlerTest {
         verify(performanceMetrics).recordWebSocketBackpressureClose();
     }
 
-    @Test
-    void privateOutcomeIsWrittenBeforePendingPublicRoomUpdate() throws Exception {
-        List<Runnable> outboundTasks = new ArrayList<>();
-        PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
-        PromotionNativeBidWebSocketHandler prioritizedHandler = new PromotionNativeBidWebSocketHandler(
-                protocolService, new ObjectMapper().findAndRegisterModules(), outboundTasks::add,
-                performanceMetrics, properties);
-        WebSocketSession prioritizedSession = mock(WebSocketSession.class);
-        when(prioritizedSession.getId()).thenReturn("priority-session");
-        when(prioritizedSession.getPrincipal()).thenReturn((Principal) () -> "42");
-        when(prioritizedSession.isOpen()).thenReturn(true);
-        prioritizedHandler.afterConnectionEstablished(prioritizedSession);
-        prioritizedHandler.handleMessage(prioritizedSession,
-                new TextMessage("{\"type\":\"SUBSCRIBE\",\"auctionWindowId\":301}"));
-        outboundTasks.removeFirst().run();
-        clearInvocations(prioritizedSession);
-
-        PromotionAuctionRealtimeEvent publicEvent = new PromotionAuctionRealtimeEvent(
-                "event-public", PromotionAuctionRealtimeEvent.RANKING_DELTA, 301L, "d-1",
-                2L, 1L, "OPEN", List.of(), List.of(new PromotionBidDelta("201", "42", "1001", 120L)),
-                java.time.Instant.parse("2026-06-20T10:05:00Z"));
-        PromotionAuctionOutcomeEvent outcome = new PromotionAuctionOutcomeEvent(
-                "event-outcome", PromotionAuctionOutcomeEvent.BID_CONFIRMED, 301L, 42L,
-                "cmd-1", "d-1", 2L, 120L, null,
-                java.time.Instant.parse("2026-06-20T10:05:00Z"));
-
-        prioritizedHandler.publishPublic(publicEvent);
-        prioritizedHandler.publishOutcome(outcome);
-        outboundTasks.removeFirst().run();
-
-        ArgumentCaptor<TextMessage> messages = ArgumentCaptor.forClass(TextMessage.class);
-        verify(prioritizedSession, times(2)).sendMessage(messages.capture());
-        assertThat(messages.getAllValues().get(0).getPayload()).contains("BID_CONFIRMED");
-        assertThat(messages.getAllValues().get(1).getPayload()).contains("RANKING_DELTA");
-    }
 }

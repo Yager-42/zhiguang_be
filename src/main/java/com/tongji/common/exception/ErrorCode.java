@@ -4,6 +4,7 @@ import lombok.Getter;
 
 @Getter
 public enum ErrorCode {
+    PROMOTION_AUCTION_PAUSED("PROMOTION_AUCTION_PAUSED", "推广竞价暂时不可用"),
     IDENTIFIER_EXISTS("IDENTIFIER_EXISTS", "账号已存在"),
     IDENTIFIER_NOT_FOUND("IDENTIFIER_NOT_FOUND", "账号不存在"),
     ZGID_EXISTS("ZGID_EXISTS", "知光号已存在"),

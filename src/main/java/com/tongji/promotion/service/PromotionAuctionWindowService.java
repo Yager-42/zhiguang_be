@@ -3,12 +3,15 @@ package com.tongji.promotion.service;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
 import com.tongji.promotion.config.PromotionProperties;
+import com.tongji.promotion.bprime.service.PromotionAuctionWindowCreatedEvent;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionAuctionWindowStatus;
+import com.tongji.promotion.model.PromotionDecisionPath;
 import com.tongji.promotion.model.PromotionResourceType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -26,22 +29,33 @@ public class PromotionAuctionWindowService {
     private final IdService idService;
     private final PromotionProperties properties;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Autowired
     public PromotionAuctionWindowService(PromotionAuctionWindowMapper windowMapper,
                                          IdService idService,
-                                         PromotionProperties properties) {
-        this(windowMapper, idService, properties, Clock.systemUTC());
+                                         PromotionProperties properties,
+                                         ApplicationEventPublisher eventPublisher) {
+        this(windowMapper, idService, properties, Clock.systemUTC(), eventPublisher);
     }
 
     public PromotionAuctionWindowService(PromotionAuctionWindowMapper windowMapper,
                                          IdService idService,
                                          PromotionProperties properties,
                                          Clock clock) {
+        this(windowMapper, idService, properties, clock, null);
+    }
+
+    private PromotionAuctionWindowService(PromotionAuctionWindowMapper windowMapper,
+                                          IdService idService,
+                                          PromotionProperties properties,
+                                          Clock clock,
+                                          ApplicationEventPublisher eventPublisher) {
         this.windowMapper = windowMapper;
         this.idService = idService;
         this.properties = properties;
         this.clock = clock;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -81,11 +95,15 @@ public class PromotionAuctionWindowService {
                 .windowEndAt(endAt)
                 .slotCount(properties.slotCount(resourceType))
                 .reservePrice(properties.reservePrice(resourceType))
+                .decisionPath(PromotionDecisionPath.REDIS_STREAM)
                 .status(PromotionAuctionWindowStatus.OPEN)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
         windowMapper.insert(window);
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(new PromotionAuctionWindowCreatedEvent(window));
+        }
         return window;
     }
 

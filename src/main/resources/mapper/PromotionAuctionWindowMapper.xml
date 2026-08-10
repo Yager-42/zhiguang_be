@@ -11,6 +11,7 @@
         <result column="window_end_at" property="windowEndAt"/>
         <result column="slot_count" property="slotCount"/>
         <result column="reserve_price" property="reservePrice"/>
+        <result column="decision_path" property="decisionPath"/>
         <result column="status" property="status"/>
         <result column="settled_at" property="settledAt"/>
         <result column="created_at" property="createdAt"/>
@@ -19,21 +20,28 @@
 
     <insert id="insert" parameterType="com.tongji.promotion.model.PromotionAuctionWindow">
         INSERT INTO promotion_auction_window (
-            id, resource_type, window_start_at, window_end_at, slot_count, reserve_price, status, settled_at, created_at, updated_at
+            id, resource_type, window_start_at, window_end_at, slot_count, reserve_price,
+            decision_path, status, settled_at, created_at, updated_at
         ) VALUES (
-            #{id}, #{resourceType}, #{windowStartAt}, #{windowEndAt}, #{slotCount}, #{reservePrice}, #{status}, #{settledAt}, #{createdAt}, #{updatedAt}
+            #{id}, #{resourceType}, #{windowStartAt}, #{windowEndAt}, #{slotCount}, #{reservePrice},
+            COALESCE(#{decisionPath}, 'LEGACY_BROKER'), #{status}, #{settledAt}, #{createdAt}, #{updatedAt}
         )
     </insert>
 
+    <sql id="WindowColumns">
+        id, resource_type, window_start_at, window_end_at, slot_count, reserve_price,
+        decision_path, status, settled_at, created_at, updated_at
+    </sql>
+
     <select id="findById" parameterType="long" resultMap="PromotionAuctionWindowResultMap">
-        SELECT *
+        SELECT <include refid="WindowColumns"/>
         FROM promotion_auction_window
         WHERE id = #{id}
         LIMIT 1
     </select>
 
     <select id="findOpenWindow" resultMap="PromotionAuctionWindowResultMap">
-        SELECT *
+        SELECT <include refid="WindowColumns"/>
         FROM promotion_auction_window
         WHERE resource_type = #{resourceType}
           AND status = 'OPEN'
@@ -43,7 +51,7 @@
     </select>
 
     <select id="findExactWindow" resultMap="PromotionAuctionWindowResultMap">
-        SELECT *
+        SELECT <include refid="WindowColumns"/>
         FROM promotion_auction_window
         WHERE resource_type = #{resourceType}
           AND window_start_at = #{startAt}
@@ -52,7 +60,7 @@
     </select>
 
     <select id="listClosableWindows" resultMap="PromotionAuctionWindowResultMap">
-        SELECT *
+        SELECT <include refid="WindowColumns"/>
         FROM promotion_auction_window
         WHERE status = 'OPEN'
           AND window_end_at &lt;= NOW()
@@ -60,8 +68,16 @@
         LIMIT #{batchSize}
     </select>
 
+    <select id="listActiveRedisStreamWindows" resultMap="PromotionAuctionWindowResultMap">
+        SELECT <include refid="WindowColumns"/>
+        FROM promotion_auction_window
+        WHERE decision_path = 'REDIS_STREAM'
+          AND status = 'OPEN'
+        ORDER BY id ASC
+    </select>
+
     <select id="listSettledWindowsCursor" resultMap="PromotionAuctionWindowResultMap">
-        SELECT *
+        SELECT <include refid="WindowColumns"/>
         FROM promotion_auction_window
         WHERE status = 'SETTLED'
           AND settled_at IS NOT NULL

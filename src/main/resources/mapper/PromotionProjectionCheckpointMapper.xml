@@ -8,14 +8,11 @@
         <id column="auction_window_id" property="auctionWindowId"/>
         <result column="last_decision_id" property="lastDecisionId"/>
         <result column="last_decision_version" property="lastDecisionVersion"/>
-        <result column="last_kafka_topic" property="lastKafkaTopic"/>
-        <result column="last_kafka_partition" property="lastKafkaPartition"/>
-        <result column="last_kafka_offset" property="lastKafkaOffset"/>
+        <result column="last_stream_id" property="lastStreamId"/>
     </resultMap>
 
     <select id="findByAuctionWindowId" resultMap="PromotionProjectionCheckpointResultMap">
-        SELECT auction_window_id, last_decision_id, last_decision_version,
-               last_kafka_topic, last_kafka_partition, last_kafka_offset
+        SELECT auction_window_id, last_decision_id, last_decision_version, last_stream_id
         FROM promotion_projection_checkpoint
         WHERE auction_window_id = #{auctionWindowId}
         LIMIT 1
@@ -23,17 +20,15 @@
 
     <insert id="upsert">
         INSERT INTO promotion_projection_checkpoint (
-            auction_window_id, last_decision_id, last_decision_version, last_kafka_topic, last_kafka_partition, last_kafka_offset, updated_at
+            auction_window_id, last_decision_id, last_decision_version, last_stream_id, updated_at
         )
         VALUES (
-            #{auctionWindowId}, #{lastDecisionId}, #{lastDecisionVersion}, #{lastKafkaTopic}, #{lastKafkaPartition}, #{lastKafkaOffset}, NOW(3)
+            #{auctionWindowId}, #{lastDecisionId}, #{lastDecisionVersion}, #{lastStreamId}, NOW(3)
         )
         ON DUPLICATE KEY UPDATE
             last_decision_id = VALUES(last_decision_id),
             last_decision_version = VALUES(last_decision_version),
-            last_kafka_topic = COALESCE(VALUES(last_kafka_topic), last_kafka_topic),
-            last_kafka_partition = COALESCE(VALUES(last_kafka_partition), last_kafka_partition),
-            last_kafka_offset = COALESCE(VALUES(last_kafka_offset), last_kafka_offset),
+            last_stream_id = VALUES(last_stream_id),
             updated_at = NOW(3)
     </insert>
 </mapper>

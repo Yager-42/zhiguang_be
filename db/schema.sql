@@ -400,6 +400,7 @@ CREATE TABLE IF NOT EXISTS promotion_auction_window (
     window_end_at DATETIME(3) NOT NULL,
     slot_count INT NOT NULL,
     reserve_price BIGINT NOT NULL,
+    decision_path VARCHAR(32) NOT NULL DEFAULT 'LEGACY_BROKER',
     status VARCHAR(16) NOT NULL,
     settled_at DATETIME(3) NULL,
     created_at DATETIME(3) NOT NULL,
@@ -431,7 +432,7 @@ CREATE TABLE IF NOT EXISTS promotion_bid_escrow (
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 推广出价：Kafka 决策日志投影的活动窗口最高有效出价。
+-- 推广出价：Redis Stream 决策日志投影的活动窗口最高有效出价。
 CREATE TABLE IF NOT EXISTS promotion_bid (
     id BIGINT UNSIGNED NOT NULL,
     campaign_id BIGINT UNSIGNED NOT NULL,
@@ -455,36 +456,11 @@ CREATE TABLE IF NOT EXISTS promotion_bid (
     KEY idx_promotion_bid_window_status_amount (auction_window_id, status, bid_amount DESC, id ASC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS promotion_auction_command (
-    id BIGINT UNSIGNED NOT NULL,
-    command_id VARCHAR(64) NOT NULL,
-    idempotency_key VARCHAR(128) NOT NULL,
-    request_hash VARCHAR(128) NOT NULL,
-    auction_window_id BIGINT UNSIGNED NOT NULL,
-    campaign_id BIGINT UNSIGNED NOT NULL,
-    bidder_user_id BIGINT UNSIGNED NOT NULL,
-    post_id BIGINT UNSIGNED NOT NULL,
-    resource_type VARCHAR(64) NOT NULL,
-    bid_amount BIGINT NOT NULL,
-    reserve_price BIGINT NOT NULL,
-    window_status VARCHAR(16) NOT NULL,
-    status VARCHAR(32) NOT NULL,
-    created_at DATETIME(3) NOT NULL,
-    updated_at DATETIME(3) NOT NULL,
-    PRIMARY KEY (id),
-    UNIQUE KEY uk_promotion_command_id (command_id),
-    UNIQUE KEY uk_promotion_command_idempotency (auction_window_id, bidder_user_id, idempotency_key),
-    KEY idx_promotion_command_window_status (auction_window_id, status, created_at),
-    KEY idx_promotion_command_publish (status, updated_at, created_at, id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS promotion_projection_checkpoint (
     auction_window_id BIGINT UNSIGNED NOT NULL,
     last_decision_id VARCHAR(64) NOT NULL,
     last_decision_version BIGINT NOT NULL,
-    last_kafka_topic VARCHAR(128) NULL,
-    last_kafka_partition INT NULL,
-    last_kafka_offset BIGINT NULL,
+    last_stream_id VARCHAR(32) NOT NULL,
     updated_at DATETIME(3) NOT NULL,
     PRIMARY KEY (auction_window_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,4 +1,5 @@
 package com.tongji.config;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -38,25 +39,11 @@ public class ThreadPoolConfig {
         return buildExecutor(2, 4, 100, 60, "reconciliation-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
     }
 
-    @Bean(name = "promotionCommandExecutor")
-    public TaskExecutor promotionCommandExecutor(
-            @Value("${promotion.bprime.command-publisher-core-size:6}") int coreSize,
-            @Value("${promotion.bprime.command-publisher-max-size:8}") int maxSize,
-            @Value("${promotion.bprime.command-publisher-queue-capacity:1024}") int queueCapacity) {
-        return buildExecutor(coreSize, maxSize, queueCapacity, 60, "promotion-command-",
-                new ThreadPoolExecutor.AbortPolicy(), 60);
-    }
-
-    @Bean(name = "promotionDecisionCompletionExecutor")
-    public TaskExecutor promotionDecisionCompletionExecutor() {
-        return buildExecutor(4, 8, 1024, 60, "promotion-decision-completion-",
-                new ThreadPoolExecutor.CallerRunsPolicy(), 60);
-    }
-
     @Bean(name = "promotionBidSubmissionExecutor")
-    public TaskExecutor promotionBidSubmissionExecutor() {
-        return buildExecutor(4, 8, 4096, 60, "promotion-bid-submission-",
-                new ThreadPoolExecutor.AbortPolicy(), 60);
+    public TaskExecutor promotionBidSubmissionExecutor(PromotionBPrimeProperties properties) {
+        int threadCount = properties.getBidSubmissionThreadCount();
+        return buildExecutor(threadCount, threadCount, properties.getBidSubmissionQueueCapacity(), 60,
+                "promotion-bid-submission-", new ThreadPoolExecutor.AbortPolicy(), 60);
     }
 
     @Bean(name = "promotionBidWebSocketOutboundExecutor")
@@ -68,7 +55,7 @@ public class ThreadPoolConfig {
     }
 
     /**
-     * 为可恢复的房间公共状态通知提供独立调度资源，避免占用私有 ACK/outcome 写线程。
+     * 为可恢复的房间公共状态通知提供独立调度资源，避免占用最终 ACK 写线程。
      *
      * @param threadCount 固定调度线程数，必须为正数
      * @return 已初始化且由 Spring 关闭的调度器

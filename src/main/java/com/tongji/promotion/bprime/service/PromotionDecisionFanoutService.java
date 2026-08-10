@@ -3,39 +3,34 @@ package com.tongji.promotion.bprime.service;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
-import com.tongji.promotion.bprime.realtime.PromotionAuctionOutcomeEvent;
-import com.tongji.promotion.bprime.realtime.PromotionAuctionRealtimePublisher;
 import com.tongji.promotion.bprime.realtime.PromotionPublicUpdateCoalescer;
+import com.tongji.promotion.bprime.redis.PromotionRedisSnapshotAdapter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * 只从权威 Stream 事件生成公共排名与关窗广播。
+ */
 @Service
-@ConditionalOnProperty(
-        name = {"promotion.bprime.enabled", "promotion.bprime.fanout-consumer-enabled"},
-        havingValue = "true")
+@ConditionalOnProperty(name = "promotion.bprime.enabled", havingValue = "true")
 public class PromotionDecisionFanoutService {
 
-    private static final long MAX_TRACKED_EVENTS = 200_000L;
+    private static final long MAX_TRACKED_WINDOWS = 200_000L;
 
-    private final PromotionAuctionRealtimePublisher publisher;
     private final PromotionPublicUpdateCoalescer publicUpdateCoalescer;
-    private final Cache<String, Boolean> deliveredEventIds = Caffeine.newBuilder()
-            .maximumSize(MAX_TRACKED_EVENTS)
-            .expireAfterWrite(Duration.ofHours(2))
-            .build();
+    private final PromotionRedisSnapshotAdapter snapshotAdapter;
     private final Cache<Long, VisibleDecision> lastVisibleDecisions = Caffeine.newBuilder()
-            .maximumSize(MAX_TRACKED_EVENTS)
+            .maximumSize(MAX_TRACKED_WINDOWS)
             .expireAfterAccess(Duration.ofHours(2))
             .build();
 
-    public PromotionDecisionFanoutService(
-            PromotionAuctionRealtimePublisher publisher,
-            PromotionPublicUpdateCoalescer publicUpdateCoalescer) {
-        this.publisher = publisher;
+    public PromotionDecisionFanoutService(PromotionPublicUpdateCoalescer publicUpdateCoalescer,
+                                          PromotionRedisSnapshotAdapter snapshotAdapter) {
         this.publicUpdateCoalescer = publicUpdateCoalescer;
+        this.snapshotAdapter = snapshotAdapter;
     }
 
     public boolean publishDecision(PromotionAuctionDecision decision) {
@@ -45,61 +40,62 @@ public class PromotionDecisionFanoutService {
         }
         try {
             switch (decision.type()) {
-                case "BID_ACCEPTED" -> {
-                    publicUpdateCoalescer.enqueueBid(decision);
-                    publishOutcome(outcomeEvent(decision, PromotionAuctionOutcomeEvent.BID_CONFIRMED));
-                }
-                case "BID_REJECTED" -> publishOutcome(
-                        outcomeEvent(decision, PromotionAuctionOutcomeEvent.BID_REJECTED));
-                case "ESCROW_APPLIED" -> {
-                    // 授权投影不对客户端广播，但仍推进窗口可见版本以保持后续事件连续。
-                }
-                case "WINDOW_CLOSED" -> publicUpdateCoalescer.publishWindowClosed(decision);
+                case "BID_ACCEPTED" -> publicUpdateCoalescer.enqueueBid(decision);
+                case "WINDOW_CLOSED" -> publicUpdateCoalescer.publishWindowClosed(withFinalRanking(decision));
                 default -> throw new IllegalArgumentException(
-                        "unsupported promotion decision type: " + decision.type());
+                        "unsupported promotion Stream event: " + decision.type());
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException exception) {
             rollbackVisibleDecision(decision, previous);
-            throw e;
+            throw exception;
         }
         return true;
     }
 
-    private void rollbackVisibleDecision(PromotionAuctionDecision decision, VisibleDecision previous) {
-        lastVisibleDecisions.asMap().computeIfPresent(decision.auctionWindowId(), (auctionWindowId, current) -> {
-            if (current.decisionVersion() == decision.decisionVersion()
-                    && current.decisionId().equals(decision.decisionId())) {
-                return previous;
-            }
-            return current;
-        });
+    private PromotionAuctionDecision withFinalRanking(PromotionAuctionDecision decision) {
+        return new PromotionAuctionDecision(
+                decision.decisionId(),
+                decision.commandId(),
+                decision.requestHash(),
+                decision.auctionWindowId(),
+                decision.decisionVersion(),
+                decision.previousVersion(),
+                decision.campaignId(),
+                decision.bidderUserId(),
+                decision.postId(),
+                decision.resourceType(),
+                decision.type(),
+                decision.accepted(),
+                decision.rejectionReason(),
+                decision.bidAmount(),
+                snapshotAdapter.snapshot(decision.auctionWindowId()).ranking(),
+                decision.walletEffects(),
+                decision.payload(),
+                decision.decidedAt());
     }
 
     private boolean requireVisibleVersionOrder(PromotionAuctionDecision decision) {
         AtomicBoolean shouldPublish = new AtomicBoolean(true);
-        lastVisibleDecisions.asMap().compute(decision.auctionWindowId(), (auctionWindowId, last) -> {
+        lastVisibleDecisions.asMap().compute(decision.auctionWindowId(), (windowId, last) -> {
             if (last == null) {
                 return new VisibleDecision(decision.decisionVersion(), decision.decisionId());
             }
-            long lastVersion = last.decisionVersion();
-            if (decision.decisionVersion() <= lastVersion) {
-                if (decision.decisionVersion() == lastVersion
-                        && last.decisionId().equals(decision.decisionId())) {
-                    shouldPublish.set(false);
-                    return last;
-                }
-                if (decision.decisionVersion() < lastVersion) {
-                    shouldPublish.set(false);
-                    return last;
-                }
-                throw new IllegalStateException("promotion fanout decision version gap: auctionWindowId="
-                        + decision.auctionWindowId() + ", last=" + lastVersion
-                        + ", previous=" + decision.previousVersion()
-                        + ", current=" + decision.decisionVersion());
+            if (decision.decisionVersion() < last.decisionVersion()) {
+                shouldPublish.set(false);
+                return last;
             }
-            if (decision.previousVersion() != lastVersion || decision.decisionVersion() != lastVersion + 1) {
+            if (decision.decisionVersion() == last.decisionVersion()) {
+                if (!last.decisionId().equals(decision.decisionId())) {
+                    throw new IllegalStateException("promotion fanout conflicting decision version: "
+                            + decision.decisionVersion());
+                }
+                shouldPublish.set(false);
+                return last;
+            }
+            if (decision.previousVersion() != last.decisionVersion()
+                    || decision.decisionVersion() != last.decisionVersion() + 1) {
                 throw new IllegalStateException("promotion fanout decision version gap: auctionWindowId="
-                        + decision.auctionWindowId() + ", last=" + lastVersion
+                        + decision.auctionWindowId() + ", last=" + last.decisionVersion()
                         + ", previous=" + decision.previousVersion()
                         + ", current=" + decision.decisionVersion());
             }
@@ -108,31 +104,16 @@ public class PromotionDecisionFanoutService {
         return shouldPublish.get();
     }
 
-    private record VisibleDecision(long decisionVersion, String decisionId) {
-    }
-
-    private void publishOutcome(PromotionAuctionOutcomeEvent event) {
-        if (deliveredEventIds.asMap().putIfAbsent(event.eventId(), Boolean.TRUE) == null) {
-            try {
-                publisher.publishOutcome(event);
-            } catch (RuntimeException e) {
-                deliveredEventIds.invalidate(event.eventId());
-                throw e;
+    private void rollbackVisibleDecision(PromotionAuctionDecision decision, VisibleDecision previous) {
+        lastVisibleDecisions.asMap().computeIfPresent(decision.auctionWindowId(), (windowId, current) -> {
+            if (current.decisionVersion() == decision.decisionVersion()
+                    && current.decisionId().equals(decision.decisionId())) {
+                return previous;
             }
-        }
+            return current;
+        });
     }
 
-    private PromotionAuctionOutcomeEvent outcomeEvent(PromotionAuctionDecision decision, String eventType) {
-        return new PromotionAuctionOutcomeEvent(
-                "decision-" + decision.decisionId() + ":outcome",
-                eventType,
-                decision.auctionWindowId(),
-                decision.bidderUserId(),
-                decision.commandId(),
-                decision.decisionId(),
-                decision.decisionVersion(),
-                decision.bidAmount(),
-                decision.rejectionReason(),
-                decision.decidedAt());
+    private record VisibleDecision(long decisionVersion, String decisionId) {
     }
 }

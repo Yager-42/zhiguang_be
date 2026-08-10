@@ -15,6 +15,8 @@ public interface PromotionBidEscrowMapper {
     PromotionBidEscrowRecord findByWindowAndCampaign(@Param("auctionWindowId") long auctionWindowId,
                                                       @Param("campaignId") long campaignId);
 
+    PromotionBidEscrowRecord findById(@Param("id") long id);
+
     int increaseAuthorization(@Param("auctionWindowId") long auctionWindowId,
                               @Param("campaignId") long campaignId,
                               @Param("authorizedAmount") long authorizedAmount,
@@ -27,6 +29,8 @@ public interface PromotionBidEscrowMapper {
                           @Param("updatedAt") Instant updatedAt);
 
     List<PromotionBidEscrowRecord> listActiveByWindowId(@Param("auctionWindowId") long auctionWindowId);
+
+    List<PromotionBidEscrowRecord> listByWindowId(@Param("auctionWindowId") long auctionWindowId);
 
     int markClosedByWindowId(@Param("auctionWindowId") long auctionWindowId,
                              @Param("updatedAt") Instant updatedAt);

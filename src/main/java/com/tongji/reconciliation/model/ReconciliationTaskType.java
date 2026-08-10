@@ -14,6 +14,7 @@ public final class ReconciliationTaskType {
     public static final String PROMOTION_DECISION_PROJECTION = "promotion_decision_projection";
     public static final String PROMOTION_ALLOCATION_REBUILD = "promotion_allocation_rebuild";
     public static final String PROMOTION_WALLET_EFFECT_REPAIR = "promotion_wallet_effect_repair";
+    public static final String PROMOTION_ESCROW_REDIS_PROJECTION = "promotion_escrow_redis_projection";
 
     public static final List<String> ALL = List.of(
             ES_INDEX,
@@ -26,7 +27,8 @@ public final class ReconciliationTaskType {
             FOLLOW_INBOX,
             PROMOTION_DECISION_PROJECTION,
             PROMOTION_ALLOCATION_REBUILD,
-            PROMOTION_WALLET_EFFECT_REPAIR
+            PROMOTION_WALLET_EFFECT_REPAIR,
+            PROMOTION_ESCROW_REDIS_PROJECTION
     );
 
     private ReconciliationTaskType() {
