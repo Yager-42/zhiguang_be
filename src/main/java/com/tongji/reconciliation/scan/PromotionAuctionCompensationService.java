@@ -1,10 +1,13 @@
 package com.tongji.reconciliation.scan;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
+import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
 import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.mapper.PromotionSlotAllocationMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionBid;
+import com.tongji.promotion.model.PromotionDecisionPath;
 import com.tongji.promotion.model.PromotionSlotAllocation;
 import com.tongji.promotion.service.PromotionAuctionSettlementPlan;
 import com.tongji.promotion.service.PromotionAuctionSettlementPlanner;
@@ -14,28 +17,38 @@ import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
 import com.tongji.reconciliation.service.ReconciliationService;
 import com.tongji.wallet.mapper.WalletLedgerMapper;
+import com.tongji.wallet.model.WalletBusinessType;
+import com.tongji.wallet.model.WalletLedgerDirection;
 import com.tongji.wallet.model.WalletLedgerEntry;
+import com.tongji.wallet.model.WalletLedgerReason;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class PromotionAuctionCompensationService {
 
     private final PromotionBidMapper bidMapper;
+    private final PromotionBidEscrowMapper escrowMapper;
     private final PromotionSlotAllocationMapper allocationMapper;
     private final WalletLedgerMapper walletLedgerMapper;
     private final PromotionAuctionSettlementPlanner settlementPlanner;
     private final ObjectMapper objectMapper;
 
     public PromotionAuctionCompensationService(PromotionBidMapper bidMapper,
+                                               PromotionBidEscrowMapper escrowMapper,
                                                PromotionSlotAllocationMapper allocationMapper,
                                                WalletLedgerMapper walletLedgerMapper,
                                                PromotionAuctionSettlementPlanner settlementPlanner,
                                                ObjectMapper objectMapper) {
         this.bidMapper = bidMapper;
+        this.escrowMapper = escrowMapper;
         this.allocationMapper = allocationMapper;
         this.walletLedgerMapper = walletLedgerMapper;
         this.settlementPlanner = settlementPlanner;
@@ -46,13 +59,15 @@ public class PromotionAuctionCompensationService {
                                                     ReconciliationService reconciliationService) {
         List<PromotionBid> bids = activeBids(window);
         PromotionAuctionSettlementPlan plan = settlementPlanner.plan(window, bids);
-        return new WindowAnalyzer(window, plan, reconciliationService).run();
+        return new WindowAnalyzer(window, plan, expectedWalletEffects(window, bids, plan),
+                reconciliationService).run();
     }
 
     public void scanWindow(PromotionAuctionWindow window, ReconciliationService reconciliationService) {
         List<PromotionBid> bids = activeBids(window);
         PromotionAuctionSettlementPlan plan = settlementPlanner.plan(window, bids);
-        new WindowAnalyzer(window, plan, reconciliationService).run();
+        new WindowAnalyzer(window, plan, expectedWalletEffects(window, bids, plan),
+                reconciliationService).run();
     }
 
     private List<PromotionBid> activeBids(PromotionAuctionWindow window) {
@@ -62,16 +77,73 @@ public class PromotionAuctionCompensationService {
         return bidMapper.listSettledBidsByWindowId(window.getId(), allocationStartAt, allocationEndAt);
     }
 
+    private List<PromotionAuctionSettlementPlan.WalletEffect> expectedWalletEffects(
+            PromotionAuctionWindow window,
+            List<PromotionBid> bids,
+            PromotionAuctionSettlementPlan plan) {
+        if (window.getDecisionPath() != PromotionDecisionPath.REDIS_STREAM) {
+            return plan.walletEffects();
+        }
+        Map<Long, PromotionBidEscrowRecord> escrows = escrowMapper.listByWindowId(window.getId()).stream()
+                .collect(Collectors.toMap(PromotionBidEscrowRecord::getCampaignId, Function.identity(),
+                        (left, right) -> left, LinkedHashMap::new));
+        Map<Long, Long> clearingPrices = plan.winners().stream()
+                .collect(Collectors.toMap(winner -> winner.bid().getCampaignId(),
+                        PromotionAuctionSettlementPlan.Winner::clearingPrice));
+        List<PromotionAuctionSettlementPlan.WalletEffect> effects = new ArrayList<>();
+        plan.walletEffects().stream()
+                .filter(effect -> "CAPTURE".equals(effect.effectType()))
+                .forEach(effects::add);
+        for (PromotionBid bid : bids) {
+            PromotionBidEscrowRecord escrow = escrows.remove(bid.getCampaignId());
+            long authorizedAmount = escrow == null ? bid.getBidAmount() : escrow.getAuthorizedAmount();
+            long releaseAmount = authorizedAmount - clearingPrices.getOrDefault(bid.getCampaignId(), 0L);
+            addReleaseEffect(effects, window.getId(), bid.getCampaignId(), bid.getBidderUserId(), releaseAmount);
+        }
+        for (PromotionBidEscrowRecord escrow : escrows.values()) {
+            addReleaseEffect(effects, window.getId(), escrow.getCampaignId(), escrow.getBidderUserId(),
+                    escrow.getAuthorizedAmount());
+        }
+        return List.copyOf(effects);
+    }
+
+    private void addReleaseEffect(List<PromotionAuctionSettlementPlan.WalletEffect> effects,
+                                  long windowId,
+                                  long campaignId,
+                                  long bidderUserId,
+                                  long amount) {
+        if (amount <= 0) {
+            return;
+        }
+        effects.add(new PromotionAuctionSettlementPlan.WalletEffect(
+                "RELEASE",
+                bidderUserId,
+                amount,
+                WalletLedgerReason.PROMOTION_BPRIME_RELEASE,
+                WalletBusinessType.PROMOTION,
+                WalletLedgerDirection.CREDIT,
+                null,
+                null,
+                amount,
+                -amount,
+                0L,
+                "promotion-bprime:" + windowId + ":" + campaignId + ":release"));
+    }
+
     private final class WindowAnalyzer {
         private final PromotionAuctionWindow window;
         private final PromotionAuctionSettlementPlan plan;
+        private final List<PromotionAuctionSettlementPlan.WalletEffect> walletEffects;
         private final ReconciliationService reconciliationService;
         private final List<ReconciliationTask> tasks = new ArrayList<>();
 
-        private WindowAnalyzer(PromotionAuctionWindow window, PromotionAuctionSettlementPlan plan,
+        private WindowAnalyzer(PromotionAuctionWindow window,
+                               PromotionAuctionSettlementPlan plan,
+                               List<PromotionAuctionSettlementPlan.WalletEffect> walletEffects,
                                ReconciliationService reconciliationService) {
             this.window = window;
             this.plan = plan;
+            this.walletEffects = walletEffects;
             this.reconciliationService = reconciliationService;
         }
 
@@ -119,7 +191,7 @@ public class PromotionAuctionCompensationService {
         }
 
         private void scanWalletEffects() {
-            for (PromotionAuctionSettlementPlan.WalletEffect effect : plan.walletEffects()) {
+            for (PromotionAuctionSettlementPlan.WalletEffect effect : walletEffects) {
                 List<WalletLedgerEntry> ledgerGroup = walletLedgerMapper.findByBusinessRef(effect.businessRef());
                 String payload = payload(effect);
                 if (ledgerGroup.isEmpty()) {

@@ -1,62 +1,127 @@
--- BD B' promotion decision authority. All KEYS share the {windowId} Redis Cluster slot.
+-- Redis is the live decision authority. Every key contains the same {windowId} hash tag.
 local stateKey = KEYS[1]
-local commandsKey = KEYS[2]
+local currentCommandBucketKey = KEYS[2]
 local rankingKey = KEYS[3]
 local campaignKey = KEYS[4]
 local escrowKey = KEYS[5]
+local eventsKey = KEYS[6]
+local publicationChannel = KEYS[7]
+local publicationWakeupKey = KEYS[8]
+local commandBucketKeys = {currentCommandBucketKey}
+for keyIndex = 9, #KEYS do
+    commandBucketKeys[#commandBucketKeys + 1] = KEYS[keyIndex]
+end
 
 local commandId = ARGV[1]
 local requestHash = ARGV[2]
 local bidderUserId = ARGV[3]
 local bidAmount = tonumber(ARGV[4]) or 0
-local reservePrice = tonumber(ARGV[5]) or 0
-local nowEpochMs = tonumber(ARGV[6]) or 0
-local windowStatus = ARGV[7]
-local auctionWindowId = ARGV[8]
-local campaignId = ARGV[9]
-local postId = ARGV[10]
-local resourceType = ARGV[11]
-local hotStateTtlSeconds = tonumber(ARGV[12])
-local submittedAt = ARGV[13]
-local commandType = ARGV[14]
-local commandIdempotencyTtlSeconds = tonumber(ARGV[15])
-local prefix = 'promotion:auction:{' .. auctionWindowId .. '}'
+local auctionWindowId = ARGV[5]
+local campaignId = ARGV[6]
+local postId = ARGV[7]
+local resourceType = ARGV[8]
+local commandBucketTtlSeconds = tonumber(ARGV[9])
+local hotStateTtlSeconds = tonumber(ARGV[10])
+local submittedAt = ARGV[11]
+local publicationWakeupTtlSeconds = tonumber(ARGV[12])
 
-local function empty_array()
-    return cjson.decode('[]')
+local function redis_type(key)
+    local value = redis.call('TYPE', key)
+    if type(value) == 'table' then
+        return value.ok
+    end
+    return value
 end
 
-redis.call('HSETNX', stateKey, 'decisionVersion', '0')
-redis.call('HSETNX', stateKey, 'status', windowStatus)
-redis.call('HSETNX', stateKey, 'reservePrice', tostring(reservePrice))
-redis.call('HSETNX', stateKey, 'resourceType', resourceType)
+local function unavailable(reason)
+    return cjson.encode({status = 'UNAVAILABLE', rejectionReason = reason})
+end
 
-local function refresh_ttl()
-    for index, key in ipairs(KEYS) do
-        if index ~= 2 then
-            redis.call('EXPIRE', key, hotStateTtlSeconds)
+local expectedTypes = {
+    {stateKey, 'hash'},
+    {currentCommandBucketKey, 'hash'},
+    {rankingKey, 'zset'},
+    {campaignKey, 'hash'},
+    {escrowKey, 'hash'},
+    {eventsKey, 'stream'},
+    {publicationWakeupKey, 'string'}
+}
+local keyTypes = {}
+for index, entry in ipairs(expectedTypes) do
+    local actual = redis_type(entry[1])
+    keyTypes[index] = actual
+    if actual ~= 'none' and actual ~= entry[2] then
+        return unavailable('REDIS_KEY_TYPE_MISMATCH')
+    end
+end
+for keyIndex = 2, #commandBucketKeys do
+    local actual = redis_type(commandBucketKeys[keyIndex])
+    if actual ~= 'none' and actual ~= 'hash' then
+        return unavailable('REDIS_KEY_TYPE_MISMATCH')
+    end
+end
+if keyTypes[1] ~= 'hash' or keyTypes[5] ~= 'hash' then
+    return unavailable('REDIS_STATE_NOT_INITIALIZED')
+end
+local currentCommandBucketWasMissing = keyTypes[2] == 'none'
+local rankingWasMissing = keyTypes[3] == 'none'
+local campaignWasMissing = keyTypes[4] == 'none'
+local eventsWasMissing = keyTypes[6] == 'none'
+
+local stateValues = redis.call('HMGET', stateKey,
+        'decisionVersion', 'windowEndAtEpochMs', 'reservePrice', 'status', 'resourceType')
+local stateVersionValue = stateValues[1]
+local windowEndAtValue = stateValues[2]
+local reservePriceValue = stateValues[3]
+local windowStatus = stateValues[4]
+local stateResourceType = stateValues[5]
+if not stateVersionValue or not windowEndAtValue or not reservePriceValue or not windowStatus
+        or not stateResourceType then
+    return unavailable('REDIS_STATE_INCOMPLETE')
+end
+if stateResourceType ~= resourceType then
+    return unavailable('REDIS_STATE_MISMATCH')
+end
+
+local stateVersion = tonumber(stateVersionValue)
+local streamVersion = 0
+if not eventsWasMissing then
+    local streamInfo = redis.call('XINFO', 'STREAM', eventsKey)
+    local lastGeneratedId = nil
+    for index = 1, #streamInfo, 2 do
+        if streamInfo[index] == 'last-generated-id' then
+            lastGeneratedId = streamInfo[index + 1]
+            break
         end
     end
+    if not lastGeneratedId then
+        return unavailable('REDIS_STREAM_VERSION_MISMATCH')
+    end
+    local separator = string.find(lastGeneratedId, '-', 1, true)
+    if not separator then
+        return unavailable('REDIS_STREAM_VERSION_MISMATCH')
+    end
+    streamVersion = tonumber(string.sub(lastGeneratedId, 1, separator - 1))
+end
+if not streamVersion or stateVersion ~= streamVersion then
+    return unavailable('REDIS_STREAM_VERSION_MISMATCH')
 end
 
-local function expire_command_fields(fields)
-    redis.call('HEXPIRE', commandsKey, commandIdempotencyTtlSeconds,
-            'FIELDS', #fields, unpack(fields))
-end
+local redisTime = redis.call('TIME')
+local nowEpochMs = (tonumber(redisTime[1]) * 1000) + math.floor(tonumber(redisTime[2]) / 1000)
 
-local function create_decision(decisionType, accepted, reason, ranking, payload)
-    local previousVersion = tonumber(redis.call('HGET', stateKey, 'decisionVersion') or '0')
-    local decisionVersion = redis.call('HINCRBY', stateKey, 'decisionVersion', 1)
-    local decisionRanking = ranking
-    if not decisionRanking or next(decisionRanking) == nil then
-        decisionRanking = empty_array()
+local function decision(decisionType, accepted, reason, version, previousVersion,
+                        decidedAtEpochMs, originalSubmittedAt, authorizedAmount, decisionId)
+    local payload = {submittedAt = originalSubmittedAt}
+    if authorizedAmount then
+        payload.authorizedAmount = authorizedAmount
     end
     return cjson.encode({
-        decisionId = commandId .. ':v' .. decisionVersion,
+        decisionId = decisionId or (commandId .. ':v' .. tostring(version)),
         commandId = commandId,
         requestHash = requestHash,
         auctionWindowId = auctionWindowId,
-        decisionVersion = decisionVersion,
+        decisionVersion = version,
         previousVersion = previousVersion,
         campaignId = campaignId,
         bidderUserId = bidderUserId,
@@ -66,95 +131,139 @@ local function create_decision(decisionType, accepted, reason, ranking, payload)
         accepted = accepted,
         rejectionReason = reason,
         bidAmount = bidAmount,
-        ranking = decisionRanking,
-        walletEffects = empty_array(),
-        payload = payload or {submittedAt = submittedAt},
-        decidedAtEpochMs = nowEpochMs
+        ranking = cjson.decode('[]'),
+        walletEffects = cjson.decode('[]'),
+        payload = payload,
+        decidedAtEpochMs = decidedAtEpochMs
     })
 end
 
-local replayHash = redis.call('HGET', commandsKey, commandId .. ':hash')
-if replayHash then
-    if replayHash == requestHash then
-        local replay = redis.call('HGET', commandsKey, commandId .. ':decision')
-        expire_command_fields({commandId .. ':hash', commandId .. ':decision'})
-        refresh_ttl()
-        return replay
+local function encode_record(accepted, reason, version, previousVersion, decidedAtEpochMs, authorizedAmount)
+    return table.concat({
+        requestHash,
+        accepted and '1' or '0',
+        reason or '',
+        tostring(version),
+        tostring(previousVersion),
+        tostring(decidedAtEpochMs),
+        submittedAt,
+        authorizedAmount and tostring(authorizedAmount) or ''
+    }, '\n')
+end
+
+local function decode_record(record)
+    local fields = {}
+    local fieldStart = 1
+    for fieldIndex = 1, 7 do
+        local separator = string.find(record, '\n', fieldStart, true)
+        if not separator then
+            return nil
+        end
+        fields[fieldIndex] = string.sub(record, fieldStart, separator - 1)
+        fieldStart = separator + 1
     end
-    local conflictField = commandId .. ':conflict:' .. requestHash
-    local conflictReplay = redis.call('HGET', commandsKey, conflictField)
-    if conflictReplay then
-        expire_command_fields({conflictField})
-        refresh_ttl()
-        return conflictReplay
+    fields[8] = string.sub(record, fieldStart)
+    return fields
+end
+
+local replayRecord = nil
+for _, commandBucketKey in ipairs(commandBucketKeys) do
+    replayRecord = redis.call('HGET', commandBucketKey, commandId)
+    if replayRecord then
+        break
     end
-    local conflict = create_decision('BID_REJECTED', false, 'IDEMPOTENCY_CONFLICT')
-    redis.call('HSET', commandsKey, conflictField, conflict)
-    expire_command_fields({conflictField})
-    refresh_ttl()
-    return conflict
+end
+if replayRecord then
+    local replay = decode_record(replayRecord)
+    if not replay then
+        return unavailable('REDIS_COMMAND_VALUE_INVALID')
+    end
+    if replay[1] ~= requestHash then
+        return decision('BID_REJECTED', false, 'IDEMPOTENCY_CONFLICT',
+                stateVersion, stateVersion, nowEpochMs, submittedAt, nil, commandId .. ':rejected')
+    end
+    local replayVersion = tonumber(replay[4])
+    local replayPreviousVersion = tonumber(replay[5])
+    local replayDecidedAtEpochMs = tonumber(replay[6])
+    if not replayVersion or not replayPreviousVersion or not replayDecidedAtEpochMs then
+        return unavailable('REDIS_COMMAND_VALUE_INVALID')
+    end
+    local replayAccepted = replay[2] == '1'
+    local replayReason = replay[3] ~= '' and replay[3] or nil
+    local replayAuthorizedAmount = replay[8] ~= '' and tonumber(replay[8]) or nil
+    return decision(replayAccepted and 'BID_ACCEPTED' or 'BID_REJECTED', replayAccepted,
+            replayReason, replayVersion, replayPreviousVersion, replayDecidedAtEpochMs,
+            replay[7], replayAuthorizedAmount, nil)
 end
 
-local function store(decision)
-    redis.call('HSET', commandsKey,
-            commandId .. ':hash', requestHash,
-            commandId .. ':decision', decision)
-    expire_command_fields({commandId .. ':hash', commandId .. ':decision'})
-    refresh_ttl()
-    return decision
+local function store_record(accepted, reason, version, previousVersion, authorizedAmount)
+    redis.call('HSET', currentCommandBucketKey, commandId,
+            encode_record(accepted, reason, version, previousVersion, nowEpochMs, authorizedAmount))
+    if currentCommandBucketWasMissing then
+        redis.call('EXPIRE', currentCommandBucketKey, commandBucketTtlSeconds)
+    end
 end
 
-if commandType == 'ESCROW_NOTIFY' then
-    local authorizedField = campaignId .. ':authorizedAmount'
-    local currentHoldField = campaignId .. ':currentHold'
-    local existingAuthorized = tonumber(redis.call('HGET', escrowKey, authorizedField) or '0')
-    local authorizedAmount = math.max(existingAuthorized, bidAmount)
-    local currentHold = tonumber(redis.call('HGET', escrowKey, currentHoldField) or '0')
-    redis.call('HSET', escrowKey,
-            authorizedField, tostring(authorizedAmount),
-            currentHoldField, tostring(currentHold))
-    return store(create_decision('ESCROW_APPLIED', false, nil, {}, {
-        submittedAt = submittedAt,
-        authorizedAmount = authorizedAmount,
-        currentHold = currentHold
-    }))
+local function store_rejection(reason)
+    local result = decision('BID_REJECTED', false, reason, stateVersion, stateVersion,
+            nowEpochMs, submittedAt, nil, nil)
+    store_record(false, reason, stateVersion, stateVersion, nil)
+    return result
 end
 
-if commandType ~= 'BID' then
-    return store(create_decision('BID_REJECTED', false, 'UNSUPPORTED_COMMAND'))
+if windowStatus ~= 'OPEN' or nowEpochMs >= tonumber(windowEndAtValue) then
+    return store_rejection('WINDOW_CLOSED')
+end
+if bidAmount < tonumber(reservePriceValue) then
+    return store_rejection('BELOW_RESERVE')
 end
 
-if redis.call('HGET', stateKey, 'status') ~= 'OPEN' then
-    return store(create_decision('BID_REJECTED', false, 'WINDOW_CLOSED'))
-end
-
-local effectiveReservePrice = tonumber(redis.call('HGET', stateKey, 'reservePrice') or tostring(reservePrice))
-if bidAmount < effectiveReservePrice then
-    return store(create_decision('BID_REJECTED', false, 'BELOW_RESERVE'))
-end
-
-local existingBidAmount = tonumber(redis.call('HGET', campaignKey, 'bidAmount') or '0')
+local campaignValues = redis.call('HMGET', campaignKey, 'bidAmount', 'rankingMember')
+local existingBidAmount = tonumber(campaignValues[1] or '0')
+local rankingMember = campaignValues[2]
 if existingBidAmount >= bidAmount then
-    return store(create_decision('BID_REJECTED', false, 'BID_NOT_HIGHER'))
+    return store_rejection('BID_NOT_HIGHER')
 end
 
 local authorizedAmount = tonumber(redis.call('HGET', escrowKey, campaignId .. ':authorizedAmount') or '0')
 if authorizedAmount < bidAmount then
-    return store(create_decision('BID_REJECTED', false, 'ESCROW_INSUFFICIENT'))
+    return store_rejection('ESCROW_INSUFFICIENT')
 end
 
-local score = (bidAmount * 1000000000000) - nowEpochMs
+local decisionVersion = stateVersion + 1
+local result = decision('BID_ACCEPTED', true, nil, decisionVersion, stateVersion,
+        nowEpochMs, submittedAt, authorizedAmount, nil)
+if not rankingMember then
+    local versionText = tostring(decisionVersion)
+    rankingMember = string.rep('0', math.max(0, 20 - string.len(versionText)))
+            .. versionText .. ':' .. campaignId
+    redis.call('ZREM', rankingKey, campaignId)
+end
 redis.call('HSET', campaignKey,
         'bidAmount', tostring(bidAmount),
         'bidderUserId', bidderUserId,
         'postId', postId,
+        'rankingMember', rankingMember,
         'updatedAt', tostring(nowEpochMs))
-redis.call('ZADD', rankingKey, score, campaignId)
+redis.call('ZADD', rankingKey, -bidAmount, rankingMember)
 redis.call('HSET', escrowKey, campaignId .. ':currentHold', tostring(bidAmount))
-redis.call('HSET', stateKey, 'updatedAt', tostring(nowEpochMs))
-
--- 高频 BID decision 只保留变化项的标量字段；Top30 仍以 rankingKey 为权威并由 snapshot 按需读取。
-return store(create_decision('BID_ACCEPTED', true, nil, {}, {
-    submittedAt = submittedAt,
-    authorizedAmount = authorizedAmount
-}))
+redis.call('HSET', stateKey,
+        'decisionVersion', tostring(decisionVersion),
+        'updatedAt', tostring(nowEpochMs))
+redis.call('XADD', eventsKey, tostring(decisionVersion) .. '-0', 'decision', result)
+store_record(true, nil, decisionVersion, stateVersion, authorizedAmount)
+if rankingWasMissing then
+    redis.call('EXPIRE', rankingKey, hotStateTtlSeconds)
+end
+if campaignWasMissing then
+    redis.call('EXPIRE', campaignKey, hotStateTtlSeconds)
+end
+if eventsWasMissing then
+    redis.call('EXPIRE', eventsKey, hotStateTtlSeconds)
+end
+local wakeupCreated = redis.call('SET', publicationWakeupKey, '1',
+        'EX', publicationWakeupTtlSeconds, 'NX')
+if wakeupCreated then
+    redis.call('PUBLISH', publicationChannel, tostring(decisionVersion) .. '-0')
+end
+return result

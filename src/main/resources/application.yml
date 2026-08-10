@@ -63,11 +63,6 @@ spring:
         options:
           model: ${AI_DASHSCOPE_MODEL:qwen-plus}
 
-rocketmq:
-  name-server: localhost:9876
-  producer:
-    group: zhiguang-promotion-command-producer
-
 comment:
   cache:
     invalidation-window-ms: ${COMMENT_CACHE_INVALIDATION_WINDOW_MS:100}
@@ -143,46 +138,23 @@ promotion:
     close-window-delay-ms: ${PROMOTION_CLOSE_WINDOW_DELAY_MS:30000}
   bprime:
     enabled: ${PROMOTION_BPRIME_ENABLED:false}
-    command-topic: ${PROMOTION_BPRIME_COMMAND_TOPIC:zhiguang_promotion_auction_commands_v2}
-    command-consumer-group: ${PROMOTION_BPRIME_COMMAND_CONSUMER_GROUP:zhiguang-promotion-command-consumer}
-    decision-topic: ${PROMOTION_BPRIME_DECISION_TOPIC:zhiguang.promotion.auction.decisions.v2}
-    projection-consumer-group: ${PROMOTION_BPRIME_PROJECTION_CONSUMER_GROUP:zhiguang-promotion-projection-consumer}
-    fanout-consumer-group: ${PROMOTION_BPRIME_FANOUT_CONSUMER_GROUP:zhiguang-promotion-fanout-consumer}
-    decision-consumer-enabled: ${PROMOTION_BPRIME_DECISION_CONSUMER_ENABLED:true}
-    projection-consumer-enabled: ${PROMOTION_BPRIME_PROJECTION_CONSUMER_ENABLED:true}
-    fanout-consumer-enabled: ${PROMOTION_BPRIME_FANOUT_CONSUMER_ENABLED:true}
-    kafka-send-timeout-ms: ${PROMOTION_BPRIME_KAFKA_SEND_TIMEOUT_MS:10000}
     hot-state-ttl-seconds: ${PROMOTION_BPRIME_HOT_STATE_TTL_SECONDS:86400}
-    command-idempotency-ttl-seconds: ${PROMOTION_BPRIME_COMMAND_IDEMPOTENCY_TTL_SECONDS:86400}
+    command-idempotency-ttl-seconds: ${PROMOTION_BPRIME_COMMAND_IDEMPOTENCY_TTL_SECONDS:300}
+    command-idempotency-bucket-seconds: ${PROMOTION_BPRIME_COMMAND_IDEMPOTENCY_BUCKET_SECONDS:60}
+    stream-sweep-interval-ms: ${PROMOTION_BPRIME_STREAM_SWEEP_INTERVAL_MS:2000}
+    stream-read-batch-size: ${PROMOTION_BPRIME_STREAM_READ_BATCH_SIZE:1000}
+    stream-retain-events: ${PROMOTION_BPRIME_STREAM_RETAIN_EVENTS:100000}
     settled-compensation-lookback-seconds: ${PROMOTION_BPRIME_SETTLED_COMPENSATION_LOOKBACK_SECONDS:604800}
-    legacy-command-recovery-enabled: ${PROMOTION_BPRIME_LEGACY_COMMAND_RECOVERY_ENABLED:false}
-    command-publish-scan-delay-ms: ${PROMOTION_BPRIME_COMMAND_PUBLISH_SCAN_DELAY_MS:1000}
-    command-publish-claim-timeout-ms: ${PROMOTION_BPRIME_COMMAND_PUBLISH_CLAIM_TIMEOUT_MS:5000}
-    command-decision-timeout-ms: ${PROMOTION_BPRIME_COMMAND_DECISION_TIMEOUT_MS:300000}
-    command-publish-batch-size: ${PROMOTION_BPRIME_COMMAND_PUBLISH_BATCH_SIZE:100}
-    projection-concurrency: ${PROMOTION_BPRIME_PROJECTION_CONCURRENCY:1}
-    command-publisher-core-size: ${PROMOTION_BPRIME_COMMAND_PUBLISHER_CORE_SIZE:6}
-    command-publisher-max-size: ${PROMOTION_BPRIME_COMMAND_PUBLISHER_MAX_SIZE:8}
-    command-publisher-worker-count: ${PROMOTION_BPRIME_COMMAND_PUBLISHER_WORKER_COUNT:8}
-    decision-max-in-flight: ${PROMOTION_BPRIME_DECISION_MAX_IN_FLIGHT:1024}
-    decision-batch-size: ${PROMOTION_BPRIME_DECISION_BATCH_SIZE:128}
-    decision-consumer-thread-count: ${PROMOTION_BPRIME_DECISION_CONSUMER_THREADS:4}
-    decision-batch-suspend-ms: ${PROMOTION_BPRIME_DECISION_BATCH_SUSPEND_MS:1000}
-    fanout-concurrency: ${PROMOTION_BPRIME_FANOUT_CONCURRENCY:1}
-    command-publisher-queue-capacity: ${PROMOTION_BPRIME_COMMAND_PUBLISHER_QUEUE_CAPACITY:1024}
-    fast-reject-enabled: ${PROMOTION_BPRIME_FAST_REJECT_ENABLED:true}
-    fast-reject-maximum-campaigns: ${PROMOTION_BPRIME_FAST_REJECT_MAXIMUM_CAMPAIGNS:200000}
-    fast-reject-expire-after-access-seconds: ${PROMOTION_BPRIME_FAST_REJECT_EXPIRE_AFTER_ACCESS_SECONDS:7200}
-    fast-reject-expiry-margin-ms: ${PROMOTION_BPRIME_FAST_REJECT_EXPIRY_MARGIN_MS:1000}
-    fast-reject-precheck-batch-size: ${PROMOTION_BPRIME_FAST_REJECT_PRECHECK_BATCH_SIZE:512}
-    fast-reject-precheck-worker-count: ${PROMOTION_BPRIME_FAST_REJECT_PRECHECK_WORKER_COUNT:2}
-    fast-reject-precheck-queue-capacity: ${PROMOTION_BPRIME_FAST_REJECT_PRECHECK_QUEUE_CAPACITY:65536}
-    fast-reject-precheck-max-wait-micros: ${PROMOTION_BPRIME_FAST_REJECT_PRECHECK_MAX_WAIT_MICROS:200}
+    bid-submission-thread-count: ${PROMOTION_BPRIME_BID_SUBMISSION_THREADS:32}
+    bid-submission-queue-capacity: ${PROMOTION_BPRIME_BID_SUBMISSION_QUEUE_CAPACITY:16384}
+    bid-route-cache-maximum-size: ${PROMOTION_BPRIME_BID_ROUTE_CACHE_MAXIMUM_SIZE:100000}
     web-socket-inbound-thread-count: ${PROMOTION_BPRIME_WS_INBOUND_THREAD_COUNT:8}
-    web-socket-outbound-thread-count: ${PROMOTION_BPRIME_WS_OUTBOUND_THREAD_COUNT:8}
+    web-socket-outbound-thread-count: ${PROMOTION_BPRIME_WS_OUTBOUND_THREAD_COUNT:32}
     web-socket-channel-queue-capacity: ${PROMOTION_BPRIME_WS_CHANNEL_QUEUE_CAPACITY:65536}
     web-socket-native-session-queue-capacity: ${PROMOTION_BPRIME_WS_NATIVE_SESSION_QUEUE_CAPACITY:4096}
-    public-update-flush-interval-ms: ${PROMOTION_BPRIME_PUBLIC_UPDATE_FLUSH_INTERVAL_MS:25}
+    public-update-flush-interval-ms: ${PROMOTION_BPRIME_PUBLIC_UPDATE_FLUSH_INTERVAL_MS:100}
+    public-update-maximum-flush-interval-ms: ${PROMOTION_BPRIME_PUBLIC_UPDATE_MAXIMUM_FLUSH_INTERVAL_MS:250}
+    public-update-adaptive-subscriber-ceiling: ${PROMOTION_BPRIME_PUBLIC_UPDATE_ADAPTIVE_SUBSCRIBER_CEILING:500}
     public-update-scheduler-thread-count: ${PROMOTION_BPRIME_PUBLIC_UPDATE_SCHEDULER_THREADS:2}
     public-update-maximum-windows: ${PROMOTION_BPRIME_PUBLIC_UPDATE_MAXIMUM_WINDOWS:10000}
     feed-slot-count: ${PROMOTION_FEED_TOP_SLOT_COUNT:1}

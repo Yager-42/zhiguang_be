@@ -1,5 +1,6 @@
 package com.tongji.promotion;
 
+import com.tongji.promotion.bprime.config.PromotionBPrimeSchemaInitializer;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.mapper.PromotionCampaignMapper;
@@ -20,8 +21,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.JdbcTemplateAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 
 import java.net.InetSocketAddress;
@@ -269,9 +272,11 @@ class PromotionMysqlIntegrationTest {
     }
 
     @Configuration
+    @Import(PromotionBPrimeSchemaInitializer.class)
     @ImportAutoConfiguration({
             DataSourceAutoConfiguration.class,
             DataSourceTransactionManagerAutoConfiguration.class,
+            JdbcTemplateAutoConfiguration.class,
             MybatisAutoConfiguration.class
     })
     @MapperScan(basePackageClasses = PromotionCampaignMapper.class)

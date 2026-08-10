@@ -3,12 +3,16 @@ package com.tongji.promotion.bprime.redis;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.core.HashOperations;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 
-import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,25 +20,23 @@ import static org.mockito.Mockito.when;
 class PromotionAuctionHotStateRepositoryTest {
 
     @Test
-    void initializesClusterSafeStateFromProjectionCheckpoint() {
+    void initializesAllWindowKeysInOneClusterSlot() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        @SuppressWarnings("unchecked")
-        HashOperations<String, Object, Object> hashOperations = mock(HashOperations.class);
-        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
-        PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
-        properties.setHotStateTtlSeconds(600L);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenReturn("OK");
         PromotionAuctionHotStateRepository repository =
-                new PromotionAuctionHotStateRepository(redisTemplate, properties);
+                new PromotionAuctionHotStateRepository(redisTemplate, new PromotionBPrimeProperties());
 
         repository.initialize(new PromotionBidRoute(
                 201L, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L,
-                "OPEN", Instant.parse("2026-08-08T12:00:00Z")), 17L);
+                "OPEN", Instant.parse("2026-08-08T12:00:00Z"), 2, "REDIS_STREAM"), 17L);
 
-        String stateKey = "promotion:auction:{301}:state";
-        verify(hashOperations).putIfAbsent(stateKey, "decisionVersion", "17");
-        verify(hashOperations).putIfAbsent(stateKey, "status", "OPEN");
-        verify(hashOperations).putIfAbsent(stateKey, "reservePrice", "100");
-        verify(hashOperations).putIfAbsent(stateKey, "resourceType", "FEED_TOP_SLOT");
-        verify(redisTemplate).expire(stateKey, Duration.ofSeconds(600L));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> keys = ArgumentCaptor.forClass(List.class);
+        verify(redisTemplate).execute(any(RedisScript.class), keys.capture(), any(Object[].class));
+        assertThat(keys.getValue()).containsExactly(
+                "promotion:auction:{301}:state",
+                "promotion:auction:{301}:ranking",
+                "promotion:auction:{301}:escrow",
+                "promotion:auction:{301}:events");
     }
 }

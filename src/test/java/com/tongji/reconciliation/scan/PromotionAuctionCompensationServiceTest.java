@@ -1,12 +1,15 @@
 package com.tongji.reconciliation.scan;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
+import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
 import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.mapper.PromotionSlotAllocationMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionAuctionWindowStatus;
 import com.tongji.promotion.model.PromotionBid;
 import com.tongji.promotion.model.PromotionBidStatus;
+import com.tongji.promotion.model.PromotionDecisionPath;
 import com.tongji.promotion.model.PromotionResourceType;
 import com.tongji.promotion.model.PromotionSlotAllocation;
 import com.tongji.promotion.service.PromotionAuctionSettlementPlanner;
@@ -27,6 +30,7 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -36,6 +40,7 @@ import static org.mockito.Mockito.when;
 class PromotionAuctionCompensationServiceTest {
 
     private PromotionBidMapper bidMapper;
+    private PromotionBidEscrowMapper escrowMapper;
     private PromotionSlotAllocationMapper allocationMapper;
     private WalletLedgerMapper walletLedgerMapper;
     private ReconciliationService reconciliationService;
@@ -44,11 +49,13 @@ class PromotionAuctionCompensationServiceTest {
     @BeforeEach
     void setUp() {
         bidMapper = mock(PromotionBidMapper.class);
+        escrowMapper = mock(PromotionBidEscrowMapper.class);
         allocationMapper = mock(PromotionSlotAllocationMapper.class);
         walletLedgerMapper = mock(WalletLedgerMapper.class);
         reconciliationService = mock(ReconciliationService.class);
         service = new PromotionAuctionCompensationService(
                 bidMapper,
+                escrowMapper,
                 allocationMapper,
                 walletLedgerMapper,
                 new PromotionAuctionSettlementPlanner(new WalletProperties()),
@@ -144,7 +151,41 @@ class PromotionAuctionCompensationServiceTest {
         );
     }
 
+    @Test
+    void redisStreamWindowReconcilesFullAuthorizationAndUnusedEscrow() {
+        PromotionAuctionWindow window = window(PromotionDecisionPath.REDIS_STREAM);
+        PromotionBid winner = bid(401L, 201L, 42L, 120L, PromotionBidStatus.WON);
+        when(bidMapper.listSettledBidsByWindowId(eq(301L), eq(Instant.parse("2026-06-20T11:00:00Z")),
+                eq(Instant.parse("2026-06-20T12:00:00Z"))))
+                .thenReturn(List.of(winner));
+        when(escrowMapper.listByWindowId(301L)).thenReturn(List.of(
+                escrow(201L, 42L, 500L), escrow(203L, 44L, 300L)));
+        when(allocationMapper.listByAuctionWindowId(301L))
+                .thenReturn(List.of(allocation(0, 201L, 42L, 50L)));
+        when(walletLedgerMapper.findByBusinessRef(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(List.of());
+
+        service.scanWindow(window, reconciliationService);
+
+        verify(reconciliationService).createTaskIfAbsent(
+                eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
+                eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
+                eq(301L),
+                argThat(payload -> payload.contains("\"amount\":450")
+                        && payload.contains("promotion-bprime:301:201:release")));
+        verify(reconciliationService).createTaskIfAbsent(
+                eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
+                eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
+                eq(301L),
+                argThat(payload -> payload.contains("\"amount\":300")
+                        && payload.contains("promotion-bprime:301:203:release")));
+    }
+
     private PromotionAuctionWindow window() {
+        return window(PromotionDecisionPath.LEGACY_BROKER);
+    }
+
+    private PromotionAuctionWindow window(PromotionDecisionPath decisionPath) {
         return PromotionAuctionWindow.builder()
                 .id(301L)
                 .resourceType(PromotionResourceType.FEED_TOP_SLOT)
@@ -152,8 +193,21 @@ class PromotionAuctionCompensationServiceTest {
                 .windowEndAt(Instant.parse("2026-06-20T11:00:00Z"))
                 .slotCount(1)
                 .reservePrice(50L)
+                .decisionPath(decisionPath)
                 .status(PromotionAuctionWindowStatus.SETTLED)
                 .settledAt(Instant.parse("2026-06-20T11:00:01Z"))
+                .build();
+    }
+
+    private PromotionBidEscrowRecord escrow(long campaignId, long bidderUserId, long authorizedAmount) {
+        return PromotionBidEscrowRecord.builder()
+                .id(8000L + campaignId)
+                .auctionWindowId(301L)
+                .campaignId(campaignId)
+                .bidderUserId(bidderUserId)
+                .authorizedAmount(authorizedAmount)
+                .currentHold(0L)
+                .status("CLOSED")
                 .build();
     }
 

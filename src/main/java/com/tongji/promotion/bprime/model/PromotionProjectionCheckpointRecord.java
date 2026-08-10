@@ -3,7 +3,7 @@ package com.tongji.promotion.bprime.model;
 import lombok.Data;
 
 /**
- * Persistent projection watermark for one auction window.
+ * 单个竞价窗口的 Redis Stream 投影水位。
  *
  * @since 2026-08-08
  */
@@ -12,7 +12,5 @@ public class PromotionProjectionCheckpointRecord {
     private long auctionWindowId;
     private String lastDecisionId;
     private long lastDecisionVersion;
-    private String lastKafkaTopic;
-    private Integer lastKafkaPartition;
-    private Long lastKafkaOffset;
+    private String lastStreamId;
 }

@@ -4,5 +4,7 @@ public interface PromotionAuctionRealtimePublisher {
 
     void publishPublic(PromotionAuctionRealtimeEvent event);
 
-    void publishOutcome(PromotionAuctionOutcomeEvent event);
+    int publicSubscriberCount(long auctionWindowId);
+
+    int pendingPublicMessageCount(long auctionWindowId);
 }

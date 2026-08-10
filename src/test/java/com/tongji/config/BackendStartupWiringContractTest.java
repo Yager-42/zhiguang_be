@@ -11,14 +11,10 @@ import com.tongji.knowpost.manager.PublishValidationHelper;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.publish.ContentPublishedPublisher;
 import com.tongji.knowpost.publish.PublishAttemptMapper;
-import com.tongji.promotion.bprime.mq.NoopPromotionCommandMessagePort;
-import com.tongji.promotion.bprime.mq.PromotionCommandMessagePort;
 import com.tongji.promotion.bprime.realtime.NoopPromotionAuctionRealtimePublisher;
 import com.tongji.promotion.bprime.realtime.PromotionAuctionRealtimePublisher;
-import com.tongji.promotion.bprime.service.PromotionDecisionProjectionService;
 import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
-import com.tongji.reconciliation.executor.PromotionDecisionProjectionReconciler;
 import com.tongji.wallet.service.ContentRewardService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -46,15 +42,12 @@ class BackendStartupWiringContractTest {
                 .withBean(PublishAttemptService.class)
                 .withBean(GorseProperties.class)
                 .withBean(GorseClient.class)
-                .withBean(PromotionDecisionProjectionService.class, () -> mock(PromotionDecisionProjectionService.class))
-                .withBean(ObjectMapper.class)
-                .withBean(PromotionDecisionProjectionReconciler.class);
+                .withBean(ObjectMapper.class);
 
         contextRunner.run(context -> {
             assertThat(context).hasSingleBean(SegmentIdGenerator.class);
             assertThat(context).hasSingleBean(PublishAttemptService.class);
             assertThat(context).hasSingleBean(GorseClient.class);
-            assertThat(context).hasSingleBean(PromotionDecisionProjectionReconciler.class);
         });
     }
 
@@ -64,15 +57,12 @@ class BackendStartupWiringContractTest {
                 .withBean(RestTemplateBuilder.class, RestTemplateBuilder::new)
                 .withUserConfiguration(
                         RestTemplateConfig.class,
-                        NoopPromotionCommandMessagePort.class,
                         NoopPromotionAuctionRealtimePublisher.class
                 );
 
         contextRunner.run(context -> {
             assertThat(context).hasSingleBean(RestTemplate.class);
-            assertThat(context).hasSingleBean(PromotionCommandMessagePort.class);
             assertThat(context).hasSingleBean(PromotionAuctionRealtimePublisher.class);
-            assertThat(context.getBean(PromotionCommandMessagePort.class)).isInstanceOf(NoopPromotionCommandMessagePort.class);
             assertThat(context.getBean(PromotionAuctionRealtimePublisher.class)).isInstanceOf(NoopPromotionAuctionRealtimePublisher.class);
         });
     }
@@ -82,12 +72,10 @@ class BackendStartupWiringContractTest {
         ApplicationContextRunner contextRunner = new ApplicationContextRunner()
                 .withPropertyValues("promotion.bprime.enabled=true")
                 .withUserConfiguration(
-                        NoopPromotionCommandMessagePort.class,
                         NoopPromotionAuctionRealtimePublisher.class
                 );
 
         contextRunner.run(context -> {
-            assertThat(context).doesNotHaveBean(PromotionCommandMessagePort.class);
             assertThat(context).doesNotHaveBean(PromotionAuctionRealtimePublisher.class);
         });
     }

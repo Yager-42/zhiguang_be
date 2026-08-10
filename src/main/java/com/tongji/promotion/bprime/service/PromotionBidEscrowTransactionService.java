@@ -4,6 +4,7 @@ import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
 import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
@@ -11,6 +12,11 @@ import com.tongji.promotion.mapper.PromotionCampaignMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionCampaign;
 import com.tongji.promotion.model.PromotionCampaignStatus;
+import com.tongji.promotion.model.PromotionDecisionPath;
+import com.tongji.reconciliation.model.ReconciliationTask;
+import com.tongji.reconciliation.model.ReconciliationTaskType;
+import com.tongji.reconciliation.model.ReconciliationTargetType;
+import com.tongji.reconciliation.service.ReconciliationService;
 import com.tongji.wallet.model.WalletBusinessType;
 import com.tongji.wallet.model.WalletLedgerReason;
 import com.tongji.wallet.service.WalletService;
@@ -29,21 +35,30 @@ public class PromotionBidEscrowTransactionService {
     private final PromotionBidEscrowMapper escrowMapper;
     private final WalletService walletService;
     private final IdService idService;
+    private final ReconciliationService reconciliationService;
+    private final PromotionBPrimeProperties properties;
 
     public PromotionBidEscrowTransactionService(PromotionCampaignMapper campaignMapper,
                                                 PromotionAuctionWindowMapper windowMapper,
                                                 PromotionBidEscrowMapper escrowMapper,
                                                 WalletService walletService,
-                                                IdService idService) {
+                                                IdService idService,
+                                                ReconciliationService reconciliationService,
+                                                PromotionBPrimeProperties properties) {
         this.campaignMapper = campaignMapper;
         this.windowMapper = windowMapper;
         this.escrowMapper = escrowMapper;
         this.walletService = walletService;
         this.idService = idService;
+        this.reconciliationService = reconciliationService;
+        this.properties = properties;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Authorization authorize(long userId, long campaignId, long requestedAmount, Instant now) {
+        if (!properties.isEnabled()) {
+            throw new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED);
+        }
         if (requestedAmount <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "amount must be greater than 0");
         }
@@ -54,6 +69,10 @@ public class PromotionBidEscrowTransactionService {
         PromotionAuctionWindow window = windowMapper.findOpenWindow(campaign.getResourceType(), now);
         if (window == null) {
             throw new BusinessException(ErrorCode.PROMOTION_BID_WINDOW_CLOSED);
+        }
+        if (window.getDecisionPath() != PromotionDecisionPath.REDIS_STREAM) {
+            throw new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED,
+                    "legacy broker auction window is draining");
         }
         requireCampaignEligibleForWindow(campaign, window);
 
@@ -94,7 +113,11 @@ public class PromotionBidEscrowTransactionService {
             existing.setExpiresAt(window.getWindowEndAt());
             existing.setUpdatedAt(now);
         }
-        return new Authorization(campaign, window, existing);
+        ReconciliationTask projectionTask = reconciliationService.createTaskIfAbsent(
+                ReconciliationTaskType.PROMOTION_ESCROW_REDIS_PROJECTION,
+                ReconciliationTargetType.PROMOTION_BID_ESCROW,
+                existing.getId());
+        return new Authorization(campaign, window, existing, projectionTask);
     }
 
     private void requireCampaignEligibleForWindow(PromotionCampaign campaign, PromotionAuctionWindow window) {
@@ -117,6 +140,7 @@ public class PromotionBidEscrowTransactionService {
 
     public record Authorization(PromotionCampaign campaign,
                                 PromotionAuctionWindow window,
-                                PromotionBidEscrowRecord escrow) {
+                                PromotionBidEscrowRecord escrow,
+                                ReconciliationTask projectionTask) {
     }
 }

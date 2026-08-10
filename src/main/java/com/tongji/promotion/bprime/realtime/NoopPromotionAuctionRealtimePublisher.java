@@ -12,6 +12,13 @@ public class NoopPromotionAuctionRealtimePublisher implements PromotionAuctionRe
     }
 
     @Override
-    public void publishOutcome(PromotionAuctionOutcomeEvent event) {
+    public int publicSubscriberCount(long auctionWindowId) {
+        return 0;
     }
+
+    @Override
+    public int pendingPublicMessageCount(long auctionWindowId) {
+        return 0;
+    }
+
 }

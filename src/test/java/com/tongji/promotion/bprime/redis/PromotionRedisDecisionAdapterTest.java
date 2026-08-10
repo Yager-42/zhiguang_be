@@ -37,14 +37,14 @@ class PromotionRedisDecisionAdapterTest {
                 """;
         List<String> keys = List.of(
                 "promotion:auction:{301}:state",
-                "promotion:auction:{301}:commands",
+                "promotion:auction:{301}:command:cmd-1",
                 "promotion:auction:{301}:ranking",
                 "promotion:auction:{301}:campaign:201",
-                "promotion:auction:{301}:escrow");
-        when(redisTemplate.execute(any(RedisScript.class), eq(keys), eq("cmd-1"), eq("hash-1"), eq("42"),
-                eq("120"), eq("100"), eq("1781949900000"), eq("OPEN"), eq("301"), eq("201"), eq("1001"),
-                eq("FEED_TOP_SLOT"), eq("86400"), eq("2026-06-20T10:05:00Z"), eq("BID"),
-                eq("86400"))).thenReturn(json);
+                "promotion:auction:{301}:escrow",
+                "promotion:auction:{301}:events",
+                "promotion:auction:{301}:pub",
+                "promotion:auction:{301}:wakeup");
+        when(redisTemplate.execute(any(RedisScript.class), eq(keys), any(Object[].class))).thenReturn(json);
 
         PromotionAuctionDecision decision = adapter.decide(command, Instant.parse("2026-06-20T10:05:00Z"));
 

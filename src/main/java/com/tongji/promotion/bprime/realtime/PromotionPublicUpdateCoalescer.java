@@ -21,19 +21,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 按窗口合并高频竞价增量，并使用独立调度资源发布可恢复的公共状态。
  *
  * <p>同一 flush 周期内每个 campaign 只保留最高版本。公共通知可被慢连接覆盖，客户端通过连续
- * {@code eventVersion} 检测缺帧并读取 snapshot；私有 outcome 不经过本组件。</p>
+ * {@code eventVersion} 检测缺帧并读取 snapshot。</p>
  *
  * @since 2026-08-09
  */
 @Component
-@ConditionalOnProperty(
-        name = {"promotion.bprime.enabled", "promotion.bprime.fanout-consumer-enabled"},
-        havingValue = "true")
+@ConditionalOnProperty(name = "promotion.bprime.enabled", havingValue = "true")
 public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PromotionPublicUpdateCoalescer.class);
@@ -41,7 +40,10 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
     private final PromotionAuctionRealtimePublisher publisher;
     private final ThreadPoolTaskScheduler scheduler;
     private final PromotionPerformanceMetrics performanceMetrics;
-    private final Duration flushInterval;
+    private final Duration schedulerTick;
+    private final long minimumFlushIntervalNanos;
+    private final long maximumFlushIntervalNanos;
+    private final int adaptiveSubscriberCeiling;
     private final Cache<Long, WindowUpdates> windows;
     private volatile ScheduledFuture<?> flushTask;
     private volatile boolean running;
@@ -54,7 +56,11 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         this.publisher = publisher;
         this.scheduler = scheduler;
         this.performanceMetrics = performanceMetrics;
-        this.flushInterval = Duration.ofMillis(properties.getPublicUpdateFlushIntervalMs());
+        this.schedulerTick = Duration.ofMillis(properties.getPublicUpdateFlushIntervalMs());
+        this.minimumFlushIntervalNanos = schedulerTick.toNanos();
+        this.maximumFlushIntervalNanos = TimeUnit.MILLISECONDS.toNanos(
+                properties.getPublicUpdateMaximumFlushIntervalMs());
+        this.adaptiveSubscriberCeiling = properties.getPublicUpdateAdaptiveSubscriberCeiling();
         this.windows = Caffeine.<Long, WindowUpdates>newBuilder()
                 .maximumSize(properties.getPublicUpdateMaximumWindows())
                 .expireAfterAccess(Duration.ofHours(2))
@@ -96,13 +102,13 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         }
     }
 
-    /** 启动固定周期的窗口增量合并任务。 */
+    /** 启动基础 tick；各窗口按订阅数与待写槽压力决定实际刷新周期。 */
     @Override
     public synchronized void start() {
         if (running) {
             return;
         }
-        flushTask = scheduler.scheduleWithFixedDelay(this::flushSafely, flushInterval);
+        flushTask = scheduler.scheduleWithFixedDelay(this::flushSafely, schedulerTick);
         running = true;
     }
 
@@ -115,7 +121,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         if (current != null) {
             current.cancel(false);
         }
-        flushSafely();
+        flushNowSafely();
     }
 
     /** 返回公共状态合并任务是否已启动。 */
@@ -139,11 +145,41 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         });
     }
 
+    private void flushDue() {
+        long nowNanos = System.nanoTime();
+        windows.asMap().values().forEach(updates -> {
+            int deltaCount = updates.publishPendingIfDue(
+                    publisher, nowNanos, adaptiveFlushIntervalNanos(updates.auctionWindowId()));
+            if (deltaCount > 0) {
+                performanceMetrics.recordPublicUpdateBatch(deltaCount);
+            }
+        });
+    }
+
+    private long adaptiveFlushIntervalNanos(long auctionWindowId) {
+        int subscriberCount = Math.max(0, publisher.publicSubscriberCount(auctionWindowId));
+        int pendingMessageCount = Math.max(0, publisher.pendingPublicMessageCount(auctionWindowId));
+        long intervalRange = maximumFlushIntervalNanos - minimumFlushIntervalNanos;
+        long subscriberPressure = intervalRange
+                * Math.min(subscriberCount, adaptiveSubscriberCeiling) / adaptiveSubscriberCeiling;
+        long queuePressure = subscriberCount == 0 ? 0L
+                : intervalRange * Math.min(pendingMessageCount, subscriberCount) / subscriberCount;
+        return minimumFlushIntervalNanos + Math.max(subscriberPressure, queuePressure);
+    }
+
     private void flushSafely() {
+        try {
+            flushDue();
+        } catch (RuntimeException exception) {
+            LOGGER.warn("Promotion public update flush failed and remains pending", exception);
+        }
+    }
+
+    private void flushNowSafely() {
         try {
             flushNow();
         } catch (RuntimeException exception) {
-            LOGGER.warn("Promotion public update flush failed and remains pending", exception);
+            LOGGER.warn("Promotion public update final flush failed and remains pending", exception);
         }
     }
 
@@ -153,10 +189,14 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         private long auctionWindowId;
         private String latestDecisionId;
         private long latestDecisionVersion;
-        private long publicEventVersion;
+        private long pendingFromDecisionVersion;
         private java.time.Instant latestOccurredAt;
+        private long lastPublishedAtNanos;
 
         private synchronized void merge(PromotionAuctionDecision decision) {
+            if (deltas.isEmpty()) {
+                pendingFromDecisionVersion = decision.decisionVersion();
+            }
             PromotionBidDelta delta = new PromotionBidDelta(
                     String.valueOf(decision.campaignId()),
                     String.valueOf(decision.bidderUserId()),
@@ -173,11 +213,29 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
             return !deltas.isEmpty();
         }
 
+        private synchronized long auctionWindowId() {
+            return auctionWindowId;
+        }
+
+        private synchronized int publishPendingIfDue(
+                PromotionAuctionRealtimePublisher publisher, long nowNanos, long flushIntervalNanos) {
+            if (deltas.isEmpty()
+                    || (lastPublishedAtNanos != 0L
+                    && nowNanos - lastPublishedAtNanos < flushIntervalNanos)) {
+                return 0;
+            }
+            return publishPending(publisher, nowNanos);
+        }
+
         private synchronized int publishPending(PromotionAuctionRealtimePublisher publisher) {
+            return publishPending(publisher, System.nanoTime());
+        }
+
+        private int publishPending(PromotionAuctionRealtimePublisher publisher, long publishedAtNanos) {
             if (deltas.isEmpty()) {
                 return 0;
             }
-            long nextEventVersion = publicEventVersion + 1L;
+            long nextEventVersion = latestDecisionVersion;
             List<PromotionBidDelta> batch = new ArrayList<>(deltas.values());
             PromotionAuctionRealtimeEvent event = new PromotionAuctionRealtimeEvent(
                     "window-" + latestDecisionId + ":public:" + nextEventVersion,
@@ -186,13 +244,16 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
                     latestDecisionId,
                     latestDecisionVersion,
                     nextEventVersion,
+                    pendingFromDecisionVersion,
+                    latestDecisionVersion,
                     "OPEN",
                     List.of(),
                     batch,
                     latestOccurredAt);
             publisher.publishPublic(event);
             deltas.clear();
-            publicEventVersion = nextEventVersion;
+            pendingFromDecisionVersion = 0L;
+            lastPublishedAtNanos = publishedAtNanos;
             return batch.size();
         }
 
@@ -200,7 +261,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
                 PromotionAuctionDecision decision,
                 PromotionAuctionRealtimePublisher publisher) {
             int deltaCount = publishPending(publisher);
-            long nextEventVersion = publicEventVersion + 1L;
+            long nextEventVersion = decision.decisionVersion();
             publisher.publishPublic(new PromotionAuctionRealtimeEvent(
                     "decision-" + decision.decisionId() + ":public:" + nextEventVersion,
                     PromotionAuctionRealtimeEvent.WINDOW_CLOSED,
@@ -208,11 +269,13 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
                     decision.decisionId(),
                     decision.decisionVersion(),
                     nextEventVersion,
+                    decision.decisionVersion(),
+                    decision.decisionVersion(),
                     String.valueOf(decision.payload().getOrDefault("finalWindowStatus", "SETTLED")),
                     decision.ranking(),
                     List.of(),
                     decision.decidedAt()));
-            publicEventVersion = nextEventVersion;
+            pendingFromDecisionVersion = 0L;
             deltas.clear();
             return deltaCount;
         }

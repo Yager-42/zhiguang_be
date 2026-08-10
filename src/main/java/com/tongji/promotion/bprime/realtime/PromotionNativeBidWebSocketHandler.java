@@ -19,10 +19,8 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
-import java.security.Principal;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,7 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * 高活动竞价原生传输：每连接使用关键反馈优先、公共状态可覆盖的单写泵。
  *
- * <p>ACK 和 outcome 进入有界 FIFO；房间公共状态只保留最新批次。关键队列过载会关闭连接，客户端可凭
+ * <p>最终 ACK 进入有界 FIFO；房间公共状态只保留最新批次。关键队列过载会关闭连接，客户端可凭
  * commandId 和 snapshot 恢复，任何关键反馈都不会被静默丢弃。</p>
  *
  * @since 2026-08-09
@@ -50,14 +48,13 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
     private final ObjectReader requestReader;
     private final ObjectReader subscriptionReader;
     private final ObjectWriter ackWriter;
-    private final ObjectWriter outcomeWriter;
     private final ObjectWriter publicEventWriter;
     private final ObjectWriter subscriptionAckWriter;
     private final TaskExecutor outboundExecutor;
     private final PromotionPerformanceMetrics performanceMetrics;
     private final int sessionQueueCapacity;
     private final Map<String, SessionWriter> sessionWriters = new ConcurrentHashMap<>();
-    private final Map<String, Set<SessionWriter>> userSessions = new ConcurrentHashMap<>();
+    private final Map<Long, Room> rooms = new ConcurrentHashMap<>();
 
     public PromotionNativeBidWebSocketHandler(
             PromotionBidWebSocketProtocolService protocolService,
@@ -70,7 +67,6 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
         this.requestReader = objectMapper.readerFor(PromotionWebSocketBidRequest.class);
         this.subscriptionReader = objectMapper.readerFor(PromotionNativeSubscriptionRequest.class);
         this.ackWriter = objectMapper.writerFor(PromotionWebSocketBidAck.class);
-        this.outcomeWriter = objectMapper.writerFor(PromotionAuctionOutcomeEvent.class);
         this.publicEventWriter = objectMapper.writerFor(PromotionAuctionRealtimeEvent.class);
         this.subscriptionAckWriter = objectMapper.writerFor(PromotionNativeSubscriptionAck.class);
         this.outboundExecutor = outboundExecutor;
@@ -80,9 +76,11 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        SessionWriter writer = new SessionWriter(session, principalName(session.getPrincipal()));
-        sessionWriters.put(session.getId(), writer);
-        userSessions.computeIfAbsent(writer.userName(), ignored -> ConcurrentHashMap.newKeySet()).add(writer);
+        SessionWriter writer = new SessionWriter(session);
+        SessionWriter previous = sessionWriters.put(session.getId(), writer);
+        if (previous != null) {
+            previous.dispose();
+        }
     }
 
     @Override
@@ -108,7 +106,6 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         SessionWriter writer = sessionWriters.remove(session.getId());
         if (writer != null) {
-            removeUserSession(writer);
             writer.dispose();
         }
     }
@@ -119,31 +116,6 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
         if (writer != null) {
             writer.requestClose(SERVER_ERROR_CLOSE);
         }
-    }
-
-    /**
-     * 将最终竞价结果发送到该用户的全部原生连接。
-     *
-     * @param event 已持久化的私有结果，不允许为 {@code null}
-     * @return 接受该关键消息的连接数量
-     */
-    public int publishOutcome(PromotionAuctionOutcomeEvent event) {
-        Objects.requireNonNull(event, "event must not be null");
-        Set<SessionWriter> sessions = userSessions.get(String.valueOf(event.bidderUserId()));
-        if (sessions == null || sessions.isEmpty()) {
-            return 0;
-        }
-        TextMessage message = serialize(outcomeWriter, event, null);
-        if (message == null) {
-            return 0;
-        }
-        int delivered = 0;
-        for (SessionWriter writer : sessions) {
-            if (writer.offerCritical(message)) {
-                delivered++;
-            }
-        }
-        return delivered;
     }
 
     /**
@@ -158,14 +130,16 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
         if (message == null) {
             return 0;
         }
+        Room room = rooms.get(event.auctionWindowId());
+        if (room == null) {
+            return 0;
+        }
+        boolean terminal = PromotionAuctionRealtimeEvent.WINDOW_CLOSED.equals(event.eventType());
         int delivered = 0;
-        for (SessionWriter writer : sessionWriters.values()) {
-            if (!writer.isSubscribedTo(event.auctionWindowId())) {
-                continue;
-            }
-            boolean accepted = PromotionAuctionRealtimeEvent.WINDOW_CLOSED.equals(event.eventType())
-                    ? writer.offerTerminal(message)
-                    : writer.offerPublic(message);
+        for (SessionWriter writer : room.writers) {
+            boolean accepted = terminal
+                    ? writer.offerTerminal(message, room)
+                    : writer.offerPublic(message, room);
             if (accepted) {
                 delivered++;
             }
@@ -179,10 +153,21 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
                     protocolService.rejected(null, ErrorCode.BAD_REQUEST.getCode()), writer));
             return;
         }
-        writer.subscribe(request.auctionWindowId());
-        writer.offerCritical(serialize(subscriptionAckWriter, new PromotionNativeSubscriptionAck(
-                PromotionNativeSubscriptionAck.SUBSCRIBED,
-                String.valueOf(request.auctionWindowId())), writer));
+        if (writer.subscribe(request.auctionWindowId())) {
+            writer.offerCritical(serialize(subscriptionAckWriter, new PromotionNativeSubscriptionAck(
+                    PromotionNativeSubscriptionAck.SUBSCRIBED,
+                    String.valueOf(request.auctionWindowId())), writer));
+        }
+    }
+
+    public int subscriberCount(long auctionWindowId) {
+        Room room = rooms.get(auctionWindowId);
+        return room == null ? 0 : room.writers.size();
+    }
+
+    public int pendingPublicMessageCount(long auctionWindowId) {
+        Room room = rooms.get(auctionWindowId);
+        return room == null ? 0 : room.pendingPublicMessageCount.get();
     }
 
     private void submitBid(WebSocketSession session, SessionWriter writer, PromotionWebSocketBidRequest request) {
@@ -207,44 +192,40 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private String principalName(Principal principal) {
-        return principal == null ? "guest" : principal.getName();
-    }
-
-    private void removeUserSession(SessionWriter writer) {
-        userSessions.computeIfPresent(writer.userName(), (userName, sessions) -> {
-            sessions.remove(writer);
-            return sessions.isEmpty() ? null : sessions;
-        });
-    }
-
     private final class SessionWriter {
 
         private final WebSocketSession session;
-        private final String userName;
         private final ConcurrentLinkedQueue<TextMessage> criticalQueue = new ConcurrentLinkedQueue<>();
-        private final AtomicReference<TextMessage> latestPublicMessage = new AtomicReference<>();
+        private final AtomicReference<PublicMessage> latestPublicMessage = new AtomicReference<>();
         private final AtomicInteger criticalQueueSize = new AtomicInteger();
         private final AtomicBoolean accepting = new AtomicBoolean(true);
         private final AtomicBoolean draining = new AtomicBoolean();
         private final AtomicReference<CloseStatus> requestedClose = new AtomicReference<>();
-        private volatile long subscribedWindowId;
+        private volatile Room subscribedRoom;
 
-        private SessionWriter(WebSocketSession session, String userName) {
+        private SessionWriter(WebSocketSession session) {
             this.session = session;
-            this.userName = userName;
         }
 
-        private String userName() {
-            return userName;
-        }
-
-        private void subscribe(long auctionWindowId) {
-            subscribedWindowId = auctionWindowId;
-        }
-
-        private boolean isSubscribedTo(long auctionWindowId) {
-            return subscribedWindowId == auctionWindowId;
+        private synchronized boolean subscribe(long auctionWindowId) {
+            if (!accepting.get()) {
+                return false;
+            }
+            Room current = subscribedRoom;
+            if (current != null && current.auctionWindowId == auctionWindowId) {
+                return true;
+            }
+            clearPublicMessage();
+            if (current != null) {
+                removeFromRoom(current);
+            }
+            rooms.compute(auctionWindowId, (ignored, indexedRoom) -> {
+                Room room = indexedRoom == null ? new Room(auctionWindowId) : indexedRoom;
+                subscribedRoom = room;
+                room.writers.add(this);
+                return room;
+            });
+            return true;
         }
 
         private boolean offerCritical(TextMessage message) {
@@ -263,22 +244,25 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
             return true;
         }
 
-        private boolean offerPublic(TextMessage message) {
-            if (message == null || !accepting.get()) {
+        private synchronized boolean offerPublic(TextMessage message, Room room) {
+            if (message == null || !accepting.get() || subscribedRoom != room) {
                 return false;
             }
-            if (latestPublicMessage.getAndSet(message) != null) {
+            PublicMessage previous = latestPublicMessage.getAndSet(new PublicMessage(room, message));
+            if (previous == null) {
+                room.pendingPublicMessageCount.incrementAndGet();
+            } else {
                 performanceMetrics.recordPublicUpdateOverwrite();
             }
             scheduleDrain();
             return true;
         }
 
-        private boolean offerTerminal(TextMessage message) {
-            if (!accepting.get()) {
+        private synchronized boolean offerTerminal(TextMessage message, Room room) {
+            if (!accepting.get() || subscribedRoom != room) {
                 return false;
             }
-            latestPublicMessage.set(null);
+            clearPublicMessage();
             return offerCritical(message);
         }
 
@@ -313,9 +297,10 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
                     criticalQueueSize.decrementAndGet();
                     session.sendMessage(message);
                 }
-                TextMessage publicMessage = latestPublicMessage.getAndSet(null);
+                PublicMessage publicMessage = latestPublicMessage.getAndSet(null);
                 if (publicMessage != null) {
-                    session.sendMessage(publicMessage);
+                    publicMessage.room.pendingPublicMessageCount.decrementAndGet();
+                    session.sendMessage(publicMessage.message);
                 }
                 continueDrain = hasPending();
             } catch (IOException exception) {
@@ -350,8 +335,8 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
             accepting.set(false);
             requestedClose.set(null);
             clearPending();
+            leaveRoom();
             sessionWriters.remove(session.getId(), this);
-            removeUserSession(this);
             if (session.isOpen()) {
                 try {
                     session.close(status);
@@ -364,13 +349,61 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
         private void clearPending() {
             criticalQueue.clear();
             criticalQueueSize.set(0);
-            latestPublicMessage.set(null);
+            clearPublicMessage();
+        }
+
+        private void clearPublicMessage() {
+            PublicMessage publicMessage = latestPublicMessage.getAndSet(null);
+            if (publicMessage != null) {
+                publicMessage.room.pendingPublicMessageCount.decrementAndGet();
+            }
+        }
+
+        private synchronized void leaveRoom() {
+            Room current = subscribedRoom;
+            subscribedRoom = null;
+            if (current != null) {
+                removeFromRoom(current);
+            }
+        }
+
+        private void removeFromRoom(Room room) {
+            rooms.computeIfPresent(room.auctionWindowId, (ignored, indexedRoom) -> {
+                if (indexedRoom != room) {
+                    return indexedRoom;
+                }
+                indexedRoom.writers.remove(this);
+                return indexedRoom.writers.isEmpty() ? null : indexedRoom;
+            });
         }
 
         private void dispose() {
             accepting.set(false);
             requestedClose.set(null);
             clearPending();
+            leaveRoom();
+        }
+    }
+
+    private final class Room {
+
+        private final long auctionWindowId;
+        private final java.util.Set<SessionWriter> writers = ConcurrentHashMap.newKeySet();
+        private final AtomicInteger pendingPublicMessageCount = new AtomicInteger();
+
+        private Room(long auctionWindowId) {
+            this.auctionWindowId = auctionWindowId;
+        }
+    }
+
+    private final class PublicMessage {
+
+        private final Room room;
+        private final TextMessage message;
+
+        private PublicMessage(Room room, TextMessage message) {
+            this.room = room;
+            this.message = message;
         }
     }
 }

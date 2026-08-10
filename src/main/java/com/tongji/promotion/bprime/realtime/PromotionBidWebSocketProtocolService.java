@@ -67,6 +67,11 @@ public class PromotionBidWebSocketProtocolService {
         }
         Throwable cause = unwrap(exception);
         if (cause instanceof BusinessException businessException) {
+            if (businessException.getErrorCode() == ErrorCode.PROMOTION_AUCTION_PAUSED) {
+                performanceMetrics.recordWebSocketBidAck("UNAVAILABLE");
+                return PromotionWebSocketBidAck.unavailable(
+                        idempotencyKey, ErrorCode.PROMOTION_AUCTION_PAUSED.getCode());
+            }
             return rejected(idempotencyKey, businessException.getErrorCode().getCode());
         }
         throw new CompletionException(cause);

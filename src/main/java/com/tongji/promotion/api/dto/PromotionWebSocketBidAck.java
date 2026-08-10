@@ -1,9 +1,9 @@
 package com.tongji.promotion.api.dto;
 
+import java.time.Instant;
+
 /**
- * WebSocket 推广出价的当前用户私有确认。
- *
- * @since 2026-08-09
+ * WebSocket 推广出价的最终私有响应。
  */
 public record PromotionWebSocketBidAck(
         String idempotencyKey,
@@ -11,19 +11,42 @@ public record PromotionWebSocketBidAck(
         String auctionWindowId,
         String status,
         boolean resultAvailable,
-        String rejectionReason
+        String rejectionReason,
+        String decisionId,
+        Long decisionVersion,
+        Long bidAmount,
+        Instant decidedAt
 ) {
 
-    /** 将统一收单结果转换为 WebSocket ACK。 */
+    public PromotionWebSocketBidAck(String idempotencyKey, String commandId, String auctionWindowId,
+                                    String status, boolean resultAvailable, String rejectionReason) {
+        this(idempotencyKey, commandId, auctionWindowId, status, resultAvailable, rejectionReason,
+                null, null, null, null);
+    }
+
     public static PromotionWebSocketBidAck from(
             String idempotencyKey,
             SubmitPromotionBidCommandResponse response) {
-        return new PromotionWebSocketBidAck(idempotencyKey, response.commandId(), response.auctionWindowId(),
-                response.status(), response.resultAvailable(), response.rejectionReason());
+        return new PromotionWebSocketBidAck(
+                idempotencyKey,
+                response.commandId(),
+                response.auctionWindowId(),
+                response.status(),
+                response.resultAvailable(),
+                response.rejectionReason(),
+                response.decisionId(),
+                response.decisionVersion(),
+                response.bidAmount(),
+                response.decidedAt());
     }
 
-    /** 创建没有进入权威命令链路的协议或业务拒绝 ACK。 */
     public static PromotionWebSocketBidAck rejected(String idempotencyKey, String rejectionReason) {
-        return new PromotionWebSocketBidAck(idempotencyKey, null, null, "REJECTED", true, rejectionReason);
+        return new PromotionWebSocketBidAck(idempotencyKey, null, null, "REJECTED", true,
+                rejectionReason, null, null, null, null);
+    }
+
+    public static PromotionWebSocketBidAck unavailable(String idempotencyKey, String rejectionReason) {
+        return new PromotionWebSocketBidAck(idempotencyKey, null, null, "UNAVAILABLE", false,
+                rejectionReason, null, null, null, null);
     }
 }

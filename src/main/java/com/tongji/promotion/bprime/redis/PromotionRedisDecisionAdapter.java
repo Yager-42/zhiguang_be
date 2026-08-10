@@ -31,26 +31,41 @@ public class PromotionRedisDecisionAdapter {
         this.decisionScript.setResultType(String.class);
     }
 
-    public PromotionAuctionDecision decide(PromotionAuctionCommand command, Instant now) {
-        List<String> keys = PromotionAuctionRedisKeys.decisionKeys(command.auctionWindowId(), command.campaignId());
-        String payload = redisTemplate.execute(decisionScript, keys,
-                command.commandId(),
-                command.requestHash(),
-                String.valueOf(command.bidderUserId()),
-                String.valueOf(command.bidAmount()),
-                String.valueOf(command.reservePrice()),
-                String.valueOf(now.toEpochMilli()),
-                command.windowStatus(),
-                String.valueOf(command.auctionWindowId()),
-                String.valueOf(command.campaignId()),
-                String.valueOf(command.postId()),
-                command.resourceType(),
-                String.valueOf(properties.getHotStateTtlSeconds()),
-                command.submittedAt().toString(),
-                command.type(),
-                String.valueOf(properties.getCommandIdempotencyTtlSeconds()));
+    public PromotionAuctionDecision decide(PromotionAuctionCommand command) {
+        long commandBucketSeconds = properties.getCommandIdempotencyBucketSeconds();
+        long currentCommandBucket = Math.floorDiv(
+                System.currentTimeMillis() / 1_000L, commandBucketSeconds);
+        int previousCommandBucketCount = Math.toIntExact(Math.ceilDiv(
+                properties.getCommandIdempotencyTtlSeconds(), commandBucketSeconds));
+        List<String> keys = PromotionAuctionRedisKeys.decisionKeys(
+                command.auctionWindowId(), command.campaignId(),
+                currentCommandBucket, previousCommandBucketCount);
+        long commandBucketTtlSeconds = Math.addExact(
+                properties.getCommandIdempotencyTtlSeconds(), commandBucketSeconds);
+        long wakeupTtlSeconds = Math.max(1L, (properties.getStreamSweepIntervalMs() * 2L + 999L) / 1_000L);
+        final String payload;
+        try {
+            payload = redisTemplate.execute(decisionScript, keys,
+                    command.commandId(),
+                    command.requestHash(),
+                    String.valueOf(command.bidderUserId()),
+                    String.valueOf(command.bidAmount()),
+                    String.valueOf(command.auctionWindowId()),
+                    String.valueOf(command.campaignId()),
+                    String.valueOf(command.postId()),
+                    command.resourceType(),
+                    String.valueOf(commandBucketTtlSeconds),
+                    String.valueOf(properties.getHotStateTtlSeconds()),
+                    command.submittedAt().toString(),
+                    String.valueOf(wakeupTtlSeconds));
+        } catch (RuntimeException exception) {
+            throw new PromotionAuctionUnavailableException("promotion auction Redis decision failed", exception);
+        }
         try {
             ObjectNode node = (ObjectNode) objectMapper.readTree(payload);
+            if ("UNAVAILABLE".equals(node.path("status").asText())) {
+                throw new PromotionAuctionUnavailableException(node.path("rejectionReason").asText());
+            }
             if (!node.hasNonNull("decidedAt") && node.hasNonNull("decidedAtEpochMs")) {
                 node.put("decidedAt", Instant.ofEpochMilli(node.get("decidedAtEpochMs").asLong()).toString());
             }
@@ -59,8 +74,16 @@ public class PromotionRedisDecisionAdapter {
             node.remove("decidedAtEpochMs");
             return objectMapper.treeToValue(node, PromotionAuctionDecision.class);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to parse promotion redis decision", e);
+            if (e instanceof PromotionAuctionUnavailableException unavailableException) {
+                throw unavailableException;
+            }
+            throw new PromotionAuctionUnavailableException("failed to parse promotion Redis decision", e);
         }
+    }
+
+    /** 兼容迁移期间的旧调用签名；裁决时间始终取 Redis TIME。 */
+    public PromotionAuctionDecision decide(PromotionAuctionCommand command, Instant ignored) {
+        return decide(command);
     }
 
     private void normalizeEmptyArray(ObjectNode node, String fieldName) {

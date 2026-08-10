@@ -36,14 +36,16 @@ class ReconciliationTask1ContractTest {
                 "follow_inbox",
                 "promotion_decision_projection",
                 "promotion_allocation_rebuild",
-                "promotion_wallet_effect_repair"
+                "promotion_wallet_effect_repair",
+                "promotion_escrow_redis_projection"
         );
         assertThat(ReconciliationTargetType.ALL).containsExactly(
                 "post",
                 "comment",
                 "user",
                 "promotion_decision",
-                "promotion_auction_window"
+                "promotion_auction_window",
+                "promotion_bid_escrow"
         );
         assertThat(ReconciliationScanType.ALL).containsExactly(
                 "post_es",
