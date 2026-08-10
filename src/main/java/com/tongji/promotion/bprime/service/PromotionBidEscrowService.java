@@ -3,6 +3,7 @@ package com.tongji.promotion.bprime.service;
 import com.tongji.promotion.api.dto.PromotionBidEscrowAuthorizationResponse;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper;
@@ -24,17 +25,20 @@ public class PromotionBidEscrowService {
     private final PromotionProjectionCheckpointMapper checkpointMapper;
     private final PromotionAuctionHotStateRepository hotStateRepository;
     private final ReconciliationTaskMapper reconciliationTaskMapper;
+    private final PromotionBPrimeProperties properties;
 
     public PromotionBidEscrowService(PromotionBidEscrowTransactionService transactionService,
                                      PromotionBidRouteRepository routeRepository,
                                      PromotionProjectionCheckpointMapper checkpointMapper,
                                      PromotionAuctionHotStateRepository hotStateRepository,
-                                     ReconciliationTaskMapper reconciliationTaskMapper) {
+                                     ReconciliationTaskMapper reconciliationTaskMapper,
+                                     PromotionBPrimeProperties properties) {
         this.transactionService = transactionService;
         this.routeRepository = routeRepository;
         this.checkpointMapper = checkpointMapper;
         this.hotStateRepository = hotStateRepository;
         this.reconciliationTaskMapper = reconciliationTaskMapper;
+        this.properties = properties;
     }
 
     public PromotionBidEscrowAuthorizationResponse authorize(long userId, long campaignId, long amount, Instant now) {
@@ -45,6 +49,8 @@ public class PromotionBidEscrowService {
             throw new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED,
                     "legacy broker auction window is draining");
         }
+        PromotionBPrimeProperties.AuctionRules rules = properties.auctionRules(
+                authorization.campaign().getResourceType()).withBoundAntiSnipe();
         PromotionBidRoute route = new PromotionBidRoute(
                 campaignId,
                 userId,
@@ -56,7 +62,12 @@ public class PromotionBidEscrowService {
                 authorization.window().getStatus().name(),
                 authorization.window().getWindowEndAt(),
                 authorization.window().getSlotCount(),
-                authorization.window().getDecisionPath().name());
+                authorization.window().getDecisionPath().name(),
+                rules.incrementCents(),
+                rules.capPriceCents(),
+                rules.extendWindowSec(),
+                rules.extendSec(),
+                rules.maxExtensions());
         try {
             PromotionProjectionCheckpointRecord checkpoint =
                     checkpointMapper.findByAuctionWindowId(escrow.getAuctionWindowId());

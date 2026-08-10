@@ -9,7 +9,7 @@ import com.tongji.wallet.model.WalletLedgerReason;
 import java.util.List;
 
 /**
- * B' 结算预期事实：slot allocation 与 wallet effect 共用同一份 GSP 计算结果。
+ * B' 结算预期事实：slot allocation 与 wallet effect 共用同一份英式第一价格计算结果。
  */
 public record PromotionAuctionSettlementPlan(
         PromotionAuctionWindow window,

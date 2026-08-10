@@ -78,7 +78,7 @@ roomState 缓存每窗口 `currentPriceCents`（只升不降，从广播事件 r
 | M16 | seller self-bid / paused | 不适用 | 跳过（zhiguang 无卖家实体；UNAVAILABLE 路径已覆盖 Redis 异常） |
 | M17 | 实时事件：BID_ACCEPTED/AUCTION_EXTENDED/AUCTION_SOLD/AUCTION_NO_BID | RANKING_DELTA/WINDOW_CLOSED | 客户端事件名**保留**（RANKING_DELTA + WINDOW_CLOSED，加性扩展 payload：terminalStatus/winner/winningAmount/actualEndAtMs）；**新增** AUCTION_EXTENDED 实时事件（新 endAtMs + extendCount） |
 | M18 | Timer：`auction:active` ZSET score=endAtMs，close 后 ZREM | T3 `closingIndex` + 1s 扫描 | 保留 T3；反狙击延长后 ZSET score 陈旧 → close.lua `NOT_DUE` 幂等重试自愈（1s 粒度；30s MySQL 兜底同构），无需扫描器改动 |
-| M19 | 参数来自创建期 rules | 窗口参数来自 `promotion.slot-auction.*`（per-resource） | 新增 per-resource 英式参数配置（见 Q16，§3.2），经 `initialize.lua` ARGV 与 `decision.lua` ARGV 注入（route/command 透传） |
+| M19 | 参数来自创建期 rules | 窗口参数来自 `promotion.slot-auction.*`（per-resource） | 新增 per-resource 英式参数配置（见 Q14，§3.2），经 `initialize.lua` ARGV 注入（route 透传写入 state）；**实现修正：`decision.lua` 不扩展 ARGV（M3 表格行为准：HMGET state 增读，Go place_bid.lua L48-51 同构，state 单一权威；route/command 透传链只服务初始化）** |
 
 ## 3. 决策日志（Q&A）
 

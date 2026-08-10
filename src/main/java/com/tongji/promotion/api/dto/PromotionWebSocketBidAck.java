@@ -15,13 +15,14 @@ public record PromotionWebSocketBidAck(
         String decisionId,
         Long decisionVersion,
         Long bidAmount,
-        Instant decidedAt
+        Instant decidedAt,
+        Long requiredAmount
 ) {
 
     public PromotionWebSocketBidAck(String idempotencyKey, String commandId, String auctionWindowId,
                                     String status, boolean resultAvailable, String rejectionReason) {
         this(idempotencyKey, commandId, auctionWindowId, status, resultAvailable, rejectionReason,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     public static PromotionWebSocketBidAck from(
@@ -37,16 +38,17 @@ public record PromotionWebSocketBidAck(
                 response.decisionId(),
                 response.decisionVersion(),
                 response.bidAmount(),
-                response.decidedAt());
+                response.decidedAt(),
+                response.requiredAmount());
     }
 
     public static PromotionWebSocketBidAck rejected(String idempotencyKey, String rejectionReason) {
         return new PromotionWebSocketBidAck(idempotencyKey, null, null, "REJECTED", true,
-                rejectionReason, null, null, null, null);
+                rejectionReason, null, null, null, null, null);
     }
 
     public static PromotionWebSocketBidAck unavailable(String idempotencyKey, String rejectionReason) {
         return new PromotionWebSocketBidAck(idempotencyKey, null, null, "UNAVAILABLE", false,
-                rejectionReason, null, null, null, null);
+                rejectionReason, null, null, null, null, null);
     }
 }

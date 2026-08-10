@@ -37,15 +37,21 @@ public class PromotionSnapshotService {
         PromotionAuctionHotSnapshot hotSnapshot = redisSnapshotAdapter.snapshot(auctionWindowId);
         if (window != null && window.getStatus() == PromotionAuctionWindowStatus.SETTLED) {
             return new PromotionAuctionSnapshot(windowIdStr, status, allocationRanking(auctionWindowId),
-                    Instant.now(), hotSnapshot.decisionVersion(), windowEndAt);
+                    Instant.now(), hotSnapshot.decisionVersion(), windowEndAt,
+                    hotSnapshot.currentPriceCents(), hotSnapshot.winnerCampaignId(),
+                    hotSnapshot.bidCount(), hotSnapshot.rules());
         }
         List<PromotionRankingItem> hotRanking = hotSnapshot.ranking();
         if (!hotRanking.isEmpty()) {
             return new PromotionAuctionSnapshot(windowIdStr, status, hotRanking, Instant.now(),
-                    hotSnapshot.decisionVersion(), windowEndAt);
+                    hotSnapshot.decisionVersion(), windowEndAt,
+                    hotSnapshot.currentPriceCents(), hotSnapshot.winnerCampaignId(),
+                    hotSnapshot.bidCount(), hotSnapshot.rules());
         }
         return new PromotionAuctionSnapshot(windowIdStr, status, List.of(), Instant.now(),
-                hotSnapshot.decisionVersion(), windowEndAt);
+                hotSnapshot.decisionVersion(), windowEndAt,
+                hotSnapshot.currentPriceCents(), hotSnapshot.winnerCampaignId(),
+                hotSnapshot.bidCount(), hotSnapshot.rules());
     }
 
     private List<PromotionRankingItem> allocationRanking(long auctionWindowId) {

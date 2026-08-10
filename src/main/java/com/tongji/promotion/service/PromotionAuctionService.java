@@ -18,11 +18,10 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 窗口关闭时的 GSP 结算：按出价降序（同价按 id 升序）取前 M 名占 M 个位，
- * 每位成交价 = 下一个有效出价与保留价的较高者；winner 扣成交价、释放超额冻结，loser 全额释放。
- * <p>只有不低于保留价的「有效出价」才能中标：低于保留价的出价不占位、全额释放。
- * 由于 winner 必为有效出价（bidAmount &ge; reserve），且排序保证 nextBid &le; winner.bidAmount，
- * 故 clearingPrice = max(nextBid, reserve) &le; winner.bidAmount，绝不会扣超过已冻结额。</p>
+ * 窗口关闭时的英式第一价格结算（LEGACY_BROKER 排空窗口；REDIS_STREAM 窗口由
+ * PromotionDecisionProjectionService.settleWindow 结算）：按出价降序（同价按 id 升序）取首位为唯一赢家，
+ * 赢家付自己的最终出价（= 终态共享当前价），loser 全额释放。
+ * <p>由于英式首价恒 ≥ reserve+increment，第一价格 ≤ winner 冻结额，绝不会扣超额。</p>
  * <p>结算结果落 {@link PromotionSlotAllocation}，有效期 = 结算窗口结束后的下一个窗口周期。</p>
  */
 @Service

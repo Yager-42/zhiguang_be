@@ -4,6 +4,7 @@ import com.tongji.promotion.bprime.model.PromotionRankingItem;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 房间公共状态通知；高频更新携带增量，终场事件才携带完整排名。
@@ -22,14 +23,17 @@ public record PromotionAuctionRealtimeEvent(
         String windowStatus,
         List<PromotionRankingItem> ranking,
         List<PromotionBidDelta> bidDeltas,
+        Map<String, Object> details,
         Instant occurredAt
 ) {
     public static final String RANKING_DELTA = "RANKING_DELTA";
     public static final String WINDOW_CLOSED = "WINDOW_CLOSED";
+    public static final String AUCTION_EXTENDED = "AUCTION_EXTENDED";
 
     public PromotionAuctionRealtimeEvent {
         ranking = ranking == null ? List.of() : List.copyOf(ranking);
         bidDeltas = bidDeltas == null ? List.of() : List.copyOf(bidDeltas);
+        details = details == null ? Map.of() : Map.copyOf(details);
     }
 
     /**
@@ -46,6 +50,6 @@ public record PromotionAuctionRealtimeEvent(
             List<PromotionRankingItem> ranking,
             Instant occurredAt) {
         this(eventId, eventType, auctionWindowId, decisionId, decisionVersion, eventVersion,
-                eventVersion, eventVersion, windowStatus, ranking, List.of(), occurredAt);
+                eventVersion, eventVersion, windowStatus, ranking, List.of(), Map.of(), occurredAt);
     }
 }

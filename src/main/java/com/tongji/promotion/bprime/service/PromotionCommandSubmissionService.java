@@ -29,6 +29,9 @@ import java.util.concurrent.CompletableFuture;
 @Service
 public class PromotionCommandSubmissionService {
 
+    /** 2^53-1：Lua/Redis 金额上限（Go MAX_MONEY 同构）。 */
+    private static final long MAX_MONEY = 9007199254740991L;
+
     private final PromotionBidRouteRepository routeRepository;
     private final PromotionRedisDecisionAdapter decisionAdapter;
     private final PromotionPerformanceMetrics performanceMetrics;
@@ -91,6 +94,9 @@ public class PromotionCommandSubmissionService {
         if (bidAmount <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "bidAmount must be greater than 0");
         }
+        if (bidAmount > MAX_MONEY) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "bidAmount must not exceed 2^53-1");
+        }
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "idempotencyKey must not be blank");
         }
@@ -149,8 +155,9 @@ public class PromotionCommandSubmissionService {
     }
 
     /**
-     * 网关侧价格预拒：出价不高于本进程已见的最新接受价时本地返回 BID_NOT_HIGHER，
+     * 网关侧价格预拒：出价不高于本进程已见的窗口共享当前价时本地返回 BID_NOT_HIGHER，
      * 不进入 Lua 裁决。任何不确定（缓存缺失、margin 内、终态、幂等重试、Redis 异常）都放行 Lua。
+     * 本地预拒不带 requiredAmount（Go fast-reject 同构；只有 Lua 拒绝路径带）。
      */
     private SubmitPromotionBidCommandResponse fastReject(SubmissionContext context, PromotionBidRoute route,
                                                          String commandId) {
@@ -161,7 +168,7 @@ public class PromotionCommandSubmissionService {
                 route.windowEndAt().minusSeconds(properties.getFastRejectMarginSeconds()))) {
             return null;
         }
-        Long cachedPrice = priceCache.get(route.auctionWindowId(), context.campaignId());
+        Long cachedPrice = priceCache.get(route.auctionWindowId());
         if (cachedPrice == null || context.bidAmount() > cachedPrice) {
             return null;
         }
@@ -184,6 +191,7 @@ public class PromotionCommandSubmissionService {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -197,7 +205,13 @@ public class PromotionCommandSubmissionService {
                 decision.decisionId(),
                 decision.decisionVersion(),
                 decision.bidAmount(),
-                decision.decidedAt());
+                decision.decidedAt(),
+                requiredAmount(decision));
+    }
+
+    private Long requiredAmount(PromotionAuctionDecision decision) {
+        Object value = decision.payload().get("requiredAmount");
+        return value instanceof Number number ? number.longValue() : null;
     }
 
     private SubmitPromotionBidCommandResponse unavailable(String commandId, PromotionBidRoute route) {
@@ -207,6 +221,7 @@ public class PromotionCommandSubmissionService {
                 "UNAVAILABLE",
                 false,
                 ErrorCode.PROMOTION_AUCTION_PAUSED.getCode(),
+                null,
                 null,
                 null,
                 null,

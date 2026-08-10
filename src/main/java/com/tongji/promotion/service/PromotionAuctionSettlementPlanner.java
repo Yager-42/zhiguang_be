@@ -26,6 +26,7 @@ public class PromotionAuctionSettlementPlanner {
                 .sorted(Comparator.comparingLong(PromotionBid::getBidAmount).reversed()
                         .thenComparingLong(PromotionBid::getId))
                 .toList();
+        // 英式升价：每窗口恰好一个赢家（排名首位），winner 付自己的最终出价（第一价格）。
         int winners = winnerCount(window, ranked);
         List<PromotionAuctionSettlementPlan.Winner> winnerFacts = new ArrayList<>();
         List<PromotionBid> losers = new ArrayList<>();
@@ -53,16 +54,15 @@ public class PromotionAuctionSettlementPlanner {
     }
 
     private int winnerCount(PromotionAuctionWindow window, List<PromotionBid> ranked) {
-        return (int) ranked.stream()
-                .takeWhile(bid -> bid.getBidAmount() >= window.getReservePrice())
-                .limit(window.getSlotCount())
-                .count();
+        return ranked.isEmpty() ? 0 : 1;
     }
 
     private long clearingPrice(PromotionAuctionWindow window, List<PromotionBid> ranked, int slotIndex) {
-        long nextBid = (slotIndex + 1 < ranked.size()) ? ranked.get(slotIndex + 1).getBidAmount() : window.getReservePrice();
-        return Math.max(nextBid, window.getReservePrice());
+        // 第一价格：赢家付自己的最终出价（= 终态共享当前价）；无 GSP 次高价概念。
+        return ranked.get(slotIndex).getBidAmount();
     }
+
+
 
     private PromotionAuctionSettlementPlan.WalletEffect captureEffect(PromotionAuctionWindow window,
                                                                       PromotionBid bid,

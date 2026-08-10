@@ -41,7 +41,9 @@ public class PromotionDecisionFanoutService {
         try {
             switch (decision.type()) {
                 case "BID_ACCEPTED" -> publicUpdateCoalescer.enqueueBid(decision);
-                case "WINDOW_CLOSED" -> publicUpdateCoalescer.publishWindowClosed(withFinalRanking(decision));
+                case "AUCTION_EXTENDED" -> publicUpdateCoalescer.publishWindowExtended(decision);
+                case "AUCTION_SOLD", "AUCTION_NO_BID" ->
+                        publicUpdateCoalescer.publishWindowClosed(withFinalRanking(decision));
                 default -> throw new IllegalArgumentException(
                         "unsupported promotion Stream event: " + decision.type());
             }
