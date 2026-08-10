@@ -8,7 +8,7 @@ Define promotion auction realtime fanout, WebSocket routing, and snapshot recove
 
 The system SHALL deliver promotion auction realtime updates by consuming the Kafka promotion auction decision topic with an independent fanout consumer group. The fanout consumer SHALL run independently from the MySQL projection consumer and MUST NOT wait for projection checkpoint advancement before publishing user-facing realtime messages.
 
-The fanout consumer SHALL consume the same decision envelope used by projection. The outer envelope event type SHALL be `AUCTION_DECISION`; `BID_ACCEPTED`, `BID_REJECTED`, and `WINDOW_CLOSED` SHALL be distinguished by nested `decision.type`, not by separate topics or type-specific partitions.
+The fanout consumer SHALL consume the same decision envelope used by projection. The outer envelope event type SHALL be `AUCTION_DECISION`; `BID_ACCEPTED`, `BID_REJECTED`, `AUCTION_EXTENDED`, `AUCTION_SOLD`, and `AUCTION_NO_BID` SHALL be distinguished by nested `decision.type`, not by separate topics or type-specific partitions.
 
 #### Scenario: Accepted decision is fanned out
 - **WHEN** Redis Lua accepts a promotion bid command
@@ -59,10 +59,15 @@ The system SHALL publish realtime promotion auction events for public window cha
 - **AND** the event includes the command id, decision id, decision version, and outcome reason when rejected
 
 #### Scenario: Window closes
-- **WHEN** a close decision is logged for an auction window
+- **WHEN** a terminal decision (`AUCTION_SOLD` or `AUCTION_NO_BID`) is logged for an auction window
 - **THEN** the system publishes a terminal window event
-- **AND** the event is derived from the `WINDOW_CLOSED` decision payload
+- **AND** the event is derived from the terminal decision payload
 - **AND** clients can update the visible auction status without waiting for feed or search rendering
+
+#### Scenario: Window is extended
+- **WHEN** an anti-snipe extension decision (`AUCTION_EXTENDED`) is logged for an auction window
+- **THEN** the system publishes an extension event carrying the new window end time and extension count
+- **AND** clients can update the visible countdown without waiting for feed or search rendering
 
 ### Requirement: WebSocket routing SHALL separate public window topics and private creator outcomes
 
