@@ -22,6 +22,7 @@ public class LikeNotificationConsumer {
     private static final long WINDOW_MILLIS = 5 * 60 * 1000L;
     private static final Duration EVENT_DEDUPE_TTL = Duration.ofHours(6);
     private static final Duration BUCKET_TTL = Duration.ofMinutes(20);
+    static final String DUE_BUCKET_INDEX_KEY = "notif:like:bucket:due";
 
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
@@ -70,7 +71,7 @@ public class LikeNotificationConsumer {
         redisTemplate.opsForHash().put(bucketKey, "windowEndEpochMillis", String.valueOf(windowEnd));
         redisTemplate.opsForHash().put(bucketKey, "latestActorUserId", String.valueOf(event.getUserId()));
         redisTemplate.opsForHash().put(bucketKey, "latestEventAt", String.valueOf(event.getOccurredAt()));
-        redisTemplate.opsForValue().set("notif:like:bucket:index:" + bucketKey, "1", BUCKET_TTL);
+        redisTemplate.opsForZSet().add(DUE_BUCKET_INDEX_KEY, bucketKey, windowEnd);
         redisTemplate.expire(bucketKey, BUCKET_TTL);
         acknowledgment.acknowledge();
     }
