@@ -9,13 +9,12 @@
 ## 1. 架构总览
 
 ```
-docker compose（单命令，12 个服务）
+docker compose（单命令，10 个服务）
 ├── app:8080            ← 应用（多阶段 Dockerfile 构建，非 root，健康检查自动就绪）
 ├── mysql:3306          主存储 + outbox（首启自动灌 db/schema.sql）
-├── redis:6379          计数 SDS/位图、Feed 缓存、单飞协调
-├── kafka:9092/9094     canal-outbox / counter-events / comment-write / decision
+├── redis:6379          计数 SDS/位图、Feed 缓存、推广 Lua + Stream（AOF everysec）
+├── kafka:9092/9094     canal-outbox / counter-events / comment-write
 │                        （9092=容器内 app 用，9094=宿主机工具直连）
-├── rocketmq-namesrv:9876 + rocketmq-broker:10911   B' 竞价命令
 ├── cassandra:9042      feed_inbox / author_feed / 正文文本（首启自动灌 init.cql）
 ├── elasticsearch:9200  搜索索引（app 启动时自动建索引/回填）
 ├── minio:9000/9001     对象存储（控制台 9001，minioadmin/minioadmin）
@@ -32,10 +31,10 @@ docker compose（单命令，12 个服务）
 | 项 | 要求 | 说明 |
 |---|---|---|
 | Docker Desktop（WSL2 后端）或 WSL 内 Docker Engine | 运行中 | `docker version` 验证；`docker compose version` 需 ≥ 2.17（支持 service_completed_successfully） |
-| 内存 | ≥ 8GB（推荐 16GB） | ES 512M + Cassandra 512M + RocketMQ 4G 起 + MySQL/Kafka + app 2G |
+| 内存 | ≥ 8GB（推荐 16GB） | ES 512M + Cassandra 512M + MySQL/Kafka/Redis + app 2G |
 | Git Bash / WSL | 有 | 压测脚本（run.sh）依赖 bash |
 | Node.js（可选） | ≥ 18 | 仅灌种子数据（`gen_seed_cassandra.mjs`）需要；压测本身不需要 |
-| 端口空闲 | 8080/3306/6379/9092/9094/9876/10911/9042/9200/9000 | `netstat -an \| findstr "8080"` 检查 |
+| 端口空闲 | 8080/3306/6379/9092/9094/9042/9200/9000 | `netstat -an \| findstr "8080"` 检查 |
 
 ## 3. 一键部署
 
@@ -46,13 +45,13 @@ docker compose up -d --build
 
 - 首次执行：拉取 8 个中间件镜像 + 构建应用镜像（Maven 下载依赖）→ 约 10~30 分钟，取决于网络。
 - 之后执行：秒级（镜像已缓存，`--build` 可省略为 `docker compose up -d`）。
-- **依赖顺序自动处理**：compose 按健康检查等待——mysql/redis/kafka/rocketmq/cassandra/es/minio healthy → cassandra-init/minio-init 跑完建表/建桶 → app 启动。
+- **依赖顺序自动处理**：compose 按健康检查等待——mysql/redis/kafka/cassandra/es/minio healthy → cassandra-init/minio-init 跑完建表/建桶 → app 启动。
 
 **等全部就绪：**
 
 ```bash
 docker compose ps
-# 期望：12 个服务，mysql/redis/kafka/rocketmq-*/cassandra/elasticsearch/minio/app 全部 healthy
+# 期望：10 个服务，mysql/redis/kafka/cassandra/elasticsearch/minio/app 全部 healthy
 #       cassandra-init / minio-init 显示 Exited (0)（一次性初始化，属正常）
 docker compose logs -f app | tail -20   # 应用日志出现 "Started ZhiGuangApplication" 即完成
 ```
@@ -120,7 +119,7 @@ java -Xmx2g -XX:+UseG1GC -jar target/zhiguang-1.0-SNAPSHOT.jar
 |---|---|---|
 | `docker compose` 命令不存在 | compose v2 插件未启用 | Docker Desktop 设置里启用 Compose V2，或装 docker-compose-plugin |
 | 首次 up 卡在 build | Maven 下载依赖慢 | 等待；或配阿里云镜像加速 |
-| app 反复重启、日志报 RocketMQ 连接失败 | 等 namesrv/broker healthy 的竞态（罕见） | `docker compose logs app` 确认；`docker compose restart app` 重试 |
+| 推广竞价返回 `UNAVAILABLE` | Redis 不可达或热状态/Stream 版本不一致 | 查看 app 与 Redis 日志；修复后使用原幂等键重试 |
 | app 日志报 Cassandra 表不存在 | cassandra-init 未完成就启动（compose 版本不支持 service_completed_successfully） | 升级 compose ≥ 2.17；或手动 `docker compose run --rm cassandra-init` 后 `restart app` |
 | app 健康检查一直 starting | 某个中间件不可达 | `docker compose logs app` 看具体连接错误 |
 | 宿主机直连 Kafka 9092 失败 | 9092 的 advertised 是容器内地址 | 用 `localhost:9094` 或 `docker exec` 进容器操作 |

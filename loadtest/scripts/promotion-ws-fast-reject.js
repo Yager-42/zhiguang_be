@@ -1,6 +1,5 @@
-// Eliaaazzz-style high-activity workload: persistent WebSocket bidders repeatedly submit a bid
-// that the gateway's monotonic watermark can prove will lose. Accepted bids still use the
-// RocketMQ -> Redis Lua -> Kafka reliable path; this script measures the safe fast-reject lane.
+// Elia-style high-activity workload: persistent WebSocket bidders repeatedly submit a bid
+// that Redis Lua rejects under the campaign monotonic-bid rule.
 import http from 'k6/http';
 import ws from 'k6/ws';
 import { check, fail, sleep } from 'k6';
@@ -29,7 +28,8 @@ const maxTrackedPending = Number(__ENV.MAX_TRACKED_PENDING || 10000);
 const bidsSent = new Counter('promotion_ws_bid_sent');
 const bidsAcknowledged = new Counter('promotion_ws_bid_acknowledged');
 const bidsFastRejected = new Counter('promotion_ws_bid_fast_rejected');
-const bidsPublished = new Counter('promotion_ws_bid_published');
+const bidsAccepted = new Counter('promotion_ws_bid_accepted');
+const bidsUnavailable = new Counter('promotion_ws_bid_unavailable');
 const missingAcks = new Counter('promotion_ws_bid_missing_ack');
 const connectionFailures = new Counter('promotion_ws_connection_failure');
 const protocolErrors = new Rate('promotion_ws_protocol_error');
@@ -48,6 +48,7 @@ export const options = {
   },
   thresholds: {
     promotion_ws_connection_failure: ['count<1'],
+    promotion_ws_bid_missing_ack: ['count<1'],
     promotion_ws_protocol_error: ['rate<0.01'],
     promotion_ws_bid_ack_duration: ['p(95)<100', 'p(99)<300'],
   },
@@ -178,12 +179,19 @@ function recordAck(body, pending, onTrackedAck) {
     protocolErrors.add(true);
     return;
   }
+  const finalStatus = ack.status === 'ACCEPTED' || ack.status === 'REJECTED';
+  if ((!finalStatus && ack.status !== 'UNAVAILABLE') || ack.resultAvailable !== finalStatus) {
+    protocolErrors.add(true);
+    return;
+  }
   protocolErrors.add(false);
   bidsAcknowledged.add(1);
   if (ack.status === 'REJECTED' && ack.rejectionReason === 'BID_NOT_HIGHER') {
     bidsFastRejected.add(1);
-  } else if (ack.status === 'PUBLISHED') {
-    bidsPublished.add(1);
+  } else if (ack.status === 'ACCEPTED') {
+    bidsAccepted.add(1);
+  } else if (ack.status === 'UNAVAILABLE') {
+    bidsUnavailable.add(1);
   }
   const sentAt = pending[ack.idempotencyKey];
   if (sentAt !== undefined) {
@@ -261,7 +269,7 @@ function primeAuthoritativeWatermarks(tokens, setupRunId) {
   for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
     const ack = submitNativeSetupBid(tokens[tokenIndex], campaignBase + tokenIndex + 1,
       `prime-${setupRunId}-${tokenIndex}`, 'prime');
-    const primed = ack.status === 'PUBLISHED'
+    const primed = ack.status === 'ACCEPTED'
       || (ack.status === 'REJECTED' && ack.rejectionReason === 'BID_NOT_HIGHER');
     if (!primed) {
       fail(`setup prime failed for campaign index=${tokenIndex}: ack=${JSON.stringify(ack)}`);

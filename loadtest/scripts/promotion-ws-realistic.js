@@ -36,9 +36,10 @@ const totalDurationSeconds = steadySeconds + rampSeconds + peakSeconds + cooldow
 
 const bidsSent = new Counter('promotion_realistic_bid_sent');
 const bidsAcknowledged = new Counter('promotion_realistic_bid_acknowledged');
-const bidsPublished = new Counter('promotion_realistic_bid_published');
+const bidsAccepted = new Counter('promotion_realistic_bid_accepted');
 const bidsFastRejected = new Counter('promotion_realistic_bid_fast_rejected');
 const bidsOtherRejected = new Counter('promotion_realistic_bid_other_rejected');
+const bidsUnavailable = new Counter('promotion_realistic_bid_unavailable');
 const raiseBids = new Counter('promotion_realistic_behavior_raise');
 const staleBids = new Counter('promotion_realistic_behavior_stale');
 const retryBids = new Counter('promotion_realistic_behavior_retry');
@@ -147,8 +148,10 @@ export default function (data) {
         return;
       }
       const queue = pending[ack.idempotencyKey];
+      const finalStatus = ack.status === 'ACCEPTED' || ack.status === 'REJECTED';
       const valid = Array.isArray(queue) && queue.length > 0
-        && (ack.status === 'PUBLISHED' || ack.status === 'REJECTED');
+        && (finalStatus || ack.status === 'UNAVAILABLE')
+        && ack.resultAvailable === finalStatus;
       protocolErrors.add(!valid);
       if (!valid) {
         return;
@@ -160,10 +163,12 @@ export default function (data) {
       pendingCount--;
       ackDuration.add(Date.now() - sentAt);
       bidsAcknowledged.add(1);
-      if (ack.status === 'PUBLISHED') {
-        bidsPublished.add(1);
+      if (ack.status === 'ACCEPTED') {
+        bidsAccepted.add(1);
       } else if (ack.rejectionReason === 'BID_NOT_HIGHER') {
         bidsFastRejected.add(1);
+      } else if (ack.status === 'UNAVAILABLE') {
+        bidsUnavailable.add(1);
       } else {
         bidsOtherRejected.add(1, { reason: String(ack.rejectionReason || 'unknown') });
       }

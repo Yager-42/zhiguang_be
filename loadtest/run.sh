@@ -13,7 +13,7 @@
 #
 # 前置条件:
 #   - k6 已安装（https://k6.io/docs/getting-started/installation/）
-#   - docker compose 全栈已启动（mysql/redis/kafka/rocketmq/cassandra/es）
+#   - docker compose 全栈已启动（mysql/redis/kafka/cassandra/es）
 #   - 应用已启动（mvn spring-boot:run 或 IDE），且灌数后重启过一次（触发 ES 索引自回填）
 #   - Windows 请使用 Git Bash 或 WSL
 #
@@ -27,7 +27,7 @@
 #   USER_N=1000 POST_N=500 FOLLOW_PER_USER=20 LARGE_FOLLOWER_N=0
 #   VUS_LEVELS="100 300 600 1000" HOLD=4m
 #   BASELINE_SCRIPTS="feed counter"     # 只跑部分单链路
-#   PROMOTION 场景需 PROMOTION_BPRIME_ENABLED=true 且 RocketMQ 正常
+#   PROMOTION 场景需 PROMOTION_BPRIME_ENABLED=true 且 Redis AOF everysec 正常
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -41,6 +41,7 @@ fi
 BASE_URL="${BASE_URL:-$DEFAULT_BASE_URL}"
 RESULTS_DIR="${RESULTS_DIR:-results}"
 METRICS_DIR="$RESULTS_DIR/metrics"
+MYSQL_DATABASE="${MYSQL_DATABASE:-zhiguang}"
 mkdir -p "$RESULTS_DIR" "$METRICS_DIR"
 
 # 种子规模
@@ -70,7 +71,7 @@ SOAK_HOLD="${SOAK_HOLD:-2h}"
 # ---------- 工具 ----------
 log() { echo "[run.sh] $*"; }
 
-mysql_exec() { docker exec -i zhiguang-mysql mysql -uzhiguang -pzhiguang123456 zhiguang; }
+mysql_exec() { docker exec -i zhiguang-mysql mysql -uzhiguang -pzhiguang123456 "$MYSQL_DATABASE"; }
 
 node_run() {
   if command -v node >/dev/null 2>&1; then

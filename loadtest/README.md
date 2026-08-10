@@ -45,7 +45,7 @@ k6 run -e VUS=1 -e HOLD=1m scripts/mixed.js             # 冒烟：确认登录/
 
 ### 1.2 其他依赖
 
-- **Docker Desktop**（中间件全栈：mysql/redis/kafka/rocketmq/cassandra/es/minio）
+- **Docker Desktop**（中间件全栈：mysql/redis/kafka/cassandra/es/minio）
 - **JDK 21 + Maven**（应用本体；本机已备 `E:\idk\zhiguang_be\jdk-21`）
 - **Git Bash 或 WSL**（执行 run.sh 必需）
 - `loadtest/seed/node_modules` 已含 bcryptjs（种子密码哈希生成用），无需安装
@@ -77,7 +77,7 @@ MAVEN_OPTS="-Xmx2g -XX:+UseG1GC" mvn spring-boot:run   # JDK21 + Maven；或 IDE
 
 | 场景 | 需要开启 |
 |---|---|
-| 竞价 WebSocket 链路（scripts/promotion-ws-fast-reject.js / promotion-ws-capacity.js / promotion-ws-realistic.js） | `PROMOTION_BPRIME_ENABLED=true docker compose up -d`（容器）或启动参数（宿主直跑）；需 RocketMQ |
+| 竞价 WebSocket 链路（scripts/promotion-ws-fast-reject.js / promotion-ws-capacity.js / promotion-ws-realistic.js / promotion-ws-user-feedback.js） | `PROMOTION_BPRIME_ENABLED=true docker compose up -d`（容器）或启动参数（宿主直跑）；Redis 必须启用 AOF everysec |
 | 推荐混排（Gorse） | `docker compose --profile recommendation up -d gorse` + `GORSE_ENABLED=true` 重启 app（可选，默认关） |
 | fanout 全链路 | 需 Canal 开启的测试环境（本地 `canal.enabled=false`，只能压到写入 outbox 为止） |
 
@@ -147,18 +147,17 @@ k6 run -e RATE=200 -e VUS=400 -e HOLD=10m scripts/mixed.js
 
 ### 4.3.1 竞价 WebSocket 专项
 
-Eliaaazzz 风格的高活动 WebSocket 快拒场景默认使用原生 WebSocket 持久连接，在 setup 中先为每个 campaign
-完成一次 Redis Lua 权威接受并校验本地单调水位已生效，再以固定目标速率重复提交同价 bid：
+Elia 风格的高活动 WebSocket 快拒场景默认使用原生 WebSocket 持久连接，在 setup 中先为每个 campaign
+完成一次 Redis Lua 权威接受，再以固定目标速率重复提交同价 bid：
 
 ```bash
 k6 run -e VUS=100 -e RATE=20000 -e DURATION_SECONDS=30 \
   scripts/promotion-ws-fast-reject.js
 ```
 
-`promotion_ws_bid_sent` 是 WebSocket 入站量，`promotion_ws_bid_fast_rejected` 是通过 Redis 前置守卫后
-未进入 RocketMQ 的安全快拒，`promotion_ws_bid_published` 是进入可靠决策链路的请求，
-`promotion_ws_bid_ack_duration` 是发包到私有 ACK 的端到端延迟。该口径用于验证 20k bids/s 网关负载，
-不等于 Redis Lua + Kafka 的 `decision_qps`。发送窗口结束后默认保留 5 秒 ACK drain；稳态入站 QPS 必须按
+`promotion_ws_bid_sent` 是 WebSocket 入站量，`promotion_ws_bid_fast_rejected` 是 Redis Lua 的单调加价拒绝，
+`promotion_ws_bid_accepted` 是 Redis 原子更新并写入 Stream 的接受结果，`promotion_ws_bid_ack_duration` 是
+发包到最终私有 ACK 的端到端延迟。发送窗口结束后默认保留 5 秒 ACK drain；稳态入站 QPS 必须按
 `promotion_ws_bid_sent / DURATION_SECONDS` 计算，不能用包含 setup 和 drain 的 k6 Counter rate。设置
 `PROMOTION_WS_TRANSPORT=stomp` 可回归兼容通道，默认 `native` 对齐 Elia 的原生 WS 读循环与单写泵。
 
@@ -173,23 +172,21 @@ k6 run -e VUS=100 -e RATE=20000 -e DURATION_SECONDS=30 \
 对应阶段时长计算，不能使用包含 setup 和 ACK drain 的 k6 全局 counter rate。
 
 `promotion-ws-user-feedback.js` 是用户视角的主竞价场景。每个用户通过高活动原生 WebSocket 在同一连接
-订阅合并后的房间 `RANKING_DELTA`、接收私有收单 ACK 和最终 outcome，从 snapshot 初始化可见价格，
-经过稳定的个体反应时间和逐次轻微扰动后提交高于所见价格的 bid，并等待 `BID_CONFIRMED` 或
-`BID_REJECTED` 后才考虑下一次出价。公共 `eventVersion` 跳号时脚本会读取 snapshot 恢复本地排名。
+订阅合并后的房间 `RANKING_DELTA` 并接收最终 `ACCEPTED/REJECTED/UNAVAILABLE` ACK，从 snapshot 初始化可见价格，
+经过稳定的个体反应时间和逐次轻微扰动后提交高于所见价格的 bid，并等待最终 ACK 后才考虑下一次出价。
+公共事件携带 `[fromDecisionVersion,toDecisionVersion]`；脚本仅在该区间无法覆盖本地下一决策版本时读取 snapshot，合并和同 campaign 覆盖不算丢帧。
 `promotion_user_final_feedbacks / MEASURE_SECONDS` 是最终用户反馈 QPS，
-`promotion_user_final_feedback_duration` 是提交到最终反馈的延迟；
-`PUBLISHED` 仅计入入口 ACK，不能当作竞价完成。
+`promotion_user_final_feedback_duration` 是提交到最终反馈的延迟。验收门槛为反馈吞吐高于 1336.5 QPS、
+p95 低于 404ms、p99 低于 841ms，最终 ACK 超时与公共版本恢复次数均为 0。
 
 默认数据库存在历史窗口或 projection checkpoint 时，应创建独立测试 schema，并通过
 `docker compose -f docker-compose.yml -f loadtest/docker-compose.isolated.yml` 启动 app；
-`LOADTEST_DATASOURCE_URL` 指向该 schema。command/decision topic 和三个 consumer group 也必须使用唯一名称。
-压测完成后可将隔离 Kafka topic 从头输出并通过 `scripts/analyze-promotion-decision-latency.mjs` 计算
-`submittedAt -> decidedAt` 的真实决策 p95/p99 与停发后 drain，不能用 WebSocket ACK 延迟替代。
+`LOADTEST_DATASOURCE_URL` 指向该 schema。压测完成后同时记录 Redis 裁决、Stream 长度与 lag、MySQL 投影、
+公共 fanout、裁剪数量和停发后的 drain，并核对钱包与 allocation 一致性。
 
-应用重启会清空进程内单调水位。脚本会先通过原生 WebSocket 让每个 campaign 经权威链路接受一次
+脚本会先通过原生 WebSocket 让每个 campaign 经权威链路接受一次
 `PROMOTION_FAST_REJECT_BID_AMOUNT` 再开压；同一批种子已接受过该价格时，需提高该参数，或重新执行 seed
-刷新窗口。竞价提交不开放 REST；原生 WebSocket 与兼容 STOMP 都通过有界异步微批合并 Redis
-状态/幂等预检，并使用相同守卫与同一收单服务。Redis Lua 始终是接受竞价的唯一裁决者。
+刷新窗口。竞价提交不开放 REST；原生 WebSocket 与兼容 STOMP 使用同一有界提交池和 Redis Lua 裁决。
 
 首次执行或种子过期时先运行 `PROMOTION_CAMPAIGN_N=100 ./run.sh seed`。单房间场景的所有活动映射
 到同一竞价窗口；多房间场景在 FEED/SEARCH 两个独立窗口间分流。
@@ -283,7 +280,7 @@ P95/P99；只有明确测试冷启动时才设置 `ALLOW_COLD_MEASUREMENT=1`。�
 | 日志出现 `login failed` | 种子用户没灌 | `./run.sh seed` 后重试；确认 BASE_URL 正确 |
 | 全部 401 | access token 过期/种子密码不符 | 脚本会自动重登；确认 PASSWORD 与 seed 一致（默认 Loadtest@123） |
 | `relation.follow accepted` 检查失败、body=false | 令牌桶限流（100/1s/用户） | 正常现象，脚本已节流；看 `relation_rate_limited` 计数 |
-| 竞价 500 / commandId 空 | `PROMOTION_BPRIME_ENABLED` 未开、窗口过期或 broker 广播地址不可达 | 开启后重启应用；执行 `./run.sh seed` 刷新窗口（有效期 50 分钟）；确认 broker 广播 `rocketmq-broker:10911` |
+| 竞价返回 `UNAVAILABLE` | `PROMOTION_BPRIME_ENABLED` 未开、窗口过期或 Redis 不可用 | 开启后重启应用；执行 `./run.sh seed` 刷新窗口（有效期 50 分钟）；确认 Redis 健康与 AOF 配置 |
 | 搜索返回空 | ES 未回填或 IK 镜像未构建 | `docker compose up -d --build elasticsearch` 后重启应用；用 `curl :9200/zhiguang_content_index/_count` 验证 |
 | 详情 P99 异常高 | Cassandra 正文没灌 → 回源 content_url 外网 | 确保 `./run.sh seed` 的 cassandra 步骤执行成功 |
 | 计数读全为 0 且慢 | SDS 缺失触发重建（限速+单飞） | 正常路径；想压重建风暴就保持这样，想压稳态读先跑 `seed/warm_sds.sh` |
