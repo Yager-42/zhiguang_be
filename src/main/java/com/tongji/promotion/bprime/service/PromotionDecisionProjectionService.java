@@ -98,11 +98,16 @@ public class PromotionDecisionProjectionService {
     }
 
     private void applyDecision(PromotionAuctionDecision decision) {
-        if ("WINDOW_CLOSED".equals(decision.decisionType())) {
+        String type = decision.decisionType();
+        if ("AUCTION_EXTENDED".equals(type)) {
+            // 信息事件：反狙击延长只推进 checkpoint，不落 MySQL（Go AUCTION_EXTENDED 同构）。
+            return;
+        }
+        if ("AUCTION_SOLD".equals(type) || "AUCTION_NO_BID".equals(type)) {
             settleWindow(decision);
             return;
         }
-        if (!decision.accepted() || !"BID_ACCEPTED".equals(decision.decisionType())) {
+        if (!decision.accepted() || !"BID_ACCEPTED".equals(type)) {
             throw new IllegalArgumentException("unsupported promotion Stream event: " + decision.decisionType());
         }
         if (escrowMapper.updateCurrentHold(decision.auctionWindowId(), decision.campaignId(),
@@ -127,6 +132,15 @@ public class PromotionDecisionProjectionService {
                 .build());
     }
 
+    /**
+     * 英式第一价格结算（Go close_auction 同构，M8）：
+     * <ul>
+     *   <li>{@code AUCTION_SOLD}：终态决策携带唯一赢家与 winningAmount（= 最后共享价），
+     *   winner 从已授权总额 capture 该金额并 release 余量；其余 campaign 全部 release + markLost；
+     *   产出单条 allocation（slot_index=0，分配期起点 = 原 window_end_at，Q13）。</li>
+     *   <li>{@code AUCTION_NO_BID}：全部 release，不写 allocation。</li>
+     * </ul>
+     */
     private void settleWindow(PromotionAuctionDecision decision) {
         if (allocationMapper.countByAuctionWindowId(decision.auctionWindowId()) > 0) {
             return;
@@ -144,15 +158,54 @@ public class PromotionDecisionProjectionService {
                 .sorted(Comparator.comparingLong(PromotionBid::getBidAmount).reversed()
                         .thenComparingLong(PromotionBid::getId))
                 .toList();
-        int winnerCount = (int) ranked.stream()
-                .takeWhile(bid -> bid.getBidAmount() >= window.getReservePrice())
-                .limit(window.getSlotCount())
-                .count();
         Map<Long, PromotionBidEscrowRecord> escrows = escrowMapper.listActiveByWindowId(window.getId()).stream()
                 .collect(Collectors.toMap(PromotionBidEscrowRecord::getCampaignId, Function.identity()));
-        for (int index = 0; index < ranked.size(); index++) {
-            settleBid(window, ranked, escrows, winnerCount, index, decision.decidedAt());
-            escrows.remove(ranked.get(index).getCampaignId());
+        if ("AUCTION_NO_BID".equals(decision.decisionType())) {
+            for (PromotionBidEscrowRecord escrow : escrows.values()) {
+                release(escrow.getBidderUserId(), escrow.getAuthorizedAmount(),
+                        window.getId(), escrow.getCampaignId());
+            }
+            escrowMapper.markClosedByWindowId(window.getId(), decision.decidedAt());
+            windowMapper.markSettled(window.getId(), decision.decidedAt());
+            cacheService.refreshActiveAllocations(window.getResourceType(), decision.decidedAt());
+            return;
+        }
+        long winnerCampaignId = payloadLong(decision, "winnerCampaignId");
+        long winningAmount = payloadLong(decision, "winningAmount");
+        if (ranked.isEmpty() || ranked.getFirst().getCampaignId() != winnerCampaignId) {
+            throw new IllegalStateException("promotion terminal winner mismatch: auctionWindowId="
+                    + decision.auctionWindowId() + ", winnerCampaignId=" + winnerCampaignId
+                    + ", rankedTop=" + (ranked.isEmpty() ? "none" : ranked.getFirst().getCampaignId()));
+        }
+        for (PromotionBid bid : ranked) {
+            PromotionBidEscrowRecord escrow = escrows.remove(bid.getCampaignId());
+            long authorizedAmount = escrow == null ? bid.getBidAmount() : escrow.getAuthorizedAmount();
+            if (bid.getCampaignId() == winnerCampaignId) {
+                walletService.captureHoldToPlatform(bid.getBidderUserId(), winningAmount,
+                        WalletLedgerReason.PROMOTION_BPRIME_CAPTURE, WalletBusinessType.PROMOTION,
+                        settlementBusinessRef(window.getId(), bid.getCampaignId(), "capture"));
+                long releaseAmount = authorizedAmount - winningAmount;
+                if (releaseAmount > 0) {
+                    release(bid, releaseAmount, window.getId());
+                }
+                bidMapper.markWon(bid.getId(), 0, winningAmount);
+                allocationMapper.insert(PromotionSlotAllocation.builder()
+                        .id(idService.nextId(IdNamespace.ADMIN_OPERATION))
+                        .auctionWindowId(window.getId())
+                        .resourceType(window.getResourceType())
+                        .slotIndex(0)
+                        .campaignId(bid.getCampaignId())
+                        .postId(bid.getPostId())
+                        .bidderUserId(bid.getBidderUserId())
+                        .clearingPrice(winningAmount)
+                        .allocationStartAt(allocationStartAt)
+                        .allocationEndAt(allocationEndAt)
+                        .createdAt(decision.decidedAt())
+                        .build());
+            } else {
+                release(bid, authorizedAmount, window.getId());
+                bidMapper.markLost(bid.getId());
+            }
         }
         for (PromotionBidEscrowRecord unusedEscrow : escrows.values()) {
             release(unusedEscrow.getBidderUserId(), unusedEscrow.getAuthorizedAmount(),
@@ -163,43 +216,13 @@ public class PromotionDecisionProjectionService {
         cacheService.refreshActiveAllocations(window.getResourceType(), decision.decidedAt());
     }
 
-    private void settleBid(PromotionAuctionWindow window,
-                           List<PromotionBid> ranked,
-                           Map<Long, PromotionBidEscrowRecord> escrows,
-                           int winnerCount,
-                           int index,
-                           Instant settledAt) {
-        PromotionBid bid = ranked.get(index);
-        PromotionBidEscrowRecord escrow = escrows.get(bid.getCampaignId());
-        long authorizedAmount = escrow == null ? bid.getBidAmount() : escrow.getAuthorizedAmount();
-        if (index >= winnerCount) {
-            release(bid, authorizedAmount, window.getId());
-            bidMapper.markLost(bid.getId());
-            return;
+    private long payloadLong(PromotionAuctionDecision decision, String key) {
+        Object value = decision.payload().get(key);
+        if (value == null) {
+            throw new IllegalStateException("promotion terminal decision is missing payload field: "
+                    + key + ", type=" + decision.decisionType());
         }
-        long clearingPrice = clearingPrice(window, ranked, index);
-        walletService.captureHoldToPlatform(bid.getBidderUserId(), clearingPrice,
-                WalletLedgerReason.PROMOTION_BPRIME_CAPTURE, WalletBusinessType.PROMOTION,
-                settlementBusinessRef(window.getId(), bid.getCampaignId(), "capture"));
-        long releaseAmount = authorizedAmount - clearingPrice;
-        if (releaseAmount > 0) {
-            release(bid, releaseAmount, window.getId());
-        }
-        bidMapper.markWon(bid.getId(), index, clearingPrice);
-        allocationMapper.insert(PromotionSlotAllocation.builder()
-                .id(idService.nextId(IdNamespace.ADMIN_OPERATION))
-                .auctionWindowId(window.getId())
-                .resourceType(window.getResourceType())
-                .slotIndex(index)
-                .campaignId(bid.getCampaignId())
-                .postId(bid.getPostId())
-                .bidderUserId(bid.getBidderUserId())
-                .clearingPrice(clearingPrice)
-                .allocationStartAt(window.getWindowEndAt())
-                .allocationEndAt(window.getWindowEndAt().plusSeconds(
-                        window.getWindowEndAt().getEpochSecond() - window.getWindowStartAt().getEpochSecond()))
-                .createdAt(settledAt)
-                .build());
+        return Long.parseLong(String.valueOf(value));
     }
 
     private void release(PromotionBid bid, long amount, long windowId) {
@@ -213,13 +236,6 @@ public class PromotionDecisionProjectionService {
         walletService.releaseHold(bidderUserId, amount,
                 WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION,
                 settlementBusinessRef(windowId, campaignId, "release"));
-    }
-
-    private long clearingPrice(PromotionAuctionWindow window, List<PromotionBid> ranked, int index) {
-        long nextBid = index + 1 < ranked.size()
-                ? ranked.get(index + 1).getBidAmount()
-                : window.getReservePrice();
-        return Math.max(nextBid, window.getReservePrice());
     }
 
     private void requireNextVersion(PromotionAuctionDecision decision, long lastVersion) {

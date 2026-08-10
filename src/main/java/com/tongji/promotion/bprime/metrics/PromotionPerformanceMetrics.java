@@ -140,8 +140,12 @@ public class PromotionPerformanceMetrics {
     }
 
     private String result(PromotionAuctionDecision decision) {
-        if ("WINDOW_CLOSED".equals(decision.decisionType())) {
-            return "window_closed";
+        String type = decision.decisionType();
+        if ("AUCTION_SOLD".equals(type) || "AUCTION_NO_BID".equals(type)) {
+            return "terminal";
+        }
+        if ("AUCTION_EXTENDED".equals(type)) {
+            return "extended";
         }
         return decision.accepted() ? "accepted" : "rejected";
     }

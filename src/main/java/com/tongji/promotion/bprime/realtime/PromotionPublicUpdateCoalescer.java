@@ -88,18 +88,48 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
     /**
      * 先发布尚未刷新的增量，再同步发布不可覆盖的终场状态。
      *
-     * @param decision 类型为 {@code WINDOW_CLOSED} 的权威结果
+     * @param decision 类型为 {@code AUCTION_SOLD} / {@code AUCTION_NO_BID} 的终态权威结果
      */
     public void publishWindowClosed(PromotionAuctionDecision decision) {
         Objects.requireNonNull(decision, "decision must not be null");
-        if (!"WINDOW_CLOSED".equals(decision.type())) {
-            throw new IllegalArgumentException("terminal public event requires WINDOW_CLOSED decision");
+        if (!"AUCTION_SOLD".equals(decision.type()) && !"AUCTION_NO_BID".equals(decision.type())) {
+            throw new IllegalArgumentException("terminal public event requires AUCTION_SOLD/AUCTION_NO_BID decision");
         }
         WindowUpdates updates = windows.get(decision.auctionWindowId(), ignored -> new WindowUpdates());
         int deltaCount = updates.publishWindowClosed(decision, publisher);
         if (deltaCount > 0) {
             performanceMetrics.recordPublicUpdateBatch(deltaCount);
         }
+    }
+
+    /**
+     * 反狙击延长事件（低频，直接发布不合并）：携带新窗口结束时间与延长次数。
+     *
+     * @param decision 类型为 {@code AUCTION_EXTENDED} 的权威结果
+     */
+    public void publishWindowExtended(PromotionAuctionDecision decision) {
+        Objects.requireNonNull(decision, "decision must not be null");
+        if (!"AUCTION_EXTENDED".equals(decision.type())) {
+            throw new IllegalArgumentException("extension public event requires AUCTION_EXTENDED decision");
+        }
+        long nextEventVersion = decision.decisionVersion();
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("endAtEpochMs", decision.payload().getOrDefault("endAtEpochMs", 0L));
+        details.put("extendCount", decision.payload().getOrDefault("extendCount", 0));
+        publisher.publishPublic(new PromotionAuctionRealtimeEvent(
+                "decision-" + decision.decisionId() + ":public:" + nextEventVersion,
+                PromotionAuctionRealtimeEvent.AUCTION_EXTENDED,
+                decision.auctionWindowId(),
+                decision.decisionId(),
+                decision.decisionVersion(),
+                nextEventVersion,
+                decision.decisionVersion(),
+                decision.decisionVersion(),
+                "OPEN",
+                List.of(),
+                List.of(),
+                details,
+                decision.decidedAt()));
     }
 
     /** 启动基础 tick；各窗口按订阅数与待写槽压力决定实际刷新周期。 */
@@ -249,6 +279,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
                     "OPEN",
                     List.of(),
                     batch,
+                    Map.of(),
                     latestOccurredAt);
             publisher.publishPublic(event);
             deltas.clear();
@@ -262,6 +293,11 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
                 PromotionAuctionRealtimePublisher publisher) {
             int deltaCount = publishPending(publisher);
             long nextEventVersion = decision.decisionVersion();
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("terminalStatus", decision.type());
+            details.put("winnerCampaignId", decision.payload().getOrDefault("winnerCampaignId", ""));
+            details.put("winningAmount", decision.payload().getOrDefault("winningAmount", 0L));
+            details.put("actualEndAtEpochMs", decision.payload().getOrDefault("actualEndAtEpochMs", 0L));
             publisher.publishPublic(new PromotionAuctionRealtimeEvent(
                     "decision-" + decision.decisionId() + ":public:" + nextEventVersion,
                     PromotionAuctionRealtimeEvent.WINDOW_CLOSED,
@@ -274,6 +310,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
                     String.valueOf(decision.payload().getOrDefault("finalWindowStatus", "SETTLED")),
                     decision.ranking(),
                     List.of(),
+                    details,
                     decision.decidedAt()));
             pendingFromDecisionVersion = 0L;
             deltas.clear();

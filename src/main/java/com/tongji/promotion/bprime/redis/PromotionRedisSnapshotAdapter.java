@@ -46,7 +46,22 @@ public class PromotionRedisSnapshotAdapter {
                         item.path("bidAmount").asLong(),
                         item.path("rank").asInt()));
             }
-            return new PromotionAuctionHotSnapshot(root.path("decisionVersion").asLong(), List.copyOf(ranking));
+            JsonNode rules = root.path("rules");
+            return new PromotionAuctionHotSnapshot(
+                    root.path("decisionVersion").asLong(),
+                    List.copyOf(ranking),
+                    root.path("currentPriceCents").asLong(),
+                    root.path("status").asText("OPEN"),
+                    root.path("winnerCampaignId").asText(""),
+                    root.path("windowEndAtEpochMs").asLong(),
+                    root.path("bidCount").asLong(),
+                    new PromotionAuctionHotSnapshot.AuctionRules(
+                            rules.path("stepCents").asLong(),
+                            rules.hasNonNull("capCents") && rules.path("capCents").asLong() > 0
+                                    ? rules.path("capCents").asLong() : null,
+                            rules.path("reserveCents").asLong(),
+                            rules.path("maxExtensions").asInt(),
+                            rules.path("antiSnipeWindowMs").asLong()));
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to parse promotion Redis snapshot", exception);
         }

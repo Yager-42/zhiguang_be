@@ -8,11 +8,12 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 
 /**
- * 每 campaign 当前最高出价缓存（只升不降），供网关侧 fast-reject 使用。
+ * 每窗口共享当前价缓存（只升不降），供网关侧 fast-reject 使用（Go ws.go 窗口级缓存同构）。
  *
- * <p>由投影器在读取权威 Stream 时更新（单消费者、按版本序，天然单调）；缓存值只升不降，
- * 投影 lag 只会让缓存落后于 Lua 实际价——预拒方向安全（更保守）。窗口关闭后残留无害：
- * 预拒条件另有 {@code windowStatus==OPEN} 守卫。</p>
+ * <p>由投影器在读取权威 Stream 时更新（单消费者、按版本序，天然单调；BID_ACCEPTED 的
+ * bidAmount 即新当前价）；缓存值只升不降，投影 lag 只会让缓存落后于 Lua 实际价——预拒方向安全。
+ * 终态决策（AUCTION_SOLD/AUCTION_NO_BID）到达时 {@link #invalidate(long)} 清空，
+ * 下一出价放行 Lua 返回 WINDOW_CLOSED（避免 route 仍 OPEN 时误拒成 BID_NOT_HIGHER）。</p>
  */
 @Component
 public class PromotionBidPriceCache {
@@ -27,18 +28,19 @@ public class PromotionBidPriceCache {
     }
 
     /** 单调上升更新；现价 >= 新价时忽略。 */
-    public void update(long auctionWindowId, long campaignId, long bidAmount) {
-        String key = key(auctionWindowId, campaignId);
+    public void update(long auctionWindowId, long currentPriceCents) {
+        String key = String.valueOf(auctionWindowId);
         prices.asMap().compute(key, (ignored, current) ->
-                current == null || bidAmount > current ? bidAmount : current);
+                current == null || currentPriceCents > current ? currentPriceCents : current);
     }
 
-    /** 返回缓存价；无缓存返回 {@code null}。 */
-    public Long get(long auctionWindowId, long campaignId) {
-        return prices.getIfPresent(key(auctionWindowId, campaignId));
+    /** 返回缓存当前价；无缓存返回 {@code null}。 */
+    public Long get(long auctionWindowId) {
+        return prices.getIfPresent(String.valueOf(auctionWindowId));
     }
 
-    private String key(long auctionWindowId, long campaignId) {
-        return auctionWindowId + ":" + campaignId;
+    /** 终态决策到达时清空该窗口缓存（Go updateRoomStateFromEvent 同构）。 */
+    public void invalidate(long auctionWindowId) {
+        prices.invalidate(String.valueOf(auctionWindowId));
     }
 }

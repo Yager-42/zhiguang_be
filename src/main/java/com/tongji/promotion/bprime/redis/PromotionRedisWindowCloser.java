@@ -13,7 +13,7 @@ import java.time.Instant;
 import java.util.Optional;
 
 /**
- * 通过 Redis TIME 原子关窗并追加 WINDOW_CLOSED Stream 事件。
+ * 通过 Redis TIME 原子关窗并追加 AUCTION_SOLD / AUCTION_NO_BID Stream 终态事件。
  */
 @Component
 public class PromotionRedisWindowCloser {
@@ -48,6 +48,12 @@ public class PromotionRedisWindowCloser {
             ObjectNode node = (ObjectNode) objectMapper.readTree(payload);
             String status = node.path("status").asText();
             if ("NOT_DUE".equals(status)) {
+                return Optional.empty();
+            }
+            if ("ALREADY_TERMINAL".equals(status)) {
+                // cap-hit SOLD / NO_BID 已由 decision/close 终态裁决：从秒级扫描索引移除，幂等 no-op。
+                redisTemplate.opsForZSet().remove(
+                        PromotionAuctionRedisKeys.closingIndex(), String.valueOf(auctionWindowId));
                 return Optional.empty();
             }
             if ("UNAVAILABLE".equals(status)) {

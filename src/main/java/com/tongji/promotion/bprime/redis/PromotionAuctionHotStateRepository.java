@@ -3,6 +3,7 @@ package com.tongji.promotion.bprime.redis;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import com.tongji.promotion.model.PromotionAuctionWindow;
+import com.tongji.promotion.model.PromotionResourceType;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -32,17 +33,31 @@ public class PromotionAuctionHotStateRepository {
     }
 
     public void initialize(PromotionBidRoute route, long initialDecisionVersion) {
+        PromotionBPrimeProperties.AuctionRules rules = properties.auctionRules(
+                PromotionResourceType.valueOf(route.resourceType()));
+        // 旧 route JSON（迁移期残留，缺英式字段 → 0）按资源位配置兜底，防止 increment=0 全收。
+        long incrementCents = route.incrementCents() > 0 ? route.incrementCents() : rules.incrementCents();
+        long capPriceCents = route.capPriceCents() > 0 ? route.capPriceCents() : rules.capPriceCents();
+        long extendWindowSec = route.extendWindowSec() > 0 ? route.extendWindowSec() : rules.extendWindowSec();
+        long extendSec = route.extendSec() > 0 ? route.extendSec() : rules.extendSec();
+        int maxExtensions = route.maxExtensions() > 0 ? route.maxExtensions() : rules.maxExtensions();
         initialize(route.auctionWindowId(), route.windowEndAt().toEpochMilli(), route.reservePrice(),
-                route.slotCount(), route.resourceType(), initialDecisionVersion);
+                route.slotCount(), route.resourceType(), initialDecisionVersion,
+                incrementCents, capPriceCents, extendWindowSec, extendSec, maxExtensions);
     }
 
     public void initialize(PromotionAuctionWindow window, long initialDecisionVersion) {
+        PromotionBPrimeProperties.AuctionRules rules = properties.auctionRules(window.getResourceType());
         initialize(window.getId(), window.getWindowEndAt().toEpochMilli(), window.getReservePrice(),
-                window.getSlotCount(), window.getResourceType().name(), initialDecisionVersion);
+                window.getSlotCount(), window.getResourceType().name(), initialDecisionVersion,
+                rules.incrementCents(), rules.capPriceCents(),
+                rules.extendWindowSec(), rules.extendSec(), rules.maxExtensions());
     }
 
     private void initialize(long auctionWindowId, long windowEndAtEpochMs, long reservePrice,
-                            int slotCount, String resourceType, long initialDecisionVersion) {
+                            int slotCount, String resourceType, long initialDecisionVersion,
+                            long incrementCents, long capPriceCents, long extendWindowSec,
+                            long extendSec, int maxExtensions) {
         String result = redisTemplate.execute(initializeScript,
                 PromotionAuctionRedisKeys.initializationKeys(auctionWindowId),
                 String.valueOf(windowEndAtEpochMs),
@@ -50,7 +65,12 @@ public class PromotionAuctionHotStateRepository {
                 String.valueOf(slotCount),
                 resourceType,
                 String.valueOf(initialDecisionVersion),
-                String.valueOf(properties.getHotStateTtlSeconds()));
+                String.valueOf(properties.getHotStateTtlSeconds()),
+                String.valueOf(incrementCents),
+                String.valueOf(capPriceCents),
+                String.valueOf(extendWindowSec),
+                String.valueOf(extendSec),
+                String.valueOf(maxExtensions));
         requireSuccess(result, "initialize");
         Long registered = redisTemplate.opsForSet().add(
                 PromotionAuctionRedisKeys.activeStreams(), String.valueOf(auctionWindowId));

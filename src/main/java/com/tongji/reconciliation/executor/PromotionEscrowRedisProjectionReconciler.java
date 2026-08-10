@@ -1,6 +1,8 @@
 package com.tongji.reconciliation.executor;
 
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
+
 import com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper;
 import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
@@ -29,19 +31,22 @@ public class PromotionEscrowRedisProjectionReconciler implements Reconciler {
     private final PromotionProjectionCheckpointMapper checkpointMapper;
     private final PromotionAuctionHotStateRepository hotStateRepository;
     private final PromotionBidRouteRepository routeRepository;
+    private final PromotionBPrimeProperties properties;
 
     public PromotionEscrowRedisProjectionReconciler(PromotionBidEscrowMapper escrowMapper,
                                                      PromotionAuctionWindowMapper windowMapper,
                                                      PromotionCampaignMapper campaignMapper,
                                                      PromotionProjectionCheckpointMapper checkpointMapper,
                                                      PromotionAuctionHotStateRepository hotStateRepository,
-                                                     PromotionBidRouteRepository routeRepository) {
+                                                     PromotionBidRouteRepository routeRepository,
+                                                     PromotionBPrimeProperties properties) {
         this.escrowMapper = escrowMapper;
         this.windowMapper = windowMapper;
         this.campaignMapper = campaignMapper;
         this.checkpointMapper = checkpointMapper;
         this.hotStateRepository = hotStateRepository;
         this.routeRepository = routeRepository;
+        this.properties = properties;
     }
 
     @Override
@@ -60,6 +65,8 @@ public class PromotionEscrowRedisProjectionReconciler implements Reconciler {
         if (window == null || campaign == null) {
             throw new IllegalStateException("promotion escrow projection source is incomplete: " + task.getTargetId());
         }
+        PromotionBPrimeProperties.AuctionRules rules =
+                properties.auctionRules(window.getResourceType()).withBoundAntiSnipe();
         PromotionBidRoute route = new PromotionBidRoute(
                 campaign.getId(),
                 escrow.getBidderUserId(),
@@ -71,7 +78,12 @@ public class PromotionEscrowRedisProjectionReconciler implements Reconciler {
                 window.getStatus().name(),
                 window.getWindowEndAt(),
                 window.getSlotCount(),
-                window.getDecisionPath().name());
+                window.getDecisionPath().name(),
+                rules.incrementCents(),
+                rules.capPriceCents(),
+                rules.extendWindowSec(),
+                rules.extendSec(),
+                rules.maxExtensions());
         PromotionProjectionCheckpointRecord checkpoint = checkpointMapper.findByAuctionWindowId(window.getId());
         hotStateRepository.initialize(route, checkpoint == null ? 0L : checkpoint.getLastDecisionVersion());
         hotStateRepository.projectAuthorization(route);

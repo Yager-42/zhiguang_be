@@ -183,7 +183,12 @@ public class PromotionRedisStreamProjector implements MessageListener {
             items.forEach(item -> {
                 PromotionAuctionDecision decision = item.decision();
                 if ("BID_ACCEPTED".equals(decision.type()) && decision.accepted()) {
-                    priceCache.update(decision.auctionWindowId(), decision.campaignId(), decision.bidAmount());
+                    // 接受价即新共享当前价，单调上升（Go updateRoomStateFromEvent 同构）
+                    priceCache.update(decision.auctionWindowId(), decision.bidAmount());
+                }
+                if ("AUCTION_SOLD".equals(decision.type()) || "AUCTION_NO_BID".equals(decision.type())) {
+                    // 终态到达即清缓存：下一出价放行 Lua 返回 WINDOW_CLOSED，避免误拒成 BID_NOT_HIGHER
+                    priceCache.invalidate(decision.auctionWindowId());
                 }
                 if (fanoutService.publishDecision(decision)) {
                     metrics.recordRealtimeComplete(decision);
@@ -229,6 +234,9 @@ public class PromotionRedisStreamProjector implements MessageListener {
         redisTemplate.expire(PromotionAuctionRedisKeys.escrow(auctionWindowId), ttl);
         redisTemplate.expire(PromotionAuctionRedisKeys.events(auctionWindowId), ttl);
         redisTemplate.opsForSet().remove(PromotionAuctionRedisKeys.activeStreams(), String.valueOf(auctionWindowId));
+        // 兜底：settle 时若 closer 尚未 ZREM（如 cap-hit 后扫描器未跑），移除关窗索引成员。
+        redisTemplate.opsForZSet().remove(
+                PromotionAuctionRedisKeys.closingIndex(), String.valueOf(auctionWindowId));
     }
 
     private long streamVersion(String streamId) {
