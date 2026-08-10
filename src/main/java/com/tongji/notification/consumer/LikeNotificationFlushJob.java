@@ -11,6 +11,7 @@ import java.util.Set;
 
 @Service
 public class LikeNotificationFlushJob {
+    private static final int FLUSH_BATCH_SIZE = 1_000;
 
     private final StringRedisTemplate redisTemplate;
     private final LikeNotificationConsumer likeNotificationConsumer;
@@ -26,20 +27,27 @@ public class LikeNotificationFlushJob {
 
     @Scheduled(fixedDelay = 30000L)
     public void flush() {
-        Set<String> indexKeys = redisTemplate.keys("notif:like:bucket:index:notif:like:bucket:*");
-        if (indexKeys == null || indexKeys.isEmpty()) {
+        long now = Instant.now().toEpochMilli();
+        Set<String> bucketKeys = redisTemplate.opsForZSet().rangeByScore(
+                LikeNotificationConsumer.DUE_BUCKET_INDEX_KEY,
+                Double.NEGATIVE_INFINITY, now, 0, FLUSH_BATCH_SIZE);
+        if (bucketKeys == null || bucketKeys.isEmpty()) {
             return;
         }
-        long now = Instant.now().toEpochMilli();
-        for (String indexKey : indexKeys) {
-            String bucketKey = indexKey.substring("notif:like:bucket:index:".length());
+        for (String bucketKey : bucketKeys) {
             LikeNotificationBucket bucket = likeNotificationConsumer.readBucket(bucketKey);
-            if (bucket == null || bucket.getWindowEndEpochMillis() == null || bucket.getWindowEndEpochMillis() > now) {
+            if (bucket == null || bucket.getWindowEndEpochMillis() == null) {
+                redisTemplate.opsForZSet().remove(LikeNotificationConsumer.DUE_BUCKET_INDEX_KEY, bucketKey);
+                continue;
+            }
+            if (bucket.getWindowEndEpochMillis() > now) {
+                redisTemplate.opsForZSet().add(LikeNotificationConsumer.DUE_BUCKET_INDEX_KEY,
+                        bucketKey, bucket.getWindowEndEpochMillis());
                 continue;
             }
             notificationCommandService.createLikeNotification(bucket);
             redisTemplate.delete(bucketKey);
-            redisTemplate.delete(indexKey);
+            redisTemplate.opsForZSet().remove(LikeNotificationConsumer.DUE_BUCKET_INDEX_KEY, bucketKey);
         }
     }
 }
