@@ -37,7 +37,7 @@ class PromotionRedisDecisionAdapterTest {
                 """;
         List<String> keys = List.of(
                 "promotion:auction:{301}:state",
-                "promotion:auction:{301}:command:cmd-1",
+                "promotion:auction:{301}:commands",
                 "promotion:auction:{301}:ranking",
                 "promotion:auction:{301}:campaign:201",
                 "promotion:auction:{301}:escrow",

@@ -9,11 +9,14 @@ import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import com.tongji.promotion.bprime.redis.PromotionAuctionUnavailableException;
+import com.tongji.promotion.bprime.redis.PromotionBidPriceCache;
 import com.tongji.promotion.bprime.redis.PromotionBidRouteRepository;
 import com.tongji.promotion.bprime.redis.PromotionRedisDecisionAdapter;
-import org.junit.jupiter.api.BeforeEach;
+import org.springframework.data.redis.core.HashOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -26,6 +29,8 @@ import java.util.concurrent.CompletionException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,15 +43,23 @@ class PromotionCommandSubmissionServiceTest {
     private PromotionRedisDecisionAdapter decisionAdapter;
     @Mock
     private PromotionPerformanceMetrics performanceMetrics;
+    @Mock
+    private StringRedisTemplate redisTemplate;
+    @Mock
+    private HashOperations<String, Object, Object> hashOperations;
 
+    private PromotionBidPriceCache priceCache;
     private PromotionCommandSubmissionService service;
-
     @BeforeEach
     void setUp() {
         PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
         properties.setEnabled(true);
+        priceCache = new PromotionBidPriceCache(properties);
+        lenient().when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        lenient().when(hashOperations.hasKey(any(), any())).thenReturn(false);
         service = new PromotionCommandSubmissionService(
-                routeRepository, decisionAdapter, performanceMetrics, properties, Runnable::run);
+                routeRepository, decisionAdapter, performanceMetrics, properties, Runnable::run,
+                priceCache, redisTemplate);
     }
 
     @Test
@@ -99,6 +112,76 @@ class PromotionCommandSubmissionServiceTest {
                 .submitAsync(42L, 201L, 120L, "idem-1", Instant.now()).join())
                 .isInstanceOf(CompletionException.class)
                 .hasCauseInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void fastRejectsBidNotHigherThanCachedPrice() {
+        priceCache.update(301L, 201L, 120L);
+        when(routeRepository.find(201L)).thenReturn(route());
+
+        SubmitPromotionBidCommandResponse response = service
+                .submitAsync(42L, 201L, 120L, "idem-1", Instant.parse("2026-06-20T10:05:00Z")).join();
+
+        assertThat(response.status()).isEqualTo("REJECTED");
+        assertThat(response.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
+        assertThat(response.resultAvailable()).isTrue();
+        verify(decisionAdapter, never()).decide(any());
+    }
+
+    @Test
+    void fastRejectSkipsIdempotentRetryToLuaReplay() {
+        priceCache.update(301L, 201L, 120L);
+        when(hashOperations.hasKey(any(), any())).thenReturn(true);
+        when(routeRepository.find(201L)).thenReturn(route());
+        when(decisionAdapter.decide(any())).thenReturn(decision(true, null));
+
+        SubmitPromotionBidCommandResponse response = service
+                .submitAsync(42L, 201L, 120L, "idem-1", Instant.parse("2026-06-20T10:05:00Z")).join();
+
+        assertThat(response.status()).isEqualTo("ACCEPTED");
+        verify(decisionAdapter).decide(any());
+    }
+
+    @Test
+    void fastRejectSkipsBidInsideEndMargin() {
+        priceCache.update(301L, 201L, 120L);
+        when(routeRepository.find(201L)).thenReturn(route());
+        when(decisionAdapter.decide(any())).thenReturn(decision(true, null));
+
+        SubmitPromotionBidCommandResponse response = service
+                .submitAsync(42L, 201L, 120L, "idem-1", Instant.parse("2026-06-20T10:59:59Z")).join();
+
+        assertThat(response.status()).isEqualTo("ACCEPTED");
+        verify(decisionAdapter).decide(any());
+    }
+
+    @Test
+    void fastRejectSkipsClosedWindow() {
+        priceCache.update(301L, 201L, 120L);
+        PromotionBidRoute closedRoute = new PromotionBidRoute(201L, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L,
+                "CLOSED", Instant.parse("2026-06-20T11:00:00Z"), 1, "REDIS_STREAM");
+        when(routeRepository.find(201L)).thenReturn(closedRoute);
+        when(decisionAdapter.decide(any())).thenReturn(decision(true, null));
+
+        SubmitPromotionBidCommandResponse response = service
+                .submitAsync(42L, 201L, 120L, "idem-1", Instant.parse("2026-06-20T10:05:00Z")).join();
+
+        assertThat(response.status()).isEqualTo("ACCEPTED");
+        verify(decisionAdapter).decide(any());
+    }
+
+    @Test
+    void fastRejectSkipsOnRedisError() {
+        priceCache.update(301L, 201L, 120L);
+        when(redisTemplate.opsForHash()).thenThrow(new IllegalStateException("redis down"));
+        when(routeRepository.find(201L)).thenReturn(route());
+        when(decisionAdapter.decide(any())).thenReturn(decision(true, null));
+
+        SubmitPromotionBidCommandResponse response = service
+                .submitAsync(42L, 201L, 120L, "idem-1", Instant.parse("2026-06-20T10:05:00Z")).join();
+
+        assertThat(response.status()).isEqualTo("ACCEPTED");
+        verify(decisionAdapter).decide(any());
     }
 
     private PromotionBidRoute route() {

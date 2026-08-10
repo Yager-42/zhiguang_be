@@ -10,8 +10,12 @@ import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import com.tongji.promotion.bprime.model.PromotionCommandIdentity;
 import com.tongji.promotion.bprime.redis.PromotionAuctionUnavailableException;
+import com.tongji.promotion.bprime.redis.PromotionAuctionRedisKeys;
+import com.tongji.promotion.bprime.model.PromotionBidFastRejectionReason;
+import com.tongji.promotion.bprime.redis.PromotionBidPriceCache;
 import com.tongji.promotion.bprime.redis.PromotionBidRouteRepository;
 import com.tongji.promotion.bprime.redis.PromotionRedisDecisionAdapter;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
@@ -30,18 +34,24 @@ public class PromotionCommandSubmissionService {
     private final PromotionPerformanceMetrics performanceMetrics;
     private final PromotionBPrimeProperties properties;
     private final TaskExecutor submissionExecutor;
+    private final PromotionBidPriceCache priceCache;
+    private final StringRedisTemplate redisTemplate;
 
     public PromotionCommandSubmissionService(PromotionBidRouteRepository routeRepository,
                                              PromotionRedisDecisionAdapter decisionAdapter,
                                              PromotionPerformanceMetrics performanceMetrics,
                                              PromotionBPrimeProperties properties,
                                              @Qualifier("promotionBidSubmissionExecutor")
-                                             TaskExecutor submissionExecutor) {
+                                             TaskExecutor submissionExecutor,
+                                             PromotionBidPriceCache priceCache,
+                                             StringRedisTemplate redisTemplate) {
         this.routeRepository = routeRepository;
         this.decisionAdapter = decisionAdapter;
         this.performanceMetrics = performanceMetrics;
         this.properties = properties;
         this.submissionExecutor = submissionExecutor;
+        this.priceCache = priceCache;
+        this.redisTemplate = redisTemplate;
     }
 
     public CompletableFuture<SubmitPromotionBidCommandResponse> submitAsync(
@@ -101,6 +111,10 @@ public class PromotionCommandSubmissionService {
             if (!"REDIS_STREAM".equals(route.decisionPath())) {
                 return unavailable(commandId, route);
             }
+            SubmitPromotionBidCommandResponse fastRejected = fastReject(context, route, commandId);
+            if (fastRejected != null) {
+                return fastRejected;
+            }
             PromotionAuctionCommand command = command(context, route, commandId);
             PromotionAuctionDecision decision = decisionAdapter.decide(command);
             performanceMetrics.recordIngressAccepted();
@@ -132,6 +146,45 @@ public class PromotionCommandSubmissionService {
                 route.windowStatus(),
                 "BID",
                 context.submittedAt());
+    }
+
+    /**
+     * 网关侧价格预拒：出价不高于本进程已见的最新接受价时本地返回 BID_NOT_HIGHER，
+     * 不进入 Lua 裁决。任何不确定（缓存缺失、margin 内、终态、幂等重试、Redis 异常）都放行 Lua。
+     */
+    private SubmitPromotionBidCommandResponse fastReject(SubmissionContext context, PromotionBidRoute route,
+                                                         String commandId) {
+        if (!properties.isFastRejectEnabled() || !"OPEN".equals(route.windowStatus())) {
+            return null;
+        }
+        if (!context.submittedAt().isBefore(
+                route.windowEndAt().minusSeconds(properties.getFastRejectMarginSeconds()))) {
+            return null;
+        }
+        Long cachedPrice = priceCache.get(route.auctionWindowId(), context.campaignId());
+        if (cachedPrice == null || context.bidAmount() > cachedPrice) {
+            return null;
+        }
+        // 幂等优先：该 commandId 已裁决过（重试）→ 放行 Lua 重放原裁决
+        try {
+            if (Boolean.TRUE.equals(redisTemplate.opsForHash().hasKey(
+                    PromotionAuctionRedisKeys.commandBucket(route.auctionWindowId()), commandId))) {
+                return null;
+            }
+        } catch (RuntimeException exception) {
+            return null; // Redis 异常 → 放行 Lua（保守）
+        }
+        performanceMetrics.recordFastRejected();
+        return new SubmitPromotionBidCommandResponse(
+                commandId,
+                String.valueOf(route.auctionWindowId()),
+                "REJECTED",
+                true,
+                PromotionBidFastRejectionReason.BID_NOT_HIGHER.name(),
+                null,
+                null,
+                null,
+                null);
     }
 
     private SubmitPromotionBidCommandResponse response(PromotionAuctionDecision decision) {

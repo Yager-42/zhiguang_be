@@ -24,6 +24,7 @@ public class PromotionPerformanceMetrics {
 
     private final MeterRegistry registry;
     private final Counter ingressAccepted;
+    private final Counter ingressFastRejected;
     private final Counter webSocketAckRejected;
     private final Counter publicUpdateBatches;
     private final Counter publicUpdateDeltas;
@@ -43,6 +44,7 @@ public class PromotionPerformanceMetrics {
         this.registry = registry;
         this.ingressAccepted = registry.counter("promotion.bprime.ingress", "result", "accepted");
         this.webSocketAckRejected = registry.counter("promotion.bprime.websocket.bid.ack", "status", "rejected");
+        this.ingressFastRejected = registry.counter("promotion.bprime.ingress", "result", "fast-rejected");
         this.publicUpdateBatches = registry.counter("promotion.bprime.websocket.public.update", "result", "batch");
         this.publicUpdateDeltas = registry.counter("promotion.bprime.websocket.public.update", "result", "delta");
         this.publicUpdateOverwrites = registry.counter(
@@ -65,6 +67,11 @@ public class PromotionPerformanceMetrics {
     /** 记录一次 Redis Lua 最终裁决。 */
     public void recordIngressAccepted() {
         ingressAccepted.increment();
+    }
+
+    /** 记录一次网关本地预拒（未进入 Lua 裁决）。 */
+    public void recordFastRejected() {
+        ingressFastRejected.increment();
     }
 
     /** Records one private WebSocket bid acknowledgment. */

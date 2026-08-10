@@ -53,6 +53,9 @@ public class PromotionRedisWindowCloser {
             if ("UNAVAILABLE".equals(status)) {
                 throw new PromotionAuctionUnavailableException(node.path("rejectionReason").asText());
             }
+            // 关窗成功：从秒级扫描索引移除；幂等重放（closeResult）也走这里，ZREM 幂等无害。
+            redisTemplate.opsForZSet().remove(
+                    PromotionAuctionRedisKeys.closingIndex(), String.valueOf(auctionWindowId));
             node.put("decidedAt",
                     Instant.ofEpochMilli(node.path("decidedAtEpochMs").asLong()).toString());
             normalizeArray(node, "ranking");

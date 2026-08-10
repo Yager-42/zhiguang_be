@@ -57,6 +57,8 @@ public class PromotionAuctionHotStateRepository {
         if (registered == null) {
             throw new PromotionAuctionUnavailableException("failed to register active promotion Stream");
         }
+        redisTemplate.opsForZSet().add(PromotionAuctionRedisKeys.closingIndex(),
+                String.valueOf(auctionWindowId), windowEndAtEpochMs);
     }
 
     public void projectAuthorization(PromotionBidRoute route) {

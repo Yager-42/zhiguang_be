@@ -70,9 +70,10 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         assertThat(belowReserve.rejectionReason()).isEqualTo("BELOW_RESERVE");
         assertThat(belowReserve.decisionVersion()).isEqualTo(1L);
         assertThat(streamIds()).containsExactly("1-0");
-        Set<String> commandBuckets = redis.keys(PREFIX + ":commands:*");
-        assertThat(commandBuckets).hasSize(1);
-        assertThat(redis.getExpire(commandBuckets.iterator().next())).isPositive();
+        // T4：幂等改为单 key Hash + 字段级 TTL（HSETEX），key 本身无 TTL。
+        Set<String> commandKeys = redis.keys(PREFIX + ":commands");
+        assertThat(commandKeys).hasSize(1);
+        assertThat(redis.opsForHash().hasKey(commandKeys.iterator().next(), "cmd-1")).isTrue();
     }
 
     @Test
