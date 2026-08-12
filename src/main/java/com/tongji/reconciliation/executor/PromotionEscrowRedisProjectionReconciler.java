@@ -78,7 +78,6 @@ public class PromotionEscrowRedisProjectionReconciler implements Reconciler {
                 window.getStatus().name(),
                 window.getWindowEndAt(),
                 window.getSlotCount(),
-                window.getDecisionPath().name(),
                 rules.incrementCents(),
                 rules.capPriceCents(),
                 rules.extendWindowSec(),
