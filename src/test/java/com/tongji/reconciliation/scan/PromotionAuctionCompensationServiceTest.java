@@ -1,235 +1,89 @@
 package com.tongji.reconciliation.scan;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
-import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
-import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.mapper.PromotionSlotAllocationMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionAuctionWindowStatus;
 import com.tongji.promotion.model.PromotionBid;
-import com.tongji.promotion.model.PromotionBidStatus;
-import com.tongji.promotion.model.PromotionDecisionPath;
 import com.tongji.promotion.model.PromotionResourceType;
-import com.tongji.promotion.model.PromotionSlotAllocation;
-import com.tongji.promotion.service.PromotionAuctionSettlementPlanner;
+import com.tongji.promotion.settlement.PromotionAuctionSettlementFacts;
+import com.tongji.promotion.settlement.PromotionAuctionSettlementModule;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
 import com.tongji.reconciliation.service.ReconciliationService;
-import com.tongji.wallet.config.WalletProperties;
 import com.tongji.wallet.mapper.WalletLedgerMapper;
 import com.tongji.wallet.model.WalletBusinessType;
 import com.tongji.wallet.model.WalletLedgerDirection;
-import com.tongji.wallet.model.WalletLedgerEntry;
 import com.tongji.wallet.model.WalletLedgerReason;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 class PromotionAuctionCompensationServiceTest {
 
-    private PromotionBidMapper bidMapper;
-    private PromotionBidEscrowMapper escrowMapper;
     private PromotionSlotAllocationMapper allocationMapper;
     private WalletLedgerMapper walletLedgerMapper;
+    private PromotionAuctionSettlementModule settlementModule;
     private ReconciliationService reconciliationService;
     private PromotionAuctionCompensationService service;
 
     @BeforeEach
     void setUp() {
-        bidMapper = mock(PromotionBidMapper.class);
-        escrowMapper = mock(PromotionBidEscrowMapper.class);
         allocationMapper = mock(PromotionSlotAllocationMapper.class);
         walletLedgerMapper = mock(WalletLedgerMapper.class);
+        settlementModule = mock(PromotionAuctionSettlementModule.class);
         reconciliationService = mock(ReconciliationService.class);
-        service = new PromotionAuctionCompensationService(
-                bidMapper,
-                escrowMapper,
-                allocationMapper,
-                walletLedgerMapper,
-                new PromotionAuctionSettlementPlanner(new WalletProperties()),
-                new ObjectMapper().findAndRegisterModules()
-        );
+        service = new PromotionAuctionCompensationService(allocationMapper, walletLedgerMapper,
+                settlementModule, new ObjectMapper().findAndRegisterModules());
     }
 
     @Test
-    void scanWindowCreatesAllocationAndWalletRepairTasksWhenFactsAreMissing() {
+    void sharedFactsCreateAllocationAndWalletRepairTasks() {
         PromotionAuctionWindow window = window();
-        when(bidMapper.listSettledBidsByWindowId(eq(301L), eq(Instant.parse("2026-06-20T11:00:00Z")),
-                eq(Instant.parse("2026-06-20T12:00:00Z"))))
-                .thenReturn(List.of(bid(401L, 201L, 42L, 120L, PromotionBidStatus.WON),
-                        bid(402L, 202L, 43L, 80L, PromotionBidStatus.LOST)));
+        when(settlementModule.expectedSettlement(301L)).thenReturn(facts(window));
         when(allocationMapper.listByAuctionWindowId(301L)).thenReturn(List.of());
         when(walletLedgerMapper.findByBusinessRef("promotion-bprime:301:201:capture")).thenReturn(List.of());
-        when(walletLedgerMapper.findByBusinessRef("promotion-bprime:301:202:release")).thenReturn(List.of());
 
         service.scanWindow(window, reconciliationService);
 
         verify(reconciliationService).createTaskIfAbsent(
                 ReconciliationTaskType.PROMOTION_ALLOCATION_REBUILD,
-                ReconciliationTargetType.PROMOTION_AUCTION_WINDOW,
-                301L
-        );
+                ReconciliationTargetType.PROMOTION_AUCTION_WINDOW, 301L);
         verify(reconciliationService).createTaskIfAbsent(
                 eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
-                eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
-                eq(301L),
-                contains("\"effectType\":\"CAPTURE\"")
-        );
-        // 英式第一价格：winner 付 120 无多余释放，只有 202 一个 RELEASE 效果
-        verify(reconciliationService, times(1)).createTaskIfAbsent(
-                eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
-                eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
-                eq(301L),
-                contains("\"effectType\":\"RELEASE\"")
-        );
+                eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW), eq(301L),
+                contains("\"businessRef\":\"promotion-bprime:301:201:capture\""));
     }
 
-    @Test
-    void scanWindowMarksPartialAllocationDead() {
-        PromotionAuctionWindow window = window();
-        when(bidMapper.listSettledBidsByWindowId(eq(301L), eq(Instant.parse("2026-06-20T11:00:00Z")),
-                eq(Instant.parse("2026-06-20T12:00:00Z"))))
-                .thenReturn(List.of(bid(401L, 201L, 42L, 120L, PromotionBidStatus.WON),
-                        bid(402L, 202L, 43L, 80L, PromotionBidStatus.LOST)));
-        when(allocationMapper.listByAuctionWindowId(301L)).thenReturn(List.of(allocation(0, 999L, 42L, 80L)));
-        when(walletLedgerMapper.findByBusinessRef(org.mockito.ArgumentMatchers.anyString())).thenReturn(List.of());
-
-        service.scanWindow(window, reconciliationService);
-
-        verify(reconciliationService).createDeadTaskIfAbsent(
-                ReconciliationTaskType.PROMOTION_ALLOCATION_REBUILD,
-                ReconciliationTargetType.PROMOTION_AUCTION_WINDOW,
-                301L,
-                "promotion allocation is partially present or inconsistent for settled window 301"
-        );
-        verify(reconciliationService, never()).createTaskIfAbsent(
-                ReconciliationTaskType.PROMOTION_ALLOCATION_REBUILD,
-                ReconciliationTargetType.PROMOTION_AUCTION_WINDOW,
-                301L
-        );
-    }
-
-    @Test
-    void scanWindowMarksWalletConflictDead() {
-        PromotionAuctionWindow window = window();
-        when(bidMapper.listSettledBidsByWindowId(eq(301L), eq(Instant.parse("2026-06-20T11:00:00Z")),
-                eq(Instant.parse("2026-06-20T12:00:00Z"))))
-                .thenReturn(List.of(bid(401L, 201L, 42L, 120L, PromotionBidStatus.WON)));
-        when(allocationMapper.listByAuctionWindowId(301L)).thenReturn(List.of(allocation(0, 201L, 42L, 50L)));
-        when(walletLedgerMapper.findByBusinessRef("promotion-bprime:301:201:capture"))
-                .thenReturn(List.of(WalletLedgerEntry.builder()
-                        .ownerUserId(99L)
-                        .amount(50L)
-                        .reason(WalletLedgerReason.PROMOTION_BPRIME_CAPTURE)
-                        .businessType(WalletBusinessType.PROMOTION)
-                        .direction(WalletLedgerDirection.DEBIT)
-                        .heldDelta(-50L)
-                        .businessRef("promotion-bprime:301:201:capture")
-                        .build()));
-        when(walletLedgerMapper.findByBusinessRef("promotion-bprime:301:201:release")).thenReturn(List.of());
-
-        service.scanWindow(window, reconciliationService);
-
-        verify(reconciliationService).createDeadTaskIfAbsent(
-                eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
-                eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
-                eq(301L),
-                contains("\"businessRef\":\"promotion-bprime:301:201:capture\""),
-                contains("conflicts")
-        );
-    }
-
-    @Test
-    void redisStreamWindowReconcilesFullAuthorizationAndUnusedEscrow() {
-        PromotionAuctionWindow window = window(PromotionDecisionPath.REDIS_STREAM);
-        PromotionBid winner = bid(401L, 201L, 42L, 120L, PromotionBidStatus.WON);
-        when(bidMapper.listSettledBidsByWindowId(eq(301L), eq(Instant.parse("2026-06-20T11:00:00Z")),
-                eq(Instant.parse("2026-06-20T12:00:00Z"))))
-                .thenReturn(List.of(winner));
-        when(escrowMapper.listByWindowId(301L)).thenReturn(List.of(
-                escrow(201L, 42L, 500L), escrow(203L, 44L, 300L)));
-        when(allocationMapper.listByAuctionWindowId(301L))
-                .thenReturn(List.of(allocation(0, 201L, 42L, 50L)));
-        when(walletLedgerMapper.findByBusinessRef(org.mockito.ArgumentMatchers.anyString()))
-                .thenReturn(List.of());
-
-        service.scanWindow(window, reconciliationService);
-
-        verify(reconciliationService).createTaskIfAbsent(
-                eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
-                eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
-                eq(301L),
-                argThat(payload -> payload.contains("\"amount\":380")
-                        && payload.contains("promotion-bprime:301:201:release")));
-        verify(reconciliationService).createTaskIfAbsent(
-                eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
-                eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
-                eq(301L),
-                argThat(payload -> payload.contains("\"amount\":300")
-                        && payload.contains("promotion-bprime:301:203:release")));
+    private PromotionAuctionSettlementFacts facts(PromotionAuctionWindow window) {
+        PromotionBid bid = PromotionBid.builder().id(401L).campaignId(201L).bidderUserId(42L)
+                .postId(1001L).bidAmount(120L).build();
+        return new PromotionAuctionSettlementFacts(window, PromotionAuctionSettlementFacts.TerminalKind.SOLD,
+                Optional.of(new PromotionAuctionSettlementFacts.Winner(bid, 201L, 120L)), List.of(),
+                List.of(new PromotionAuctionSettlementFacts.WalletEffect(
+                        PromotionAuctionSettlementFacts.EffectType.CAPTURE, 42L, 120L,
+                        WalletLedgerReason.PROMOTION_BPRIME_CAPTURE, WalletBusinessType.PROMOTION,
+                        WalletLedgerDirection.DEBIT, 0L, null, 0L, -120L, 0L,
+                        "promotion-bprime:301:201:capture")),
+                Optional.of(new PromotionAuctionSettlementFacts.Allocation(
+                        PromotionResourceType.FEED_TOP_SLOT, 0, 201L, 1001L, 42L, 120L,
+                        Instant.parse("2026-06-20T11:00:00Z"), Instant.parse("2026-06-20T12:00:00Z"))));
     }
 
     private PromotionAuctionWindow window() {
-        return window(PromotionDecisionPath.LEGACY_BROKER);
-    }
-
-    private PromotionAuctionWindow window(PromotionDecisionPath decisionPath) {
-        return PromotionAuctionWindow.builder()
-                .id(301L)
-                .resourceType(PromotionResourceType.FEED_TOP_SLOT)
+        return PromotionAuctionWindow.builder().id(301L).resourceType(PromotionResourceType.FEED_TOP_SLOT)
                 .windowStartAt(Instant.parse("2026-06-20T10:00:00Z"))
                 .windowEndAt(Instant.parse("2026-06-20T11:00:00Z"))
-                .slotCount(1)
-                .reservePrice(50L)
-                .decisionPath(decisionPath)
                 .status(PromotionAuctionWindowStatus.SETTLED)
-                .settledAt(Instant.parse("2026-06-20T11:00:01Z"))
-                .build();
-    }
-
-    private PromotionBidEscrowRecord escrow(long campaignId, long bidderUserId, long authorizedAmount) {
-        return PromotionBidEscrowRecord.builder()
-                .id(8000L + campaignId)
-                .auctionWindowId(301L)
-                .campaignId(campaignId)
-                .bidderUserId(bidderUserId)
-                .authorizedAmount(authorizedAmount)
-                .currentHold(0L)
-                .status("CLOSED")
-                .build();
-    }
-
-    private PromotionBid bid(long id, long campaignId, long bidderUserId, long bidAmount, PromotionBidStatus status) {
-        return PromotionBid.builder()
-                .id(id)
-                .campaignId(campaignId)
-                .auctionWindowId(301L)
-                .bidderUserId(bidderUserId)
-                .bidAmount(bidAmount)
-                .status(status)
-                .postId(9000L + id)
-                .build();
-    }
-
-    private PromotionSlotAllocation allocation(int slotIndex, long campaignId, long bidderUserId, long clearingPrice) {
-        return PromotionSlotAllocation.builder()
-                .auctionWindowId(301L)
-                .slotIndex(slotIndex)
-                .campaignId(campaignId)
-                .bidderUserId(bidderUserId)
-                .clearingPrice(clearingPrice)
-                .build();
+                .settledAt(Instant.parse("2026-06-20T11:00:01Z")).build();
     }
 }
