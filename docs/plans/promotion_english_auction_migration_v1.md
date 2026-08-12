@@ -4,7 +4,7 @@
 |------|-----|
 | **plan_id** | `promotion-english-auction-migration-v1` |
 | **plan_version** | `0.1.0` |
-| **status** | **in-progress**（T1 契约文档已提交；T2 Lua 翻译进行中） |
+| **status** | **completed**（T1-T6 全部完成：契约文档、Lua、Java、测试、压测、报告；分 commit 提交，见 git log） |
 | **created** | 2026-08-10 |
 | **updated** | 2026-08-10 |
 | **code baseline** | Git `3081a96`（T1-T4 已提交，工作区干净）；`com.tongji.promotion.bprime.*`、`src/main/resources/redis/lua/promotion-auction-*.lua`、`loadtest/` |
