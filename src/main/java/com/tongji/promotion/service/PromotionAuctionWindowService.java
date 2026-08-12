@@ -7,7 +7,6 @@ import com.tongji.promotion.bprime.service.PromotionAuctionWindowCreatedEvent;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionAuctionWindowStatus;
-import com.tongji.promotion.model.PromotionDecisionPath;
 import com.tongji.promotion.model.PromotionResourceType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -95,7 +94,6 @@ public class PromotionAuctionWindowService {
                 .windowEndAt(endAt)
                 .slotCount(properties.slotCount(resourceType))
                 .reservePrice(properties.reservePrice(resourceType))
-                .decisionPath(PromotionDecisionPath.REDIS_STREAM)
                 .status(PromotionAuctionWindowStatus.OPEN)
                 .createdAt(now)
                 .updatedAt(now)

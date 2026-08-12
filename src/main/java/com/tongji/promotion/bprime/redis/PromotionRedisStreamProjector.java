@@ -122,7 +122,7 @@ public class PromotionRedisStreamProjector implements MessageListener {
             return;
         }
         try {
-            List<PromotionAuctionWindow> activeWindows = windowMapper.listActiveRedisStreamWindows();
+            List<PromotionAuctionWindow> activeWindows = windowMapper.listActiveWindows();
             if (activeWindows == null || activeWindows.isEmpty()) {
                 return;
             }
