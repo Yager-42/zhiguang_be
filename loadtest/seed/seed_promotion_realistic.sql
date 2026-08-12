@@ -14,13 +14,13 @@ INSERT INTO promotion_auction_window (
 VALUES (
     @realistic_window_id, 'FEED_TOP_SLOT', NOW(3) - INTERVAL 1 MINUTE,
     NOW(3) + INTERVAL __PROMOTION_WINDOW_MINUTES__ MINUTE,
-    10, 1, 'REDIS_STREAM', 'OPEN', NULL, NOW(3), NOW(3)
+    1, 1, 'REDIS_STREAM', 'OPEN', NULL, NOW(3), NOW(3)
 )
 ON DUPLICATE KEY UPDATE
     resource_type = 'FEED_TOP_SLOT',
     window_start_at = NOW(3) - INTERVAL 1 MINUTE,
     window_end_at = NOW(3) + INTERVAL __PROMOTION_WINDOW_MINUTES__ MINUTE,
-    slot_count = 10,
+    slot_count = 1,
     reserve_price = 1,
     decision_path = 'REDIS_STREAM',
     status = 'OPEN',
