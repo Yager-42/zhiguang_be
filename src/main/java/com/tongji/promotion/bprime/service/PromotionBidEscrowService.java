@@ -10,7 +10,6 @@ import com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper;
 import com.tongji.promotion.bprime.model.PromotionProjectionCheckpointRecord;
 import com.tongji.promotion.bprime.redis.PromotionAuctionHotStateRepository;
 import com.tongji.promotion.bprime.redis.PromotionBidRouteRepository;
-import com.tongji.promotion.model.PromotionDecisionPath;
 import com.tongji.reconciliation.mapper.ReconciliationTaskMapper;
 import org.springframework.stereotype.Service;
 
@@ -45,10 +44,6 @@ public class PromotionBidEscrowService {
         PromotionBidEscrowTransactionService.Authorization authorization =
                 transactionService.authorize(userId, campaignId, amount, now);
         PromotionBidEscrowRecord escrow = authorization.escrow();
-        if (authorization.window().getDecisionPath() != PromotionDecisionPath.REDIS_STREAM) {
-            throw new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED,
-                    "legacy broker auction window is draining");
-        }
         PromotionBPrimeProperties.AuctionRules rules = properties.auctionRules(
                 authorization.campaign().getResourceType()).withBoundAntiSnipe();
         PromotionBidRoute route = new PromotionBidRoute(
@@ -62,7 +57,6 @@ public class PromotionBidEscrowService {
                 authorization.window().getStatus().name(),
                 authorization.window().getWindowEndAt(),
                 authorization.window().getSlotCount(),
-                authorization.window().getDecisionPath().name(),
                 rules.incrementCents(),
                 rules.capPriceCents(),
                 rules.extendWindowSec(),

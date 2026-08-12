@@ -12,7 +12,6 @@ import com.tongji.promotion.mapper.PromotionCampaignMapper;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionCampaign;
 import com.tongji.promotion.model.PromotionCampaignStatus;
-import com.tongji.promotion.model.PromotionDecisionPath;
 import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
@@ -69,10 +68,6 @@ public class PromotionBidEscrowTransactionService {
         PromotionAuctionWindow window = windowMapper.findOpenWindow(campaign.getResourceType(), now);
         if (window == null) {
             throw new BusinessException(ErrorCode.PROMOTION_BID_WINDOW_CLOSED);
-        }
-        if (window.getDecisionPath() != PromotionDecisionPath.REDIS_STREAM) {
-            throw new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED,
-                    "legacy broker auction window is draining");
         }
         requireCampaignEligibleForWindow(campaign, window);
 

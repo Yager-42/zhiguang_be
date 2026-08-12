@@ -94,9 +94,6 @@ public class PromotionCommandSubmissionService {
         }
         String commandId = PromotionCommandIdentity.bidCommandId(
                 route.auctionWindowId(), context.userId(), context.idempotencyKey());
-        if (!"REDIS_STREAM".equals(route.decisionPath())) {
-            return CompletableFuture.completedFuture(unavailable(commandId, route));
-        }
         SubmitPromotionBidCommandResponse fastRejected = fastReject(context, route, commandId);
         if (fastRejected != null) {
             return CompletableFuture.completedFuture(fastRejected);
@@ -199,7 +196,7 @@ public class PromotionCommandSubmissionService {
         return unavailable(command.commandId(), new PromotionBidRoute(
                 command.campaignId(), command.bidderUserId(), command.postId(), command.auctionWindowId(),
                 command.resourceType(), command.reservePrice(), 0L, command.windowStatus(),
-                command.submittedAt(), 1, "REDIS_STREAM"));
+                command.submittedAt(), 1));
     }
 
     private SubmitPromotionBidCommandResponse unavailable(String commandId, PromotionBidRoute route) {

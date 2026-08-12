@@ -5,31 +5,20 @@ import com.tongji.common.id.IdService;
 import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
 import com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
-import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
 import com.tongji.promotion.bprime.model.PromotionDecisionProjectionItem;
 import com.tongji.promotion.bprime.model.PromotionProjectionCheckpointRecord;
-import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
-import com.tongji.promotion.mapper.PromotionSlotAllocationMapper;
-import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionBid;
 import com.tongji.promotion.model.PromotionBidStatus;
-import com.tongji.promotion.model.PromotionSlotAllocation;
-import com.tongji.promotion.service.PromotionAllocationCacheService;
-import com.tongji.wallet.model.WalletBusinessType;
-import com.tongji.wallet.model.WalletLedgerReason;
-import com.tongji.wallet.service.WalletService;
+import com.tongji.promotion.settlement.PromotionAuctionSettlementModule;
+import com.tongji.promotion.settlement.PromotionAuctionTerminalInput;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * 严格按 Redis Stream 版本将竞价事实投影到 MySQL。
@@ -40,26 +29,17 @@ public class PromotionDecisionProjectionService {
     private final PromotionProjectionCheckpointMapper checkpointMapper;
     private final PromotionBidEscrowMapper escrowMapper;
     private final PromotionBidMapper bidMapper;
-    private final PromotionAuctionWindowMapper windowMapper;
-    private final PromotionSlotAllocationMapper allocationMapper;
-    private final PromotionAllocationCacheService cacheService;
     private final IdService idService;
-    private final WalletService walletService;
+    private final PromotionAuctionSettlementModule settlementModule;
     public PromotionDecisionProjectionService(PromotionProjectionCheckpointMapper checkpointMapper,
                                               PromotionBidEscrowMapper escrowMapper,
                                               PromotionBidMapper bidMapper,
-                                              PromotionAuctionWindowMapper windowMapper,
-                                              PromotionSlotAllocationMapper allocationMapper,
-                                              WalletService walletService,
-                                              PromotionAllocationCacheService cacheService,
+                                              PromotionAuctionSettlementModule settlementModule,
                                               IdService idService) {
         this.checkpointMapper = checkpointMapper;
         this.escrowMapper = escrowMapper;
         this.bidMapper = bidMapper;
-        this.windowMapper = windowMapper;
-        this.allocationMapper = allocationMapper;
-        this.walletService = walletService;
-        this.cacheService = cacheService;
+        this.settlementModule = settlementModule;
         this.idService = idService;
     }
 
@@ -142,78 +122,13 @@ public class PromotionDecisionProjectionService {
      * </ul>
      */
     private void settleWindow(PromotionAuctionDecision decision) {
-        if (allocationMapper.countByAuctionWindowId(decision.auctionWindowId()) > 0) {
-            return;
-        }
-        PromotionAuctionWindow window = windowMapper.findById(decision.auctionWindowId());
-        if (window == null) {
-            throw new IllegalStateException("promotion auction window not found: " + decision.auctionWindowId());
-        }
-        Instant allocationStartAt = window.getWindowEndAt();
-        long spanSeconds = window.getWindowEndAt().getEpochSecond() - window.getWindowStartAt().getEpochSecond();
-        Instant allocationEndAt = allocationStartAt.plusSeconds(spanSeconds);
-        List<PromotionBid> ranked = bidMapper.listActiveBidsByWindowId(
-                        window.getId(), allocationStartAt, allocationEndAt)
-                .stream()
-                .sorted(Comparator.comparingLong(PromotionBid::getBidAmount).reversed()
-                        .thenComparingLong(PromotionBid::getId))
-                .toList();
-        Map<Long, PromotionBidEscrowRecord> escrows = escrowMapper.listActiveByWindowId(window.getId()).stream()
-                .collect(Collectors.toMap(PromotionBidEscrowRecord::getCampaignId, Function.identity()));
-        if ("AUCTION_NO_BID".equals(decision.decisionType())) {
-            for (PromotionBidEscrowRecord escrow : escrows.values()) {
-                release(escrow.getBidderUserId(), escrow.getAuthorizedAmount(),
-                        window.getId(), escrow.getCampaignId());
-            }
-            escrowMapper.markClosedByWindowId(window.getId(), decision.decidedAt());
-            windowMapper.markSettled(window.getId(), decision.decidedAt());
-            cacheService.refreshActiveAllocations(window.getResourceType(), decision.decidedAt());
-            return;
-        }
-        long winnerCampaignId = payloadLong(decision, "winnerCampaignId");
-        long winningAmount = payloadLong(decision, "winningAmount");
-        if (ranked.isEmpty() || ranked.getFirst().getCampaignId() != winnerCampaignId) {
-            throw new IllegalStateException("promotion terminal winner mismatch: auctionWindowId="
-                    + decision.auctionWindowId() + ", winnerCampaignId=" + winnerCampaignId
-                    + ", rankedTop=" + (ranked.isEmpty() ? "none" : ranked.getFirst().getCampaignId()));
-        }
-        for (PromotionBid bid : ranked) {
-            PromotionBidEscrowRecord escrow = escrows.remove(bid.getCampaignId());
-            long authorizedAmount = escrow == null ? bid.getBidAmount() : escrow.getAuthorizedAmount();
-            if (bid.getCampaignId() == winnerCampaignId) {
-                walletService.captureHoldToPlatform(bid.getBidderUserId(), winningAmount,
-                        WalletLedgerReason.PROMOTION_BPRIME_CAPTURE, WalletBusinessType.PROMOTION,
-                        settlementBusinessRef(window.getId(), bid.getCampaignId(), "capture"));
-                long releaseAmount = authorizedAmount - winningAmount;
-                if (releaseAmount > 0) {
-                    release(bid, releaseAmount, window.getId());
-                }
-                bidMapper.markWon(bid.getId(), 0, winningAmount);
-                allocationMapper.insert(PromotionSlotAllocation.builder()
-                        .id(idService.nextId(IdNamespace.ADMIN_OPERATION))
-                        .auctionWindowId(window.getId())
-                        .resourceType(window.getResourceType())
-                        .slotIndex(0)
-                        .campaignId(bid.getCampaignId())
-                        .postId(bid.getPostId())
-                        .bidderUserId(bid.getBidderUserId())
-                        .clearingPrice(winningAmount)
-                        .allocationStartAt(allocationStartAt)
-                        .allocationEndAt(allocationEndAt)
-                        .createdAt(decision.decidedAt())
-                        .build());
-            } else {
-                release(bid, authorizedAmount, window.getId());
-                bidMapper.markLost(bid.getId());
-            }
-        }
-        for (PromotionBidEscrowRecord unusedEscrow : escrows.values()) {
-            release(unusedEscrow.getBidderUserId(), unusedEscrow.getAuthorizedAmount(),
-                    window.getId(), unusedEscrow.getCampaignId());
-        }
-        escrowMapper.markClosedByWindowId(window.getId(), decision.decidedAt());
-        windowMapper.markSettled(window.getId(), decision.decidedAt());
-        cacheService.refreshActiveAllocations(window.getResourceType(), decision.decidedAt());
+        boolean sold = "AUCTION_SOLD".equals(decision.decisionType());
+        settlementModule.settle(new PromotionAuctionTerminalInput(
+                decision.auctionWindowId(),
+                sold ? PromotionAuctionTerminalInput.Kind.SOLD : PromotionAuctionTerminalInput.Kind.NO_BID,
+                sold ? payloadLong(decision, "winnerCampaignId") : null,
+                sold ? payloadLong(decision, "winningAmount") : null,
+                decision.decidedAt()));
     }
 
     private long payloadLong(PromotionAuctionDecision decision, String key) {
@@ -225,18 +140,7 @@ public class PromotionDecisionProjectionService {
         return Long.parseLong(String.valueOf(value));
     }
 
-    private void release(PromotionBid bid, long amount, long windowId) {
-        release(bid.getBidderUserId(), amount, windowId, bid.getCampaignId());
-    }
 
-    private void release(long bidderUserId, long amount, long windowId, long campaignId) {
-        if (amount <= 0) {
-            return;
-        }
-        walletService.releaseHold(bidderUserId, amount,
-                WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION,
-                settlementBusinessRef(windowId, campaignId, "release"));
-    }
 
     private void requireNextVersion(PromotionAuctionDecision decision, long lastVersion) {
         if (decision.previousVersion() != lastVersion || decision.decisionVersion() != lastVersion + 1) {
@@ -278,9 +182,6 @@ public class PromotionDecisionProjectionService {
         return "promotion-bprime:escrow:" + decision.auctionWindowId() + ":" + decision.campaignId();
     }
 
-    private String settlementBusinessRef(long windowId, long campaignId, String effect) {
-        return "promotion-bprime:" + windowId + ":" + campaignId + ":" + effect;
-    }
 
     private static final class ProjectionState {
         private String lastDecisionId;
