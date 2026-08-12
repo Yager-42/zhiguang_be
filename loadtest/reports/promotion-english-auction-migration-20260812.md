@@ -78,3 +78,41 @@ wsl docker run --rm --add-host=host.docker.internal:host-gateway \
   -e PROMOTION_CAMPAIGN_BASE=4200000 -e PROMOTION_EXPECTED_WINDOW_ID=8800001 \
   grafana/k6:latest run /scripts/promotion-ws-realistic.js
 ```
+
+## 补充：英式真实形态场景（2026-08-12，预算分布 + 端到端延迟 + 负载下结算）
+
+针对首轮场景的批判性审查（QPS 为配置产物、接受/结算路径空转、无端到端延迟指标）实现的第二版场景：
+
+| 设计项 | 实现 |
+|---|---|
+| 1. 预算分布 | `PROMOTION_ESCROW_MIN/MAX`（默认 500-5000）每 VU 均匀取样；`PROMOTION_ESCROW_AMOUNT` 显式设置时退回固定预算 |
+| 3. 端到端感知延迟 | `promotion_realistic_public_delta_duration`：接受 → 该出价对应的 RANKING_DELTA 到达本连接（按 campaignId+bidAmount 关联待确认出价） |
+| 4. 尾段结算 | seed 窗口 span 3min（`__PROMOTION_WINDOW_MINUTES__=2`），压测 150s 覆盖窗口到期 → close.lua → 第一价格结算 |
+
+### 结果（VUS=500，150s：steady 15 / ramp 30 / peak 60 / cooldown 45）
+
+| 指标 | 值 | 说明 |
+|---|---:|---|
+| 出价 / ack | 588,138 / 588,138 | 100% ack，missing **0** |
+| 接受 | **33** | 预算分布让价格持续爬升（~4930 收敛），接受路径被全程压力 |
+| ack p95 / p99 | 6ms / 15ms | |
+| **端到端广播 p95 / p99** | **299ms / 300ms** | 接受 → RANKING_DELTA 到达；上限 = 公共增量合并器 flush（100-250ms）+ 投影/网络 |
+| settled_events | 500/500 | 全部 VU 收到 WINDOW_CLOSED 终局广播 |
+| 公共事件 / 价格更新 | 10,476 / 14,960 | |
+| 预拒占比 | 99.994% | required 台阶语义下的自然形态（低出价必拒） |
+| 进 Lua 比例 | 服务端 decision/ingress 同首轮形态 | |
+
+**负载下结算验证**（压测结束后 20s 查 MySQL）：
+
+| 检查项 | 结果 |
+|---|---|
+| 窗口状态 | SETTLED |
+| allocation | 1 条（slot_index=0，campaign 4200094，**clearing_price=4929 = 终态共享价（第一价格）**） |
+| escrow | 500 条全部 CLOSED |
+| wallet_ledger | 1 capture + 500 release（winner capture + 余量释放 + loser 全释放），金额守恒 |
+
+### 该场景暴露的环境/脚本问题（已修复）
+
+1. **wallet_ledger 历史残留 vs 窗口 id 复用**：seed 固定窗口 8800001，而 8 月 10 日基线压测的同 id 窗口已写入 500 条 `promotion-bprime:8800001:*:release`（amount=1000）。8 月 12 日新预算（500-5000）结算时同 ref 幂等组不匹配（`WALLET_DUPLICATE_BUSINESS_REF`，按设计抛错）→ settle 死循环重试。**代码幂等判等按契约工作**；压测重置清单必须包含 `DELETE FROM wallet_ledger/wallet_business_ref WHERE business_ref LIKE 'promotion-bprime:8800001:%'`（生产窗口 id 唯一，无此场景）。
+2. **missing_ack=4**：压测尾段 socket.close 时在途出价丢 ack（0.0007%）。修复：尾段停发（最后 5s 不发新出价）→ missing 归零。
+3. 反狙击延长在 3 分钟窗口下未触发（接受集中在早期、endAt-now>10s）；延长链路已由 Lua EVAL/集成测试覆盖。
