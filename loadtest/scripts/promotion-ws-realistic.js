@@ -1,4 +1,7 @@
 // Stateful single-room auction workload with persistent native WebSocket connections.
+// English realistic form: per-VU escrow budget distribution (prices keep climbing, accept path
+// stays loaded), end-to-end public delta latency (accept -> RANKING_DELTA arrival), and a short
+// window so the run tail drives close/settle under load.
 // The request mix models raises, stale views, idempotent retries, double submits, and escrow failures.
 import http from 'k6/http';
 import ws from 'k6/ws';
@@ -15,7 +18,16 @@ const bidderVus = Number(__ENV.VUS || 500);
 const campaignPoolSize = Number(__ENV.PROMOTION_CAMPAIGN_POOL_SIZE || bidderVus);
 const campaignBase = Number(__ENV.PROMOTION_CAMPAIGN_BASE || 4200000);
 const expectedWindowId = String(__ENV.PROMOTION_EXPECTED_WINDOW_ID || '8800001');
-const escrowAmount = Number(__ENV.PROMOTION_ESCROW_AMOUNT || 1000);
+// PROMOTION_ESCROW_AMOUNT 显式设置时所有 VU 固定预算（兼容旧场景）；
+// 否则每 VU 从 [ESCROW_MIN, ESCROW_MAX] 均匀取样——预算差异让共享价持续爬升、
+// 接受/投影/广播路径被全程压力（全等预算下价格 10 秒收敛为纯拒绝形态）
+const escrowAmount = __ENV.PROMOTION_ESCROW_AMOUNT !== undefined
+  ? Number(__ENV.PROMOTION_ESCROW_AMOUNT) : null;
+const escrowMin = Number(__ENV.PROMOTION_ESCROW_MIN || 500);
+const escrowMax = Number(__ENV.PROMOTION_ESCROW_MAX || 5000);
+function budgetFor(vuIndex) {
+  return escrowAmount !== null ? escrowAmount : randomInt(escrowMin, escrowMax);
+}
 const steadySeconds = Number(__ENV.STEADY_SECONDS || 20);
 const rampSeconds = Number(__ENV.RAMP_SECONDS || 20);
 const peakSeconds = Number(__ENV.PEAK_SECONDS || 15);
@@ -60,6 +72,9 @@ const protocolErrors = new Rate('promotion_ws_protocol_error');
 const ackDuration = new Trend('promotion_realistic_ack_duration', true);
 const publicEvents = new Counter('promotion_realistic_public_events');
 const deltaUpdates = new Counter('promotion_realistic_shared_price_updates');
+// 端到端感知延迟：接受 -> 该出价对应的 RANKING_DELTA 到达本连接（竞价体验的核心指标）
+const publicDeltaDuration = new Trend('promotion_realistic_public_delta_duration', true);
+const settledEvents = new Counter('promotion_realistic_settled_events');
 
 export const options = {
   setupTimeout: '10m',
@@ -78,22 +93,25 @@ export const options = {
     promotion_ws_connection_failure: ['count<1'],
     promotion_ws_protocol_error: ['rate<0.01'],
     promotion_realistic_ack_duration: ['p(95)<200', 'p(99)<500'],
+    promotion_realistic_public_delta_duration: ['p(95)<1000', 'p(99)<2000'],
   },
 };
 
 export function setup() {
   validateConfiguration();
   const tokens = loginUsers(bidderVus);
-  const auctionWindowId = authorizeEscrows(tokens);
+  const escrowBudgets = [];
+  const auctionWindowId = authorizeEscrows(tokens, escrowBudgets);
   if (auctionWindowId !== expectedWindowId) {
     fail(`expected auction window ${expectedWindowId}, but escrow selected ${auctionWindowId}`);
   }
-  return { tokens, runId: String(Date.now()), auctionWindowId };
+  return { tokens, runId: String(Date.now()), auctionWindowId, escrowBudgets };
 }
 
 export default function (data) {
   const token = data.tokens[(vu.idInTest - 1) % data.tokens.length];
   const campaignId = campaignBase + ((vu.idInTest - 1) % campaignPoolSize) + 1;
+  const escrowBudget = data.escrowBudgets[(vu.idInTest - 1) % data.escrowBudgets.length];
   const wsUrl = BASE_URL.replace(/^http/, 'ws') + '/ws/promotion-auction-native';
   const pending = {};
   let pendingCount = 0;
@@ -106,6 +124,9 @@ export default function (data) {
   let startedAt = 0;
   let connectionFailureRecorded = false;
   let subscribed = false;
+  // 本 VU 待确认出价的发送记录（campaignId -> [{sentAt, bidAmount}]），
+  // 与 RANKING_DELTA 中自己 campaign 的 delta 关联测端到端广播延迟
+  const pendingByCampaign = {};
 
   const response = ws.connect(wsUrl, {
     headers: { Authorization: `Bearer ${token}` },
@@ -125,6 +146,10 @@ export default function (data) {
         if (elapsedMs >= totalDurationSeconds * 1000) {
           return;
         }
+        // 尾段停发（留给在途 ack 清空）：避免 socket.close 时在途出价丢 ack（missing_ack）
+        if (elapsedMs >= (totalDurationSeconds - 5) * 1000) {
+          return;
+        }
         const currentRate = rateAt(elapsedMs / 1000);
         const sendProbability = (currentRate / bidderVus) * (sendIntervalMs / 1000);
         if (Math.random() >= sendProbability) {
@@ -132,7 +157,7 @@ export default function (data) {
         }
 
         const generated = nextPayload(data.runId, campaignId, sequence + 1,
-          sharedPrice, previousBid, lastPayload);
+          sharedPrice, previousBid, lastPayload, escrowBudget);
         sequence++;
         previousBid = generated.previousBid;
         lastPayload = generated.lastPayload;
@@ -149,6 +174,15 @@ export default function (data) {
         }
         pending[idempotencyKey].push(Date.now());
         pendingCount++;
+        if (pendingByCampaign[campaignId] === undefined) {
+          pendingByCampaign[campaignId] = [];
+        }
+        pendingByCampaign[campaignId].push({
+          sentAt: Date.now(), bidAmount: generated.payload.bidAmount,
+        });
+        if (pendingByCampaign[campaignId].length > 100) {
+          pendingByCampaign[campaignId].shift();
+        }
         socket.send(JSON.stringify(generated.payload));
         bidsSent.add(1);
       }, sendIntervalMs);
@@ -178,13 +212,28 @@ export default function (data) {
               sharedPrice = amount;
               deltaUpdates.add(1);
             }
+            // 端到端延迟：自己 campaign 的接受价出现在公共广播中 → 关联最早同额出价
+            if (String(delta.campaignId) === String(campaignId)) {
+              const mine = pendingByCampaign[campaignId];
+              if (mine) {
+                for (let index = 0; index < mine.length; index++) {
+                  if (mine[index].bidAmount === amount) {
+                    publicDeltaDuration.add(Date.now() - mine[index].sentAt);
+                    mine.splice(index, 1);
+                    break;
+                  }
+                }
+              }
+            }
           }
-        } else if (parsed.eventType === 'WINDOW_CLOSED'
-            && Array.isArray(parsed.ranking) && parsed.ranking.length > 0) {
-          const amount = Number(parsed.ranking[0].bidAmount);
-          if (Number.isFinite(amount) && amount > sharedPrice) {
-            sharedPrice = amount;
-            deltaUpdates.add(1);
+        } else if (parsed.eventType === 'WINDOW_CLOSED') {
+          settledEvents.add(1);
+          if (Array.isArray(parsed.ranking) && parsed.ranking.length > 0) {
+            const amount = Number(parsed.ranking[0].bidAmount);
+            if (Number.isFinite(amount) && amount > sharedPrice) {
+              sharedPrice = amount;
+              deltaUpdates.add(1);
+            }
           }
         }
         return;
@@ -236,14 +285,14 @@ export default function (data) {
   }
 }
 
-function nextPayload(runId, campaignId, nextSequence, sharedPrice, previousBid, lastPayload) {
+function nextPayload(runId, campaignId, nextSequence, sharedPrice, previousBid, lastPayload, escrowBudget) {
   const choice = Math.random() * 100;
   const newKey = `real-${runId}-${vu.idInTest}-${nextSequence}`;
   const current = Math.max(sharedPrice, 0);
   if (choice < raisePercent) {
     // 知情对抗：出当前共享价 + 随机台阶；首出价（尚未观察到价格）用 reserve+increment 起步区间
     const basePrice = current === 0 ? randomInt(101, 300) : current;
-    const raised = Math.min(escrowAmount, basePrice + randomInt(raiseMin, raiseMax));
+    const raised = Math.min(escrowBudget, basePrice + randomInt(raiseMin, raiseMax));
     const payload = bidPayload(campaignId, raised, newKey);
     return { behavior: 'raise', payload, knownBid: raised, previousBid: current, lastPayload: payload };
   }
@@ -262,7 +311,7 @@ function nextPayload(runId, campaignId, nextSequence, sharedPrice, previousBid, 
     return { behavior: 'double', payload, knownBid: current, previousBid, lastPayload: payload };
   }
   // 预算不足：授权额 +1；价格低于授权时仍可接受，高于时 ESCROW_INSUFFICIENT
-  const payload = bidPayload(campaignId, escrowAmount + 1, newKey);
+  const payload = bidPayload(campaignId, escrowBudget + 1, newKey);
   return { behavior: 'insufficient', payload, knownBid: current, previousBid, lastPayload: payload };
 }
 
@@ -340,16 +389,18 @@ function loginUsers(count) {
   return tokens;
 }
 
-function authorizeEscrows(tokens) {
+function authorizeEscrows(tokens, escrowBudgets) {
   let selectedWindowId = null;
   for (let offset = 0; offset < tokens.length; offset += loginBatchSize) {
     const requests = [];
     const batchEnd = Math.min(offset + loginBatchSize, tokens.length);
     for (let tokenIndex = offset; tokenIndex < batchEnd; tokenIndex++) {
+      const amount = budgetFor(tokenIndex);
+      escrowBudgets.push(amount);
       requests.push([
         'POST',
         `${BASE_URL}/api/v1/promotions/campaigns/${campaignBase + tokenIndex + 1}/escrow`,
-        JSON.stringify({ amount: escrowAmount }),
+        JSON.stringify({ amount }),
         {
           headers: { Authorization: `Bearer ${tokens[tokenIndex]}`, 'Content-Type': 'application/json' },
           tags: { name: 'setup.promotion.escrow' },
