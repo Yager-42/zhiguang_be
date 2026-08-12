@@ -48,7 +48,7 @@
 ## 结论
 
 - 英式升价迁移在知情对抗负载下：**ack p95 10ms→3ms、missing 0、UNAVAILABLE 0、公共事件流与共享价认知闭环验证通过**；预拒 99.997% 为预算收敛后的自然形态（required=current+increment 语义下所有低于台阶的出价都被 fast-reject 或 Lua 拒绝）。
-- 迁移正确性由 601 个单测/集成测试（全绿）+ 65 用例 Lua EVAL 矩阵 + 13 用例 Redis 集成测试背书。
+- ack p95 **10ms→3ms**：网关窗口级 fast-reject（`bidAmount <= cached currentPrice`）拦截注定失败出价，Lua 调用量从 100% 降到 **62.9%**（服务端计数：decision 101,005 / ingress 160,635，网关本地预拒 37.1%）。
 - 尚未实测：cap 一口价生产流量（cap=0 默认禁用，EVAL/集成测试已覆盖 300 cap 场景）；反狙击延长的实时事件端到端（Lua/集成测试已覆盖）。
 
 ## 复现命令
