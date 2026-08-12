@@ -4,6 +4,7 @@ SET @realistic_window_id := __PROMOTION_WINDOW_ID__;
 SET @realistic_campaign_base := __PROMOTION_CAMPAIGN_BASE__;
 SET @realistic_campaign_n := __PROMOTION_CAMPAIGN_N__;
 SET @realistic_user_base := __USER_ID_BASE__;
+SET @realistic_user_pool_n := __USER_POOL_N__;
 SET @realistic_post_base := __POST_ID_BASE__;
 SET @realistic_post_n := __POST_N__;
 
@@ -38,7 +39,7 @@ WITH RECURSIVE seq AS (
 )
 SELECT
     @realistic_campaign_base + i,
-    @realistic_user_base + i,
+    @realistic_user_base + ((i - 1) % @realistic_user_pool_n) + 1,
     @realistic_post_base + ((i - 1) % @realistic_post_n) + 1,
     'FEED_TOP_SLOT',
     'ACTIVE',
