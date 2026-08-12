@@ -116,3 +116,20 @@ wsl docker run --rm --add-host=host.docker.internal:host-gateway \
 1. **wallet_ledger 历史残留 vs 窗口 id 复用**：seed 固定窗口 8800001，而 8 月 10 日基线压测的同 id 窗口已写入 500 条 `promotion-bprime:8800001:*:release`（amount=1000）。8 月 12 日新预算（500-5000）结算时同 ref 幂等组不匹配（`WALLET_DUPLICATE_BUSINESS_REF`，按设计抛错）→ settle 死循环重试。**代码幂等判等按契约工作**；压测重置清单必须包含 `DELETE FROM wallet_ledger/wallet_business_ref WHERE business_ref LIKE 'promotion-bprime:8800001:%'`（生产窗口 id 唯一，无此场景）。
 2. **missing_ack=4**：压测尾段 socket.close 时在途出价丢 ack（0.0007%）。修复：尾段停发（最后 5s 不发新出价）→ missing 归零。
 3. 反狙击延长在 3 分钟窗口下未触发（接受集中在早期、endAt-now>10s）；延长链路已由 Lua EVAL/集成测试覆盖。
+
+## 补充：上限压测（2026-08-12，Lua 裁决吞吐拐点）
+
+目标：找到实现的实际吞吐上限（而非场景设定速率）。方法：关闭网关 fast-reject（`PROMOTION_BPRIME_FAST_REJECT_ENABLED=false`，compose 暴露该开关 + `docker commit` 保留新 jar 后 `force-recreate`），`SEND_INTERVAL_MS=5`，预算 5000-50000 保持接受路径持续，双 k6 实例（各 500 VU、campaign 池 1000 分半）突破单实例注入端瓶颈。
+
+| 级别 | 注入（sent/s） | 服务端 decision | ack p95 / p99 | 结论 |
+|---|---:|---:|---:|---|
+| 单实例 10k 目标 | 4,199/s | 4,199/s（100% 进 Lua） | 373ms / 435ms | **k6 单实例注入端上限 ~4.2k/s**（非服务端）；该速率下已开始排队 |
+| 双实例 2×10k | 7,789/s（A 3,913 + B 3,876） | **~9.4k/s**（差分 499,790/53s） | **1.6s / 1.78s** | **服务端 Lua 裁决饱和**：Redis 单线程同 slot 串行 ~110μs/次 ≈ 9k/s 硬顶，超量排队 |
+
+**结论**：
+- **当前实现（单实例、单 Redis、窗口同 slot 串行 Lua）裁决上限 ≈ 9k/s**；超过后 ack p99 从 15ms 量级恶化到 >1.5s（排队）。
+- 4.2k/s 时延迟仍好（p95 6ms）——日常负载远低于上限；9k/s 是单 Redis 单点理论边界（decision.lua 每脚本 ~20 命令：TYPE×5 + HMGET 14 字段 + XREVRANGE + TIME + HSET + HEXPIRE），**扩容方向 = 多 Redis 分片（跨窗口 hash slot 并行）而非单点优化**。
+- fast-reject 开启时（生产形态），网关拦截吸收 ~60-90% 无效出价，Lua 实际承压远低于 9k/s——上限压测的 9k/s 是"纯裁决"能力。
+- 双实例注入时客户端 missing=0、UNAVAILABLE=0——排队不丢包，延迟恶化是唯一信号。
+
+**复现要点**：`PROMOTION_BPRIME_FAST_REJECT_ENABLED=false` 需 compose 重建（已加入 `docker-compose.yml` env 映射）；seed 模板新增 `__USER_POOL_N__`（campaign creator 在用户池内循环，支持 campaign_n > 用户池）。
