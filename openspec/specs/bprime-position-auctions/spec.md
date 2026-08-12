@@ -80,38 +80,41 @@ The system SHALL expose current position auction snapshot from Redis hot state w
 
 ### Requirement: Position auction decisions SHALL feed projection and fanout independently
 
-The system SHALL run final MySQL projection and realtime fanout as separate consumers of the Kafka decision topic. Projection SHALL build final allocation, settlement/wallet effects, final window status, and checkpoints. Fanout SHALL publish display events. Neither consumer SHALL be the authority for the other.
+The system SHALL run final MySQL projection and realtime fanout independently from the Redis Stream decision log. Projection SHALL build final allocation, settlement/wallet effects, final window status, and checkpoints. Fanout SHALL publish display events. Neither consumer SHALL be the authority for the other.
 
 #### Scenario: Same decision feeds two consumers
-- **WHEN** a promotion auction decision is appended to Kafka
-- **THEN** the projection consumer reads it when needed to update final MySQL projection and checkpoints
-- **AND** the fanout consumer reads it to publish realtime display events
-- **AND** both consumers use the Kafka decision id and decision version for idempotency
+- **WHEN** a promotion auction decision is appended to Redis Stream
+- **THEN** projection reads it to update final MySQL projection and checkpoints
+- **AND** fanout reads it to publish realtime display events
+- **AND** both use decision version for idempotency
 
 #### Scenario: Fanout fails after decision append
-- **WHEN** the fanout consumer fails to publish a realtime event
-- **THEN** MySQL projection can still consume and apply the decision
+- **WHEN** fanout fails to publish a realtime event
+- **THEN** MySQL projection can still consume and apply the Stream decision
 - **AND** client recovery remains possible through snapshot
 
-### Requirement: Closed position auction SHALL project only final results to MySQL
+### Requirement: Redis terminal decisions SHALL be the production settlement authority
 
-The system SHALL project final promotion auction results to MySQL when a terminal decision (`AUCTION_SOLD` or `AUCTION_NO_BID`) is consumed. Final projection SHALL include the single winner, slot allocation, settlement/wallet effects, final window status, and projection checkpoint. Rejected bid decisions and transient ranking updates SHALL remain in Kafka and Redis hot state, not per-decision MySQL rows.
+The system SHALL project final promotion auction results to MySQL only when Redis Stream `AUCTION_SOLD` or `AUCTION_NO_BID` is consumed. A single promotion settlement module SHALL own deterministic facts and the transactional settlement write set. The outer projection transaction SHALL retain checkpoint ownership so settlement writes and checkpoint commit or roll back together.
 
 #### Scenario: Accepted decision is projected
-- **WHEN** a `BID_ACCEPTED` decision is consumed by projection
-- **THEN** system upserts the lightweight `promotion_bid` fact for campaign, auction window, bidder, bid amount, command id, decision id, and projection source
-- **AND** applies the wallet hold state needed by the accepted bid
-- **AND** advances projection checkpoint
-- **AND** does not create slot allocation or feed/search-visible commercial placement before window close
+- **WHEN** a `BID_ACCEPTED` decision is consumed
+- **THEN** projection upserts the lightweight `promotion_bid` fact and updates escrow current hold
+- **AND** advances the projection checkpoint
+- **AND** does not create slot allocation or invoke wallet hold
 
-#### Scenario: Window close decision is projected
-- **WHEN** a terminal decision (`AUCTION_SOLD` or `AUCTION_NO_BID`) is consumed by projection
-- **AND** the decision payload contains the winner campaign, winning amount (first price), actual end time, wallet effects, allocation window, and final window status
-- **THEN** system writes the single slot allocation for the winning campaign (`AUCTION_SOLD` only)
-- **AND** writes final settlement or wallet effects needed by the business
-- **AND** records final window status and projection checkpoint
-- **AND** does not read Redis hot ranking as final settlement authority
-- **AND** does not require every prior accepted or rejected bid decision to already exist as a MySQL row
+#### Scenario: Sold decision is projected
+- **WHEN** an `AUCTION_SOLD` decision is consumed
+- **THEN** settlement locks the window row and validates the terminal winner and first price against MySQL bid and active escrow facts
+- **AND** writes winner capture, authorization releases, one allocation, bid and escrow transitions, and guarded `SETTLED` state
+- **AND** the outer transaction writes the checkpoint atomically with those effects
+- **AND** matching duplicate delivery is idempotent while conflicting delivery fails
+
+#### Scenario: No-bid decision is projected
+- **WHEN** an `AUCTION_NO_BID` decision is consumed
+- **THEN** settlement releases every active escrow and writes no allocation
+- **AND** marks the window settled and advances checkpoint in the same transaction
+- **AND** does not consult Redis ranking or WebSocket state to invent a winner
 
 #### Scenario: Rejected decision is consumed
 - **WHEN** a rejected bid decision is consumed by projection

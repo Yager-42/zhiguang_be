@@ -1,25 +1,24 @@
 ## ADDED Requirements
 
-### Requirement: B' compensation SHALL repair settled-window facts only
-The system SHALL run B' promotion auction compensation only for `SETTLED` auction windows. This change SHALL repair settled projection, slot allocation, and wallet settlement facts, and SHALL NOT repair Redis hot state, WebSocket delivery, or in-flight bidding state.
-
-#### Scenario: Settled window projection is missing
-- **WHEN** an auction window has accepted Kafka decision facts
-- **AND** projection checkpoint or projected bid facts are missing
-- **THEN** system schedules promotion decision projection repair tasks
-- **AND** each repair task remains idempotent by decision id
+### Requirement: B' compensation SHALL derive settled facts only from MySQL
+The system SHALL run B' promotion auction compensation only for `SETTLED` windows and SHALL derive expected winner, first price, wallet effects, escrow closure, and allocation from the shared promotion settlement facts using MySQL window, bid, and escrow records. It SHALL NOT use Redis, Redis Stream history, WebSocket delivery, or historical commands to invent expected settlement.
 
 #### Scenario: Settled window allocation is fully missing
-- **WHEN** a `SETTLED` auction window has enough durable settled facts to recompute winners and clearing prices
-- **AND** no slot allocation row exists for that window
-- **THEN** system schedules promotion allocation rebuild repair
-- **AND** allocation rebuild recomputes winners from durable bid and window facts instead of trusting existing projected slot indexes or clearing prices
+- **WHEN** a `SETTLED` sold window has sufficient consistent MySQL settled facts
+- **AND** no allocation row exists
+- **THEN** the system schedules promotion allocation rebuild
+- **AND** rebuild inserts only the expected allocation
+- **AND** does not call wallet settlement or change bid, escrow, or window state
 
 #### Scenario: Settled window allocation is partially present
-- **WHEN** a `SETTLED` auction window has some slot allocation rows
-- **AND** the row count, slot continuity, or winner set is inconsistent with recomputed durable facts
-- **THEN** system marks the window reconciliation as `dead`
-- **AND** does not try to auto-heal the partial allocation set
+- **WHEN** a `SETTLED` window has an incomplete or conflicting allocation
+- **THEN** reconciliation marks the task `dead`
+- **AND** does not auto-heal individual allocation rows
+
+#### Scenario: Bid authorization fact is missing
+- **WHEN** a settled bid has no corresponding escrow authorization fact
+- **THEN** reconciliation marks the task `dead`
+- **AND** does not substitute bid amount for authorization or read Redis/WebSocket state
 
 ### Requirement: B' compensation SHALL repair wallet effects idempotently
 The system SHALL verify and repair only settled-window `CAPTURE` and `RELEASE` wallet effects. Repairs SHALL use wallet businessRef idempotency, SHALL create repair tasks per missing effect, and SHALL reject mismatched existing ledger facts.

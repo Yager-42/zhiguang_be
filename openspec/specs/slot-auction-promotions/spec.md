@@ -95,6 +95,30 @@ The system SHALL reserve bidder funds when accepting a promotion bid decision. O
 - **THEN** all held amounts are released back to available balance
 - **AND** no slot allocation is created
 
+### Requirement: Production and recovery SHALL share settlement facts
+
+The system SHALL derive first-price winner, bid transitions, escrow closure, wallet capture/release effects, stable business references, and allocation period through one promotion settlement module. Production settlement SHALL use only Redis Stream `AUCTION_SOLD` or `AUCTION_NO_BID` terminal decisions as authority. Recovery SHALL derive the same immutable expected settlement only from settled MySQL window, bid, and escrow facts and SHALL NOT use Redis or WebSocket state.
+
+#### Scenario: Sold terminal decision settles authorized funds
+- **WHEN** an `AUCTION_SOLD` terminal decision agrees with the accepted MySQL bid and active escrow
+- **THEN** the winner is captured at the terminal first price
+- **AND** winner authorization surplus and every loser or unused authorization are released
+- **AND** each effect uses `promotion-bprime:{window}:{campaign}:{capture|release}`
+- **AND** one allocation starts at the original window end and lasts the original window duration
+
+#### Scenario: Terminal decision conflicts with durable facts
+- **WHEN** the terminal winner or amount conflicts with the accepted bid
+- **OR** a bid lacks corresponding active escrow
+- **OR** winner authorization is less than the winning amount
+- **THEN** production settlement fails and rolls back
+- **AND** recovery reports a non-retryable conflict without inferring authorization from bid amount
+
+#### Scenario: Allocation is rebuilt after settlement
+- **WHEN** a `SETTLED` sold window has wholly missing allocation and sufficient MySQL settled facts
+- **THEN** recovery inserts only the missing allocation fact
+- **AND** does not call wallet settlement or change bid, escrow, or window state
+- **AND** partial or conflicting allocation is not automatically repaired
+
 ### Requirement: Slot allocations SHALL drive feed and search insertion
 
 The system SHALL expose slot allocation results to feed and search rendering, including promoted-vs-organic distinction and resource-specific placement metadata. Slot allocations SHALL be produced only by B' position auction projection.

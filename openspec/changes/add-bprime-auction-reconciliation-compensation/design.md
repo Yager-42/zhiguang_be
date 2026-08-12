@@ -26,19 +26,16 @@ zhiguang 现有 `data-reconciliation` 已有任务表、checkpoint、error log�
 
 ## Decisions
 
-### 1. Durable facts first
+### 1. MySQL settled facts only
 
-补偿权威顺序固定：
+Settled-window recovery authority is limited to:
 
-1. Kafka decision log
-2. MySQL projection checkpoint / `promotion_bid` / `promotion_auction_window` / `promotion_slot_allocation`
-3. Wallet ledger/account
-4. RocketMQ command record（仅入口审计）
-5. Redis hot state / WebSocket delivery（仅派生展示）
+1. MySQL `promotion_auction_window` settled state and original period
+2. MySQL projected `promotion_bid`
+3. MySQL `promotion_bid_escrow` authorization and closure facts
+4. Wallet ledger/account for comparison of derived effects
 
-`promotion_auction_decision` 不再存在，也不是补偿事实源。Redis 和 WebSocket 永远不是事实源。command record 缺失但 settled 链完整时，只记告警，不阻断补偿成功。
-
-替代方案：拿 command 或 Redis 去反推 settled 事实。拒绝。入口审计和热状态都不配覆盖 durable facts。
+Recovery calls the same immutable settlement-fact derivation used by production settlement. Redis hot state, Redis Stream history, WebSocket delivery, and historical command records are not inputs to expected settlement. Missing active escrow for a bid, insufficient winner authorization, or conflicting winner/amount is non-retryable; recovery never substitutes bid amount for missing authorization.
 
 ### 2. 新增最小任务类型，不新增任务表或新 target 主键
 
@@ -81,17 +78,11 @@ scan source 固定为：
 
 `configuredLookback` 必须与 Kafka decision topic 的实际 retention 配置对齐，不把“7 天”写死成业务真理。
 
-### 6. Allocation rebuild 只处理全缺失
+### 6. Allocation rebuild only inserts a wholly missing fact
 
-`promotion_allocation_rebuild` 只处理：
-- `promotion_slot_allocation` 全缺失
+`promotion_allocation_rebuild` only handles a `SETTLED` sold window whose expected allocation is derivable from MySQL settled facts and whose allocation rows are wholly absent. It invokes the promotion settlement module's allocation-only action. The action inserts the expected allocation and MUST NOT call `WalletService` or modify bid, escrow, or window state.
 
-如果出现这些情况，直接 `dead`：
-- allocation 已有部分行但数量不对
-- slot 不连续
-- 需要依赖已过期 Kafka 明细且 MySQL settled facts 不足
-
-allocation 重建时不盲信 `promotion_bid.status`、`slot_index`、`clearing_price`，而是从 `promotion_bid.bid_amount`、`slot_count`、`reserve_price`、window 时间窗重新计算赢家和 clearing price。
+Any existing partial or conflicting allocation, no-bid allocation, or insufficient settled fact is non-retryable and goes directly to `dead`.
 
 ### 7. Wallet repair 只处理 settled 结果
 
