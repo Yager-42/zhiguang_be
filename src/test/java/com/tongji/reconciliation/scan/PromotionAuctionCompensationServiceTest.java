@@ -72,7 +72,6 @@ class PromotionAuctionCompensationServiceTest {
                         bid(402L, 202L, 43L, 80L, PromotionBidStatus.LOST)));
         when(allocationMapper.listByAuctionWindowId(301L)).thenReturn(List.of());
         when(walletLedgerMapper.findByBusinessRef("promotion-bprime:301:201:capture")).thenReturn(List.of());
-        when(walletLedgerMapper.findByBusinessRef("promotion-bprime:301:201:release")).thenReturn(List.of());
         when(walletLedgerMapper.findByBusinessRef("promotion-bprime:301:202:release")).thenReturn(List.of());
 
         service.scanWindow(window, reconciliationService);
@@ -88,7 +87,8 @@ class PromotionAuctionCompensationServiceTest {
                 eq(301L),
                 contains("\"effectType\":\"CAPTURE\"")
         );
-        verify(reconciliationService, times(2)).createTaskIfAbsent(
+        // 英式第一价格：winner 付 120 无多余释放，只有 202 一个 RELEASE 效果
+        verify(reconciliationService, times(1)).createTaskIfAbsent(
                 eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
                 eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
                 eq(301L),
@@ -171,7 +171,7 @@ class PromotionAuctionCompensationServiceTest {
                 eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
                 eq(ReconciliationTargetType.PROMOTION_AUCTION_WINDOW),
                 eq(301L),
-                argThat(payload -> payload.contains("\"amount\":450")
+                argThat(payload -> payload.contains("\"amount\":380")
                         && payload.contains("promotion-bprime:301:201:release")));
         verify(reconciliationService).createTaskIfAbsent(
                 eq(ReconciliationTaskType.PROMOTION_WALLET_EFFECT_REPAIR),
