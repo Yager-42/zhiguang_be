@@ -74,6 +74,9 @@ class PromotionRedisStreamProjectorRedisIntegrationTest {
         if (keys != null && !keys.isEmpty()) {
             redis.delete(keys);
         }
+        // sweep 只遍历 active-streams 注册表：显式登记测试窗口（与生产初始化流程一致）
+        redis.opsForSet().add(PromotionAuctionRedisKeys.activeStreams(), String.valueOf(WINDOW_ID));
+        redis.opsForZSet().remove(PromotionAuctionRedisKeys.closingIndex(), String.valueOf(WINDOW_ID));
     }
 
     @AfterEach

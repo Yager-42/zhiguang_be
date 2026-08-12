@@ -2,6 +2,7 @@ package com.tongji.promotion.bprime.service;
 
 import com.tongji.common.exception.BusinessException;
 import com.tongji.promotion.api.dto.PromotionBidEscrowAuthorizationResponse;
+import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper;
 import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
 import com.tongji.promotion.bprime.redis.PromotionAuctionHotStateRepository;
@@ -44,8 +45,10 @@ class PromotionBidEscrowServiceTest {
         PromotionProjectionCheckpointMapper checkpointMapper = mock(PromotionProjectionCheckpointMapper.class);
         hotStateRepository = mock(PromotionAuctionHotStateRepository.class);
         reconciliationTaskMapper = mock(ReconciliationTaskMapper.class);
+        PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
+        properties.setEnabled(true);
         service = new PromotionBidEscrowService(transactionService, routeRepository, checkpointMapper,
-                hotStateRepository, reconciliationTaskMapper);
+                hotStateRepository, reconciliationTaskMapper, properties);
 
         Instant now = Instant.parse("2026-08-09T12:00:00Z");
         PromotionCampaign campaign = PromotionCampaign.builder()

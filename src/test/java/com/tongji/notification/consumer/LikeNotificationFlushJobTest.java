@@ -12,6 +12,11 @@ import java.util.Set;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class LikeNotificationFlushJobTest {
@@ -26,6 +31,11 @@ class LikeNotificationFlushJobTest {
         redisTemplate = mock(StringRedisTemplate.class);
         likeNotificationConsumer = mock(LikeNotificationConsumer.class);
         commandService = mock(NotificationCommandService.class);
+        org.springframework.data.redis.core.ZSetOperations<String, String> zSetOperations =
+                mock(org.springframework.data.redis.core.ZSetOperations.class);
+        when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+        when(zSetOperations.rangeByScore(any(), anyDouble(), anyDouble(), anyLong(), anyLong()))
+                .thenReturn(Set.of());
         flushJob = new LikeNotificationFlushJob(redisTemplate, likeNotificationConsumer, commandService);
     }
 
@@ -46,12 +56,14 @@ class LikeNotificationFlushJobTest {
                 .build();
         when(redisTemplate.keys("notif:like:bucket:index:notif:like:bucket:*")).thenReturn(Set.of(indexKey));
         when(likeNotificationConsumer.readBucket(bucketKey)).thenReturn(bucket);
+        when(redisTemplate.opsForZSet().rangeByScore(any(), anyDouble(), anyDouble(), anyLong(), anyLong()))
+                .thenReturn(Set.of(bucketKey));
 
         flushJob.flush();
 
         verify(commandService).createLikeNotification(bucket);
         verify(redisTemplate).delete(bucketKey);
-        verify(redisTemplate).delete(indexKey);
+        verify(redisTemplate.opsForZSet()).remove(any(), eq(bucketKey));
     }
 
     @Test

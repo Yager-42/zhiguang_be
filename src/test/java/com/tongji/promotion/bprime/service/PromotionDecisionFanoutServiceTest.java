@@ -38,11 +38,31 @@ class PromotionDecisionFanoutServiceTest {
     void closeReadsFinalRankingAfterAuthoritativeStreamEvent() {
         PromotionRankingItem ranking = new PromotionRankingItem("201", "42", "1001", 120L, 1);
         when(snapshotAdapter.snapshot(301L)).thenReturn(new PromotionAuctionHotSnapshot(2L, List.of(ranking)));
-        PromotionAuctionDecision close = decision("d-close", 2L, 1L, "WINDOW_CLOSED");
+        PromotionAuctionDecision close = decision("d-close", 2L, 1L, "AUCTION_SOLD");
 
         service.publishDecision(close);
 
         verify(coalescer).publishWindowClosed(argThat(value -> value.ranking().equals(List.of(ranking))));
+    }
+
+    @Test
+    void extendedDecisionRoutesToExtensionEvent() {
+        PromotionAuctionDecision extended = decision("d-ext", 2L, 1L, "AUCTION_EXTENDED");
+
+        service.publishDecision(extended);
+
+        verify(coalescer).publishWindowExtended(extended);
+    }
+
+    @Test
+    void noBidDecisionRoutesToWindowClosedEvent() {
+        when(snapshotAdapter.snapshot(301L)).thenReturn(
+                new PromotionAuctionHotSnapshot(2L, List.of()));
+        PromotionAuctionDecision noBid = decision("d-nobid", 2L, 1L, "AUCTION_NO_BID");
+
+        service.publishDecision(noBid);
+
+        verify(coalescer).publishWindowClosed(argThat(value -> value.type().equals("AUCTION_NO_BID")));
     }
 
     @Test

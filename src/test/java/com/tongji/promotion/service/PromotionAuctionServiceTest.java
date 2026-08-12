@@ -31,6 +31,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * LEGACY_BROKER 窗口结算测试（英式第一价格：单赢家 = 排名首位，付自己的最终出价，其余全额释放）。
+ */
 @ExtendWith(MockitoExtension.class)
 class PromotionAuctionServiceTest {
 
@@ -64,90 +67,84 @@ class PromotionAuctionServiceTest {
     }
 
     @Test
-    void settlesTwoSlotWindowWithGspPricing() {
+    void settlesSingleWinnerWithFirstPriceAndReleasesLosers() {
         PromotionAuctionWindow window = window(301L, PromotionResourceType.FEED_TOP_SLOT, 2, 50L);
         List<PromotionBid> bids = List.of(
                 bid(401L, 201L, 42L, 120L),
                 bid(402L, 202L, 43L, 100L),
                 bid(403L, 203L, 44L, 70L)
         );
-        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(501L, 502L);
+        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(501L);
 
         service.settleWindow(window, bids, Instant.parse("2026-06-20T11:00:00Z"));
 
-        // 2 槽位 GSP：top2 中标，成交价 = 下一个有效出价与保留价的较高者
-        verify(walletService).captureHoldToPlatform(42L, 100L, WalletLedgerReason.PROMOTION_BPRIME_CAPTURE,
+        // 英式单赢家：首位（120）按第一价格 120 结算，其余全额释放
+        verify(walletService).captureHoldToPlatform(42L, 120L, WalletLedgerReason.PROMOTION_BPRIME_CAPTURE,
                 WalletBusinessType.PROMOTION, ref(301L, 201L, "capture"));
-        verify(walletService).captureHoldToPlatform(43L, 70L, WalletLedgerReason.PROMOTION_BPRIME_CAPTURE,
-                WalletBusinessType.PROMOTION, ref(301L, 202L, "capture"));
-        // winner 释放超额冻结
-        verify(walletService).releaseHold(42L, 20L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION, ref(301L, 201L, "release"));
-        verify(walletService).releaseHold(43L, 30L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION, ref(301L, 202L, "release"));
-        // loser 全额释放
-        verify(walletService).releaseHold(44L, 70L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION, ref(301L, 203L, "release"));
-        verify(bidMapper).markWon(401L, 0, 100L);
-        verify(bidMapper).markWon(402L, 1, 70L);
+        verify(walletService).releaseHold(43L, 100L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE,
+                WalletBusinessType.PROMOTION, ref(301L, 202L, "release"));
+        verify(walletService).releaseHold(44L, 70L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE,
+                WalletBusinessType.PROMOTION, ref(301L, 203L, "release"));
+        verify(bidMapper).markWon(401L, 0, 120L);
+        verify(bidMapper).markLost(402L);
         verify(bidMapper).markLost(403L);
+        verify(allocationMapper).insert(any());
     }
 
     @Test
     void settlesTiedBidsWithStableIdOrdering() {
-        // 两个并列最高出价：按 id 升序稳定排序，前者付并列价、后者付下一个有效出价
+        // 并列最高出价：按 id 升序稳定排序，首位按第一价格结算，其余释放
         PromotionAuctionWindow window = window(301L, PromotionResourceType.FEED_TOP_SLOT, 2, 50L);
         List<PromotionBid> bids = List.of(
                 bid(401L, 201L, 42L, 100L),
                 bid(402L, 202L, 43L, 100L),
                 bid(403L, 203L, 44L, 80L)
         );
-        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(501L, 502L);
+        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(501L);
 
         service.settleWindow(window, bids, Instant.parse("2026-06-20T11:00:00Z"));
 
-        // 401（id 较小）成交价 = 并列出价 100；402 成交价 = 下一个有效出价 80
         verify(walletService).captureHoldToPlatform(42L, 100L, WalletLedgerReason.PROMOTION_BPRIME_CAPTURE,
                 WalletBusinessType.PROMOTION, ref(301L, 201L, "capture"));
-        verify(walletService).captureHoldToPlatform(43L, 80L, WalletLedgerReason.PROMOTION_BPRIME_CAPTURE,
-                WalletBusinessType.PROMOTION, ref(301L, 202L, "capture"));
+        verify(walletService).releaseHold(43L, 100L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE,
+                WalletBusinessType.PROMOTION, ref(301L, 202L, "release"));
         verify(bidMapper).markWon(401L, 0, 100L);
-        verify(bidMapper).markWon(402L, 1, 80L);
+        verify(bidMapper).markLost(402L);
         verify(bidMapper).markLost(403L);
     }
 
     @Test
-    void dropsBelowReserveBidsAndAppliesReserveFloorAsClearingPrice() {
-        // 低于保留价的出价不占位、全额释放；末位 winner 成交价取保留价下限
+    void releasesEveryBidBelowWinnerRegardlessOfReserveFloor() {
+        // 英式无 reserve 地板结算：首位（120）第一价格，其余（含低于 reserve 的 30）全额释放
         PromotionAuctionWindow window = window(301L, PromotionResourceType.FEED_TOP_SLOT, 2, 50L);
         List<PromotionBid> bids = List.of(
                 bid(401L, 201L, 42L, 120L),
                 bid(402L, 202L, 43L, 100L),
-                bid(403L, 203L, 44L, 30L)   // 低于 reserve 50
+                bid(403L, 203L, 44L, 30L)
         );
-        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(501L, 502L);
+        when(idService.nextId(IdNamespace.ADMIN_OPERATION)).thenReturn(501L);
 
         service.settleWindow(window, bids, Instant.parse("2026-06-20T11:00:00Z"));
 
-        // 403 低于保留价 → 落败全额释放，绝不被结算成 winner
         verify(bidMapper).markLost(403L);
         verify(bidMapper, never()).markWon(eq(403L), anyInt(), anyLong());
-        verify(walletService).releaseHold(44L, 30L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION, ref(301L, 203L, "release"));
-        // 末位 winner 402 的下一个排名出价（30）低于保留价 → 成交价取保留价 50（<= 其出价 100，不超额）
-        verify(walletService).captureHoldToPlatform(43L, 50L, WalletLedgerReason.PROMOTION_BPRIME_CAPTURE,
-                WalletBusinessType.PROMOTION, ref(301L, 202L, "capture"));
-        verify(bidMapper).markWon(402L, 1, 50L);
+        verify(walletService).releaseHold(44L, 30L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE,
+                WalletBusinessType.PROMOTION, ref(301L, 203L, "release"));
+        verify(walletService).captureHoldToPlatform(42L, 120L, WalletLedgerReason.PROMOTION_BPRIME_CAPTURE,
+                WalletBusinessType.PROMOTION, ref(301L, 201L, "capture"));
+        verify(bidMapper).markWon(401L, 0, 120L);
     }
 
     @Test
-    void capturesNothingAndReleasesAllWhenEveryBidBelowReserve() {
-        // 全部出价低于保留价：无人中标，不扣任何人一分钱（边界：不会扣超过 hold）
+    void noBidsSettleWithoutCaptureOrAllocation() {
         PromotionAuctionWindow window = window(301L, PromotionResourceType.FEED_TOP_SLOT, 1, 50L);
-        List<PromotionBid> bids = List.of(bid(401L, 201L, 42L, 30L));
 
-        service.settleWindow(window, bids, Instant.parse("2026-06-20T11:00:00Z"));
+        service.settleWindow(window, List.of(), Instant.parse("2026-06-20T11:00:00Z"));
 
-        verify(walletService).releaseHold(42L, 30L, WalletLedgerReason.PROMOTION_BPRIME_RELEASE, WalletBusinessType.PROMOTION, ref(301L, 201L, "release"));
-        verify(bidMapper).markLost(401L);
-        verify(walletService, never()).captureHoldToPlatform(anyLong(), anyLong(), any(), any());
+        verify(walletService, never()).captureHoldToPlatform(anyLong(), anyLong(), any(), any(), any());
+        verify(walletService, never()).releaseHold(anyLong(), anyLong(), any(), any(), any());
         verify(allocationMapper, never()).insert(any());
+        verify(windowMapper).markSettled(301L, Instant.parse("2026-06-20T11:00:00Z"));
     }
 
     private PromotionAuctionWindow window(long id, PromotionResourceType type, int slotCount, long reservePrice) {

@@ -34,6 +34,8 @@ class ThreadPoolConfigTest {
             .withBean(KafkaTemplate.class, () -> new KafkaTemplate<>(mock(ProducerFactory.class)))
             .withBean(RelationEventProcessor.class, NoOpRelationEventProcessor::new)
             .withBean(ObjectMapper.class, ObjectMapper::new)
+            .withBean(com.tongji.promotion.bprime.config.PromotionBPrimeProperties.class,
+                    com.tongji.promotion.bprime.config.PromotionBPrimeProperties::new)
             .withPropertyValues(
                     "canal.enabled=false",
                     "canal.host=127.0.0.1",

@@ -83,13 +83,13 @@ class PromotionCommandSubmissionServiceTest {
     @Test
     void returnsFinalRejectedDecisionDirectly() {
         when(routeRepository.find(201L)).thenReturn(route());
-        when(decisionAdapter.decide(any())).thenReturn(decision(false, "BELOW_RESERVE"));
+        when(decisionAdapter.decide(any())).thenReturn(decision(false, "BID_NOT_HIGHER"));
 
         SubmitPromotionBidCommandResponse response = service
                 .submitAsync(42L, 201L, 99L, "idem-low", Instant.now()).join();
 
         assertThat(response.status()).isEqualTo("REJECTED");
-        assertThat(response.rejectionReason()).isEqualTo("BELOW_RESERVE");
+        assertThat(response.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
     }
 
     @Test
@@ -116,7 +116,7 @@ class PromotionCommandSubmissionServiceTest {
 
     @Test
     void fastRejectsBidNotHigherThanCachedPrice() {
-        priceCache.update(301L, 201L, 120L);
+        priceCache.update(301L, 120L);
         when(routeRepository.find(201L)).thenReturn(route());
 
         SubmitPromotionBidCommandResponse response = service
@@ -130,7 +130,7 @@ class PromotionCommandSubmissionServiceTest {
 
     @Test
     void fastRejectSkipsIdempotentRetryToLuaReplay() {
-        priceCache.update(301L, 201L, 120L);
+        priceCache.update(301L, 120L);
         when(hashOperations.hasKey(any(), any())).thenReturn(true);
         when(routeRepository.find(201L)).thenReturn(route());
         when(decisionAdapter.decide(any())).thenReturn(decision(true, null));
@@ -144,7 +144,7 @@ class PromotionCommandSubmissionServiceTest {
 
     @Test
     void fastRejectSkipsBidInsideEndMargin() {
-        priceCache.update(301L, 201L, 120L);
+        priceCache.update(301L, 120L);
         when(routeRepository.find(201L)).thenReturn(route());
         when(decisionAdapter.decide(any())).thenReturn(decision(true, null));
 
@@ -157,7 +157,7 @@ class PromotionCommandSubmissionServiceTest {
 
     @Test
     void fastRejectSkipsClosedWindow() {
-        priceCache.update(301L, 201L, 120L);
+        priceCache.update(301L, 120L);
         PromotionBidRoute closedRoute = new PromotionBidRoute(201L, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L,
                 "CLOSED", Instant.parse("2026-06-20T11:00:00Z"), 1, "REDIS_STREAM");
         when(routeRepository.find(201L)).thenReturn(closedRoute);
@@ -172,7 +172,7 @@ class PromotionCommandSubmissionServiceTest {
 
     @Test
     void fastRejectSkipsOnRedisError() {
-        priceCache.update(301L, 201L, 120L);
+        priceCache.update(301L, 120L);
         when(redisTemplate.opsForHash()).thenThrow(new IllegalStateException("redis down"));
         when(routeRepository.find(201L)).thenReturn(route());
         when(decisionAdapter.decide(any())).thenReturn(decision(true, null));

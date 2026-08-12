@@ -32,6 +32,7 @@ class LikeNotificationConsumerTest {
     private StringRedisTemplate redisTemplate;
     private ValueOperations<String, String> valueOperations;
     private HashOperations<String, Object, Object> hashOperations;
+    private org.springframework.data.redis.core.ZSetOperations<String, String> zSetOperations;
     private KnowPostMapper knowPostMapper;
     private CommentMapper commentMapper;
     private Acknowledgment acknowledgment;
@@ -43,11 +44,14 @@ class LikeNotificationConsumerTest {
         redisTemplate = mock(StringRedisTemplate.class);
         valueOperations = mock(ValueOperations.class);
         hashOperations = mock(HashOperations.class);
+        zSetOperations = mock(org.springframework.data.redis.core.ZSetOperations.class);
         knowPostMapper = mock(KnowPostMapper.class);
         commentMapper = mock(CommentMapper.class);
         acknowledgment = mock(Acknowledgment.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.opsForHash()).thenReturn((HashOperations) hashOperations);
+        when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+        when(zSetOperations.add(any(), any(), any(Double.class))).thenReturn(true);
         consumer = new LikeNotificationConsumer(objectMapper, redisTemplate, knowPostMapper, commentMapper);
     }
 
