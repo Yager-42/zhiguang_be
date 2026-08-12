@@ -1,6 +1,7 @@
 package com.tongji.promotion;
 
 import com.tongji.promotion.bprime.config.PromotionBPrimeSchemaInitializer;
+import com.tongji.promotion.bprime.mapper.PromotionProjectionCheckpointMapper;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.mapper.PromotionCampaignMapper;
@@ -63,6 +64,12 @@ class PromotionMysqlIntegrationTest {
     @Autowired
     private PromotionCampaignMapper campaignMapper;
 
+    @Autowired
+    private PromotionProjectionCheckpointMapper checkpointMapper;
+
+    @Autowired
+    private org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+
     @Test
     void windowEnumRoundTripsAndOpenWindowLookup() {
         long id = uniqueId();
@@ -97,6 +104,42 @@ class PromotionMysqlIntegrationTest {
         // 结算后 status=SETTLED，不再被列为可关闭
         assertThat(windowMapper.findExactWindow(PromotionResourceType.FEED_TOP_SLOT, start, end).getStatus())
                 .isEqualTo(PromotionAuctionWindowStatus.SETTLED);
+    }
+
+    @Test
+    void windowLockReadAndGuardedSettlementTransition() {
+        long id = uniqueId();
+        Instant start = uniqueClosableWindowStart();
+        Instant end = start.plusSeconds(3600);
+        insertWindow(id, PromotionResourceType.FEED_TOP_SLOT, start, end,
+                1, 10L, PromotionAuctionWindowStatus.OPEN);
+
+        PromotionAuctionWindow locked = windowMapper.findByIdForUpdate(id);
+
+        assertThat(locked).isNotNull();
+        assertThat(locked.getStatus()).isEqualTo(PromotionAuctionWindowStatus.OPEN);
+        Instant settledAt = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        assertThat(windowMapper.markSettledIfOpen(id, settledAt)).isEqualTo(1);
+        assertThat(windowMapper.markSettledIfOpen(id, settledAt.plusMillis(1))).isZero();
+        assertThat(windowMapper.findById(id).getSettledAt()).isEqualTo(settledAt);
+    }
+
+    @Test
+    void settlementAndCheckpointRollBackTogether() {
+        long id = uniqueId();
+        Instant start = uniqueClosableWindowStart();
+        Instant end = start.plusSeconds(3600);
+        insertWindow(id, PromotionResourceType.FEED_TOP_SLOT, start, end,
+                1, 10L, PromotionAuctionWindowStatus.OPEN);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
+            assertThat(windowMapper.markSettledIfOpen(id, Instant.now())).isEqualTo(1);
+            assertThat(checkpointMapper.upsert(id, "terminal-1", 1L, "1-0")).isEqualTo(1);
+            throw new IllegalStateException("force projection rollback");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(windowMapper.findById(id).getStatus()).isEqualTo(PromotionAuctionWindowStatus.OPEN);
+        assertThat(checkpointMapper.findByAuctionWindowId(id)).isNull();
     }
 
     @Test
@@ -261,7 +304,6 @@ class PromotionMysqlIntegrationTest {
         long offsetMillis = uniqueId() % 3_599_000L;
         return now.minusSeconds(7_199L).plusMillis(offsetMillis);
     }
-
     static boolean mysqlReachable() {
         try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress("127.0.0.1", 3306), 500);
@@ -279,7 +321,12 @@ class PromotionMysqlIntegrationTest {
             JdbcTemplateAutoConfiguration.class,
             MybatisAutoConfiguration.class
     })
-    @MapperScan(basePackageClasses = PromotionCampaignMapper.class)
+    @MapperScan(basePackageClasses = {PromotionCampaignMapper.class, PromotionProjectionCheckpointMapper.class})
     static class TestConfig {
+        @org.springframework.context.annotation.Bean
+        org.springframework.transaction.support.TransactionTemplate transactionTemplate(
+                org.springframework.transaction.PlatformTransactionManager transactionManager) {
+            return new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        }
     }
 }

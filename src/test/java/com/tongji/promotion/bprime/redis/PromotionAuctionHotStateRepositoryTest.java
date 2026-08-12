@@ -34,9 +34,7 @@ class PromotionAuctionHotStateRepositoryTest {
         PromotionAuctionHotStateRepository repository =
                 new PromotionAuctionHotStateRepository(redisTemplate, new PromotionBPrimeProperties());
 
-        repository.initialize(new PromotionBidRoute(
-                201L, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L,
-                "OPEN", Instant.parse("2026-08-08T12:00:00Z"), 2, "REDIS_STREAM"), 17L);
+        repository.initialize(new PromotionBidRoute(201L, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L, "OPEN", Instant.parse("2026-08-08T12:00:00Z"), 2), 17L);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> keys = ArgumentCaptor.forClass(List.class);
