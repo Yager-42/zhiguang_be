@@ -149,7 +149,7 @@ class PromotionCommandSubmissionServiceTest {
     void fastRejectSkipsClosedWindow() {
         ;
         PromotionBidRoute closedRoute = new PromotionBidRoute(201L, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L,
-                "CLOSED", Instant.parse("2026-06-20T11:00:00Z"), 1, "REDIS_STREAM");
+                "CLOSED", Instant.parse("2026-06-20T11:00:00Z"), 1);
         when(routeRepository.find(201L)).thenReturn(closedRoute);
         when(decisionAdapter.decide(any())).thenReturn(batch(decision(true, null)));
 
@@ -184,7 +184,7 @@ class PromotionCommandSubmissionServiceTest {
 
     private PromotionBidRoute route() {
         return new PromotionBidRoute(201L, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L,
-                "OPEN", Instant.parse("2026-06-20T11:00:00Z"), 1, "REDIS_STREAM");
+                "OPEN", Instant.parse("2026-06-20T11:00:00Z"), 1);
     }
 
     private PromotionAuctionDecision decision(boolean accepted, String reason) {

@@ -11,7 +11,6 @@ import com.tongji.promotion.bprime.redis.PromotionBidRouteRepository;
 import com.tongji.promotion.model.PromotionAuctionWindow;
 import com.tongji.promotion.model.PromotionAuctionWindowStatus;
 import com.tongji.promotion.model.PromotionCampaign;
-import com.tongji.promotion.model.PromotionDecisionPath;
 import com.tongji.promotion.model.PromotionResourceType;
 import com.tongji.reconciliation.mapper.ReconciliationTaskMapper;
 import com.tongji.reconciliation.model.ReconciliationTask;
@@ -57,7 +56,6 @@ class PromotionBidEscrowServiceTest {
         PromotionAuctionWindow window = PromotionAuctionWindow.builder()
                 .id(301L).resourceType(PromotionResourceType.FEED_TOP_SLOT)
                 .windowEndAt(now.plusSeconds(60)).slotCount(2).reservePrice(100L)
-                .decisionPath(PromotionDecisionPath.REDIS_STREAM)
                 .status(PromotionAuctionWindowStatus.OPEN).build();
         PromotionBidEscrowRecord escrow = PromotionBidEscrowRecord.builder()
                 .id(501L).auctionWindowId(301L).campaignId(201L).bidderUserId(42L)

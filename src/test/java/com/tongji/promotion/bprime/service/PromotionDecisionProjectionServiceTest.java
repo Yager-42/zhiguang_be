@@ -10,6 +10,8 @@ import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
 import com.tongji.promotion.mapper.PromotionBidMapper;
 import com.tongji.promotion.mapper.PromotionSlotAllocationMapper;
 import com.tongji.promotion.service.PromotionAllocationCacheService;
+import com.tongji.promotion.settlement.PromotionAuctionSettlementModule;
+import com.tongji.promotion.settlement.PromotionAuctionTerminalInput;
 import com.tongji.wallet.service.WalletService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,14 +45,14 @@ class PromotionDecisionProjectionServiceTest {
     @Mock private WalletService walletService;
     @Mock private PromotionAllocationCacheService cacheService;
     @Mock private IdService idService;
+    @Mock private PromotionAuctionSettlementModule settlementModule;
 
     private PromotionDecisionProjectionService service;
 
     @BeforeEach
     void setUp() {
         service = new PromotionDecisionProjectionService(
-                checkpointMapper, escrowMapper, bidMapper, windowMapper, allocationMapper,
-                walletService, cacheService, idService);
+                checkpointMapper, escrowMapper, bidMapper, settlementModule, idService);
     }
 
     @Test
@@ -136,15 +138,9 @@ class PromotionDecisionProjectionServiceTest {
     }
 
     @Test
-    void soldWindowSettlesFirstPriceSingleAllocation() {
+    void soldTerminalDelegatesStronglyTypedInputAndAdvancesCheckpoint() {
         when(checkpointMapper.findByAuctionWindowId(301L))
                 .thenReturn(checkpoint("d-1", 1L, "1-0"));
-        when(windowMapper.findById(301L)).thenReturn(window());
-        when(bidMapper.listActiveBidsByWindowId(301L, WINDOW_END, ALLOCATION_END))
-                .thenReturn(List.of(bid(201L, 42L, 300L), bid(202L, 43L, 250L)));
-        when(escrowMapper.listActiveByWindowId(301L))
-                .thenReturn(List.of(escrow(201L, 42L, 500L), escrow(202L, 43L, 400L)));
-        when(idService.nextId(any())).thenReturn(9001L);
 
         service.projectBatch(List.of(new PromotionDecisionProjectionItem(
                 new PromotionAuctionDecision("d-sold", "cmd-close", "hash", 301L, 2L, 1L,
@@ -153,70 +149,26 @@ class PromotionDecisionProjectionServiceTest {
                         Map.of("winnerCampaignId", "201", "winningAmount", 300), DECIDED_AT),
                 "2-0")));
 
-        // winner 付第一价格 300，释放 500-300=200；loser 全释放 400
-        verify(walletService).captureHoldToPlatform(eq(42L), eq(300L),
-                eq(com.tongji.wallet.model.WalletLedgerReason.PROMOTION_BPRIME_CAPTURE),
-                eq(com.tongji.wallet.model.WalletBusinessType.PROMOTION), any());
-        verify(walletService).releaseHold(eq(42L), eq(200L), any(), any(), any());
-        verify(walletService).releaseHold(eq(43L), eq(400L), any(), any(), any());
-        verify(bidMapper).markWon(anyLong(), eq(0), eq(300L));
-        verify(bidMapper).markLost(anyLong());
-        ArgumentCaptor<com.tongji.promotion.model.PromotionSlotAllocation> allocation =
-                ArgumentCaptor.forClass(com.tongji.promotion.model.PromotionSlotAllocation.class);
-        verify(allocationMapper).insert(allocation.capture());
-        assertThat(allocation.getValue().getSlotIndex()).isZero();
-        assertThat(allocation.getValue().getClearingPrice()).isEqualTo(300L);
-        assertThat(allocation.getValue().getCampaignId()).isEqualTo(201L);
-        assertThat(allocation.getValue().getAllocationStartAt()).isEqualTo(WINDOW_END);
-        verify(escrowMapper).markClosedByWindowId(301L, DECIDED_AT);
-        verify(windowMapper).markSettled(301L, DECIDED_AT);
-        verify(cacheService).refreshActiveAllocations(any(), eq(DECIDED_AT));
+        verify(settlementModule).settle(new PromotionAuctionTerminalInput(
+                301L, PromotionAuctionTerminalInput.Kind.SOLD, 201L, 300L, DECIDED_AT));
+        verify(checkpointMapper).upsert(301L, "d-sold", 2L, "2-0");
     }
 
     @Test
-    void noBidWindowReleasesAllEscrowsWithoutAllocation() {
+    void noBidTerminalDelegatesWithoutWinnerAndAdvancesCheckpoint() {
         when(checkpointMapper.findByAuctionWindowId(301L))
                 .thenReturn(checkpoint("d-1", 1L, "1-0"));
-        when(windowMapper.findById(301L)).thenReturn(window());
-        when(bidMapper.listActiveBidsByWindowId(301L, WINDOW_END, ALLOCATION_END))
-                .thenReturn(List.of());
-        when(escrowMapper.listActiveByWindowId(301L))
-                .thenReturn(List.of(escrow(201L, 42L, 500L)));
 
         service.projectBatch(List.of(new PromotionDecisionProjectionItem(
                 new PromotionAuctionDecision("d-nobid", "cmd-close", "hash", 301L, 2L, 1L,
                         0L, 0L, 0L, "FEED_TOP_SLOT", "AUCTION_NO_BID", true, null,
-                        0L, List.of(), List.of(),
-                        Map.of("actualEndAtEpochMs", 123L), DECIDED_AT),
-                "2-0")));
+                        0L, List.of(), List.of(), Map.of(), DECIDED_AT), "2-0")));
 
-        verify(walletService).releaseHold(eq(42L), eq(500L), any(), any(), any());
-        verify(walletService, never()).captureHoldToPlatform(anyLong(), anyLong(), any(), any(), any());
-        verify(allocationMapper, never()).insert(any());
-        verify(bidMapper, never()).markWon(anyLong(), anyInt(), anyLong());
-        verify(escrowMapper).markClosedByWindowId(301L, DECIDED_AT);
-        verify(windowMapper).markSettled(301L, DECIDED_AT);
+        verify(settlementModule).settle(new PromotionAuctionTerminalInput(
+                301L, PromotionAuctionTerminalInput.Kind.NO_BID, null, null, DECIDED_AT));
+        verify(checkpointMapper).upsert(301L, "d-nobid", 2L, "2-0");
     }
 
-    @Test
-    void soldWinnerMismatchWithRankedTopFailsFast() {
-        when(checkpointMapper.findByAuctionWindowId(301L))
-                .thenReturn(checkpoint("d-1", 1L, "1-0"));
-        when(windowMapper.findById(301L)).thenReturn(window());
-        when(bidMapper.listActiveBidsByWindowId(301L, WINDOW_END, ALLOCATION_END))
-                .thenReturn(List.of(bid(201L, 42L, 300L)));
-        when(escrowMapper.listActiveByWindowId(301L))
-                .thenReturn(List.of(escrow(201L, 42L, 500L)));
-
-        assertThatThrownBy(() -> service.projectBatch(List.of(new PromotionDecisionProjectionItem(
-                new PromotionAuctionDecision("d-sold", "cmd-close", "hash", 301L, 2L, 1L,
-                        202L, 43L, 1002L, "FEED_TOP_SLOT", "AUCTION_SOLD", true, null,
-                        0L, List.of(), List.of(),
-                        Map.of("winnerCampaignId", "202", "winningAmount", 300), DECIDED_AT),
-                "2-0"))))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("winner mismatch");
-    }
 
     private PromotionProjectionCheckpointRecord checkpoint(String id, long version, String streamId) {
         PromotionProjectionCheckpointRecord checkpoint = new PromotionProjectionCheckpointRecord();

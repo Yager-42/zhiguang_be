@@ -323,7 +323,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
                                     long authorizedAmount, long reservePrice, long capPriceCents,
                                     int maxExtensions) {
         return new PromotionBidRoute(campaignId, bidderUserId, 1000L + bidderUserId, WINDOW_ID,
-                "FEED_TOP_SLOT", reservePrice, authorizedAmount, "OPEN", endAt, 2, "REDIS_STREAM",
+                "FEED_TOP_SLOT", reservePrice, authorizedAmount, "OPEN", endAt, 2,
                 100L, capPriceCents, 10L, 10L, maxExtensions);
     }
 

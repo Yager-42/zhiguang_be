@@ -67,8 +67,6 @@ class PromotionBidRouteRepositoryTest {
     }
 
     private PromotionBidRoute route(Instant windowEndAt) {
-        return new PromotionBidRoute(
-                CAMPAIGN_ID, 42L, 1001L, 301L, "FEED_TOP_SLOT",
-                100L, 500L, "OPEN", windowEndAt, 1, "REDIS_STREAM");
+        return new PromotionBidRoute(CAMPAIGN_ID, 42L, 1001L, 301L, "FEED_TOP_SLOT", 100L, 500L, "OPEN", windowEndAt, 1);
     }
 }
