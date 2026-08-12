@@ -39,11 +39,11 @@ public class ThreadPoolConfig {
         return buildExecutor(2, 4, 100, 60, "reconciliation-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
     }
 
-    @Bean(name = "promotionBidSubmissionExecutor")
-    public TaskExecutor promotionBidSubmissionExecutor(PromotionBPrimeProperties properties) {
-        int threadCount = properties.getBidSubmissionThreadCount();
-        return buildExecutor(threadCount, threadCount, properties.getBidSubmissionQueueCapacity(), 60,
-                "promotion-bid-submission-", new ThreadPoolExecutor.AbortPolicy(), 60);
+    @Bean(name = "promotionBidDrainerExecutor")
+    public TaskExecutor promotionBidDrainerExecutor(PromotionBPrimeProperties properties) {
+        int threadCount = properties.getBidDrainerThreadCount();
+        return buildExecutor(threadCount, threadCount, properties.getBidReadyWindowQueueCapacity(), 60,
+                "promotion-bid-drainer-", new ThreadPoolExecutor.AbortPolicy(), 60);
     }
 
     @Bean(name = "promotionBidWebSocketOutboundExecutor")

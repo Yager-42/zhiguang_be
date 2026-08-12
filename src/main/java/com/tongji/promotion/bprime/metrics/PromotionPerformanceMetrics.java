@@ -37,8 +37,13 @@ public class PromotionPerformanceMetrics {
     private final Timer streamDrainDuration;
     private final Timer projectionEndToEndLatency;
     private final Timer realtimeEndToEndLatency;
+    private final Timer bidBatchDuration;
+    private final DistributionSummary bidBatchCommands;
+    private final Counter bidBackpressure;
     private final AtomicInteger publisherQueueDepth = new AtomicInteger();
     private final AtomicInteger publisherActiveWorkers = new AtomicInteger();
+    private final AtomicInteger bidPendingDepth = new AtomicInteger();
+    private final AtomicInteger bidActiveWindows = new AtomicInteger();
 
     public PromotionPerformanceMetrics(MeterRegistry registry) {
         this.registry = registry;
@@ -58,9 +63,16 @@ public class PromotionPerformanceMetrics {
         this.streamDrainDuration = registry.timer("promotion.bprime.stream.drain.duration");
         this.projectionEndToEndLatency = registry.timer("promotion.bprime.end.to.end", "target", "projection");
         this.realtimeEndToEndLatency = registry.timer("promotion.bprime.end.to.end", "target", "websocket");
+        this.bidBatchDuration = registry.timer("promotion.bprime.bid.batch.duration");
+        this.bidBatchCommands = registry.summary("promotion.bprime.bid.batch.commands");
+        this.bidBackpressure = registry.counter("promotion.bprime.bid.backpressure");
         Gauge.builder("promotion.bprime.publisher.queue.depth", publisherQueueDepth, AtomicInteger::get)
                 .register(registry);
         Gauge.builder("promotion.bprime.publisher.active.workers", publisherActiveWorkers, AtomicInteger::get)
+                .register(registry);
+        Gauge.builder("promotion.bprime.bid.pending.depth", bidPendingDepth, AtomicInteger::get)
+                .register(registry);
+        Gauge.builder("promotion.bprime.bid.active.windows", bidActiveWindows, AtomicInteger::get)
                 .register(registry);
     }
 
@@ -137,6 +149,23 @@ public class PromotionPerformanceMetrics {
     /** 记录一次窗口 Stream 追平循环的耗时。 */
     public void recordStreamDrain(long elapsedNanos) {
         streamDrainDuration.record(Math.max(0L, elapsedNanos), TimeUnit.NANOSECONDS);
+    }
+
+    /** 记录一次批量 Redis 裁决及其命令数。 */
+    public void recordBidBatch(int commandCount, long elapsedNanos) {
+        bidBatchCommands.record(Math.max(0, commandCount));
+        bidBatchDuration.record(Math.max(0L, elapsedNanos), TimeUnit.NANOSECONDS);
+    }
+
+    /** 更新 flat combiner 的当前积压与活跃窗口数。 */
+    public void updateBidCombinerState(int pendingDepth, int activeWindows) {
+        bidPendingDepth.set(Math.max(0, pendingDepth));
+        bidActiveWindows.set(Math.max(0, activeWindows));
+    }
+
+    /** 记录一次本地容量背压。 */
+    public void recordBidBackpressure() {
+        bidBackpressure.increment();
     }
 
     private String result(PromotionAuctionDecision decision) {

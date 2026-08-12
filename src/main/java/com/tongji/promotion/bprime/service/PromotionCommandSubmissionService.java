@@ -9,13 +9,9 @@ import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import com.tongji.promotion.bprime.model.PromotionCommandIdentity;
-import com.tongji.promotion.bprime.redis.PromotionAuctionUnavailableException;
-import com.tongji.promotion.bprime.redis.PromotionAuctionRedisKeys;
-import com.tongji.promotion.bprime.model.PromotionBidFastRejectionReason;
-import com.tongji.promotion.bprime.redis.PromotionBidPriceCache;
+import com.tongji.promotion.bprime.redis.PromotionBidAdmissionState;
 import com.tongji.promotion.bprime.redis.PromotionBidRouteRepository;
 import com.tongji.promotion.bprime.redis.PromotionRedisDecisionAdapter;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
@@ -24,7 +20,7 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * WebSocket 竞价入口：在有界线程池中同步取得 Redis Lua 的最终裁决。
+ * WebSocket 竞价入口：路由后进入每窗口 flat combiner，并同步返回 Redis Lua 最终裁决。
  */
 @Service
 public class PromotionCommandSubmissionService {
@@ -33,28 +29,23 @@ public class PromotionCommandSubmissionService {
     private static final long MAX_MONEY = 9007199254740991L;
 
     private final PromotionBidRouteRepository routeRepository;
-    private final PromotionRedisDecisionAdapter decisionAdapter;
     private final PromotionPerformanceMetrics performanceMetrics;
     private final PromotionBPrimeProperties properties;
-    private final TaskExecutor submissionExecutor;
-    private final PromotionBidPriceCache priceCache;
-    private final StringRedisTemplate redisTemplate;
+    private final PromotionBidAdmissionState admissionState;
+    private final PromotionWindowBidCombiner combiner;
 
     public PromotionCommandSubmissionService(PromotionBidRouteRepository routeRepository,
                                              PromotionRedisDecisionAdapter decisionAdapter,
                                              PromotionPerformanceMetrics performanceMetrics,
                                              PromotionBPrimeProperties properties,
-                                             @Qualifier("promotionBidSubmissionExecutor")
-                                             TaskExecutor submissionExecutor,
-                                             PromotionBidPriceCache priceCache,
-                                             StringRedisTemplate redisTemplate) {
+                                             @Qualifier("promotionBidDrainerExecutor") TaskExecutor drainerExecutor,
+                                             PromotionBidAdmissionState admissionState) {
         this.routeRepository = routeRepository;
-        this.decisionAdapter = decisionAdapter;
         this.performanceMetrics = performanceMetrics;
         this.properties = properties;
-        this.submissionExecutor = submissionExecutor;
-        this.priceCache = priceCache;
-        this.redisTemplate = redisTemplate;
+        this.admissionState = admissionState;
+        this.combiner = new PromotionWindowBidCombiner(decisionAdapter, drainerExecutor, properties,
+                performanceMetrics, admissionState, this::response, this::unavailable);
     }
 
     public CompletableFuture<SubmitPromotionBidCommandResponse> submitAsync(
@@ -69,21 +60,13 @@ public class PromotionCommandSubmissionService {
         } catch (RuntimeException exception) {
             return CompletableFuture.failedFuture(exception);
         }
-        CompletableFuture<SubmitPromotionBidCommandResponse> result = new CompletableFuture<>();
         try {
-            submissionExecutor.execute(() -> {
-                try {
-                    result.complete(submitAuthoritative(context));
-                } catch (BusinessException exception) {
-                    result.completeExceptionally(exception);
-                } catch (RuntimeException exception) {
-                    result.complete(unavailable(null, null));
-                }
-            });
+            return submitPrepared(context);
+        } catch (BusinessException exception) {
+            return CompletableFuture.failedFuture(exception);
         } catch (RuntimeException exception) {
-            result.complete(unavailable(null, null));
+            return CompletableFuture.completedFuture(unavailable(null, null));
         }
-        return result;
     }
 
     private SubmissionContext prepare(long userId, long campaignId, long bidAmount,
@@ -104,35 +87,21 @@ public class PromotionCommandSubmissionService {
                 now == null ? Instant.now() : now);
     }
 
-    private SubmitPromotionBidCommandResponse submitAuthoritative(SubmissionContext context) {
-        PromotionBidRoute route = null;
-        String commandId = null;
-        try {
-            route = routeRepository.find(context.campaignId());
-            if (route == null || route.bidderUserId() != context.userId()) {
-                throw new BusinessException(ErrorCode.PROMOTION_BID_ESCROW_REQUIRED);
-            }
-            commandId = PromotionCommandIdentity.bidCommandId(
-                    route.auctionWindowId(), context.userId(), context.idempotencyKey());
-            if (!"REDIS_STREAM".equals(route.decisionPath())) {
-                return unavailable(commandId, route);
-            }
-            SubmitPromotionBidCommandResponse fastRejected = fastReject(context, route, commandId);
-            if (fastRejected != null) {
-                return fastRejected;
-            }
-            PromotionAuctionCommand command = command(context, route, commandId);
-            PromotionAuctionDecision decision = decisionAdapter.decide(command);
-            performanceMetrics.recordIngressAccepted();
-            performanceMetrics.recordDecisionDurable(decision);
-            return response(decision);
-        } catch (PromotionAuctionUnavailableException exception) {
-            return unavailable(commandId, route);
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
-            return unavailable(commandId, route);
+    private CompletableFuture<SubmitPromotionBidCommandResponse> submitPrepared(SubmissionContext context) {
+        PromotionBidRoute route = routeRepository.find(context.campaignId());
+        if (route == null || route.bidderUserId() != context.userId()) {
+            throw new BusinessException(ErrorCode.PROMOTION_BID_ESCROW_REQUIRED);
         }
+        String commandId = PromotionCommandIdentity.bidCommandId(
+                route.auctionWindowId(), context.userId(), context.idempotencyKey());
+        if (!"REDIS_STREAM".equals(route.decisionPath())) {
+            return CompletableFuture.completedFuture(unavailable(commandId, route));
+        }
+        SubmitPromotionBidCommandResponse fastRejected = fastReject(context, route, commandId);
+        if (fastRejected != null) {
+            return CompletableFuture.completedFuture(fastRejected);
+        }
+        return combiner.submit(command(context, route, commandId));
     }
 
     private PromotionAuctionCommand command(SubmissionContext context, PromotionBidRoute route, String commandId) {
@@ -155,44 +124,40 @@ public class PromotionCommandSubmissionService {
     }
 
     /**
-     * 网关侧价格预拒：出价不高于本进程已见的窗口共享当前价时本地返回 BID_NOT_HIGHER，
-     * 不进入 Lua 裁决。任何不确定（缓存缺失、margin 内、终态、幂等重试、Redis 异常）都放行 Lua。
-     * 本地预拒不带 requiredAmount（Go fast-reject 同构；只有 Lua 拒绝路径带）。
+     * 仅依据 Redis 已确认的版本化状态做零 Redis 确定性拒绝；当前赢家命令和终场 margin 必须进 Lua。
      */
     private SubmitPromotionBidCommandResponse fastReject(SubmissionContext context, PromotionBidRoute route,
                                                          String commandId) {
-        if (!properties.isFastRejectEnabled() || !"OPEN".equals(route.windowStatus())) {
+        if (!properties.isFastRejectEnabled()) {
             return null;
         }
-        if (!context.submittedAt().isBefore(
-                route.windowEndAt().minusSeconds(properties.getFastRejectMarginSeconds()))) {
+        PromotionBidAdmissionState.Snapshot state = admissionState.get(route.auctionWindowId());
+        if (state == null || !"OPEN".equals(state.status()) || commandId.equals(state.winnerCommandId())) {
             return null;
         }
-        Long cachedPrice = priceCache.get(route.auctionWindowId());
-        if (cachedPrice == null || context.bidAmount() > cachedPrice) {
+        Instant safeEndAt = Instant.ofEpochMilli(state.actualEndAtEpochMs())
+                .minusSeconds(properties.getFastRejectMarginSeconds());
+        if (!context.submittedAt().isBefore(safeEndAt)) {
             return null;
         }
-        // 幂等优先：该 commandId 已裁决过（重试）→ 放行 Lua 重放原裁决
-        try {
-            if (Boolean.TRUE.equals(redisTemplate.opsForHash().hasKey(
-                    PromotionAuctionRedisKeys.commandBucket(route.auctionWindowId()), commandId))) {
-                return null;
-            }
-        } catch (RuntimeException exception) {
-            return null; // Redis 异常 → 放行 Lua（保守）
+        long increment = route.incrementCents() > 0
+                ? route.incrementCents()
+                : properties.auctionRules(com.tongji.promotion.model.PromotionResourceType
+                        .valueOf(route.resourceType())).incrementCents();
+        long required = state.committedPriceCents() > MAX_MONEY - increment
+                ? MAX_MONEY : state.committedPriceCents() + increment;
+        if (route.capPriceCents() > 0 && required > route.capPriceCents()) {
+            required = route.capPriceCents();
+        }
+        if (context.bidAmount() >= required) {
+            return null;
         }
         performanceMetrics.recordFastRejected();
         return new SubmitPromotionBidCommandResponse(
-                commandId,
-                String.valueOf(route.auctionWindowId()),
-                "REJECTED",
-                true,
-                PromotionBidFastRejectionReason.BID_NOT_HIGHER.name(),
-                null,
-                null,
-                null,
-                null,
-                null);
+                commandId, String.valueOf(route.auctionWindowId()), "REJECTED", true,
+                "BID_NOT_HIGHER", null, state.decisionVersion(), context.bidAmount(), context.submittedAt(), required,
+                false, state.winnerCampaignId() == 0 ? null : String.valueOf(state.winnerCampaignId()),
+                state.committedPriceCents());
     }
 
     private SubmitPromotionBidCommandResponse response(PromotionAuctionDecision decision) {
@@ -206,12 +171,35 @@ public class PromotionCommandSubmissionService {
                 decision.decisionVersion(),
                 decision.bidAmount(),
                 decision.decidedAt(),
-                requiredAmount(decision));
+                requiredAmount(decision),
+                decision.accepted(),
+                payloadString(decision, "winnerCampaignId"),
+                payloadLong(decision, "currentPriceCents"));
     }
 
     private Long requiredAmount(PromotionAuctionDecision decision) {
         Object value = decision.payload().get("requiredAmount");
         return value instanceof Number number ? number.longValue() : null;
+    }
+
+    private String payloadString(PromotionAuctionDecision decision, String field) {
+        Object value = decision.payload().get(field);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private Long payloadLong(PromotionAuctionDecision decision, String field) {
+        Object value = decision.payload().get(field);
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return value instanceof String text && !text.isBlank() ? Long.valueOf(text) : null;
+    }
+
+    private SubmitPromotionBidCommandResponse unavailable(PromotionAuctionCommand command) {
+        return unavailable(command.commandId(), new PromotionBidRoute(
+                command.campaignId(), command.bidderUserId(), command.postId(), command.auctionWindowId(),
+                command.resourceType(), command.reservePrice(), 0L, command.windowStatus(),
+                command.submittedAt(), 1, "REDIS_STREAM"));
     }
 
     private SubmitPromotionBidCommandResponse unavailable(String commandId, PromotionBidRoute route) {
@@ -221,6 +209,9 @@ public class PromotionCommandSubmissionService {
                 "UNAVAILABLE",
                 false,
                 ErrorCode.PROMOTION_AUCTION_PAUSED.getCode(),
+                null,
+                null,
+                null,
                 null,
                 null,
                 null,

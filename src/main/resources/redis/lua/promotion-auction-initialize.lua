@@ -53,11 +53,13 @@ else
             'extendSec', extendSec,
             'maxExtensions', maxExtensions,
             'extendCount', '0',
-            'bidCount', '0')
+            'bidCount', '0',
+            'winnerCommandId', '',
+            'winnerRequestHash', '',
+            'winnerAck', '')
 end
 
--- 幂等回填英式字段：窗口参数不可变，旧热状态（缺少新字段）HSETNX 补齐，
--- 避免 decision.lua 因 REDIS_STATE_INCOMPLETE 拒绝存量窗口出价。
+-- 幂等回填英式字段及当前赢家槽；旧热状态缺失时安全补空，首次新接受会原子覆盖。
 redis.call('HSETNX', stateKey, 'currentPriceCents', reservePrice)
 redis.call('HSETNX', stateKey, 'winnerCampaignId', '')
 redis.call('HSETNX', stateKey, 'incrementCents', incrementCents)
@@ -67,6 +69,9 @@ redis.call('HSETNX', stateKey, 'extendSec', extendSec)
 redis.call('HSETNX', stateKey, 'maxExtensions', maxExtensions)
 redis.call('HSETNX', stateKey, 'extendCount', '0')
 redis.call('HSETNX', stateKey, 'bidCount', '0')
+redis.call('HSETNX', stateKey, 'winnerCommandId', '')
+redis.call('HSETNX', stateKey, 'winnerRequestHash', '')
+redis.call('HSETNX', stateKey, 'winnerAck', '')
 
 -- Materialize empty hashes so type checks can distinguish missing initialization.
 redis.call('HSETNX', escrowKey, '_initialized', '1')

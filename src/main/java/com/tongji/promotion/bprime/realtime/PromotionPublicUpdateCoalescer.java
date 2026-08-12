@@ -221,6 +221,9 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         private long latestDecisionVersion;
         private long pendingFromDecisionVersion;
         private java.time.Instant latestOccurredAt;
+        private Object latestWinnerCampaignId;
+        private Object latestCurrentPriceCents;
+        private Object latestNextRequiredAmount;
         private long lastPublishedAtNanos;
 
         private synchronized void merge(PromotionAuctionDecision decision) {
@@ -237,6 +240,11 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
             latestDecisionId = decision.decisionId();
             latestDecisionVersion = decision.decisionVersion();
             latestOccurredAt = decision.decidedAt();
+            latestWinnerCampaignId = decision.payload().getOrDefault(
+                    "winnerCampaignId", String.valueOf(decision.campaignId()));
+            latestCurrentPriceCents = decision.payload().getOrDefault(
+                    "currentPriceCents", decision.bidAmount());
+            latestNextRequiredAmount = decision.payload().getOrDefault("nextRequiredAmount", 0L);
         }
 
         private synchronized boolean hasPending() {
@@ -267,6 +275,11 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
             }
             long nextEventVersion = latestDecisionVersion;
             List<PromotionBidDelta> batch = new ArrayList<>(deltas.values());
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("winnerCampaignId", latestWinnerCampaignId);
+            details.put("currentPriceCents", latestCurrentPriceCents);
+            details.put("nextRequiredAmount", latestNextRequiredAmount);
+            details.put("decisionVersion", latestDecisionVersion);
             PromotionAuctionRealtimeEvent event = new PromotionAuctionRealtimeEvent(
                     "window-" + latestDecisionId + ":public:" + nextEventVersion,
                     PromotionAuctionRealtimeEvent.RANKING_DELTA,
@@ -279,7 +292,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
                     "OPEN",
                     List.of(),
                     batch,
-                    Map.of(),
+                    details,
                     latestOccurredAt);
             publisher.publishPublic(event);
             deltas.clear();

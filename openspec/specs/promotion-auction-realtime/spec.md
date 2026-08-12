@@ -58,6 +58,17 @@ The system SHALL publish realtime promotion auction events for public window cha
 - **THEN** the system publishes a targeted outcome event to that creator
 - **AND** the event includes the command id, decision id, decision version, and outcome reason when rejected
 
+#### Scenario: Private accepted acknowledgement arrives after newer public state
+- **WHEN** a private accepted acknowledgement for decision version 101 arrives after public state version 102
+- **THEN** `leadingAtDecision=true` confirms only that the command led at version 101
+- **AND** the client keeps version 102 as its current winner state
+- **AND** determines current leadership only from the greatest public or snapshot `decisionVersion`
+
+#### Scenario: Public ranking state identifies the winner
+- **WHEN** the system publishes a coalesced `RANKING_DELTA`
+- **THEN** its details include `winnerCampaignId`, `currentPriceCents`, `nextRequiredAmount`, and `decisionVersion`
+- **AND** clients do not infer the current winner from ranking order or private acknowledgement arrival order
+
 #### Scenario: Window closes
 - **WHEN** a terminal decision (`AUCTION_SOLD` or `AUCTION_NO_BID`) is logged for an auction window
 - **THEN** the system publishes a terminal window event
@@ -101,6 +112,7 @@ The system SHALL keep promotion auction snapshot as the recovery path for reconn
 - **WHEN** a client receives a realtime event whose version does not follow its local version
 - **THEN** the client reads snapshot
 - **AND** replaces its local auction display state with snapshot data
+- **AND** the client does not display definite current leadership until snapshot recovery completes
 
 #### Scenario: Creator restores own visible state
 - **WHEN** a creator reloads after reconnect
