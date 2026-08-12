@@ -21,7 +21,6 @@ public class PromotionAuctionWindow {
     private Instant windowEndAt;
     private int slotCount;
     private long reservePrice;
-    private PromotionDecisionPath decisionPath;
     private PromotionAuctionWindowStatus status;
     private Instant settledAt;
     private Instant createdAt;

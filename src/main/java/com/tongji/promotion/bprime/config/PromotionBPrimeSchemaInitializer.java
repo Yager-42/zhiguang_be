@@ -13,7 +13,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class PromotionBPrimeSchemaInitializer {
 
-    private static final String WINDOW_TABLE = "promotion_auction_window";
     private static final String CHECKPOINT_TABLE = "promotion_projection_checkpoint";
 
     private final JdbcTemplate jdbcTemplate;
@@ -45,8 +44,6 @@ public class PromotionBPrimeSchemaInitializer {
                     )
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """);
-        ensureColumn(WINDOW_TABLE, "decision_path",
-                "VARCHAR(32) NOT NULL DEFAULT 'LEGACY_BROKER'");
         ensureColumn(CHECKPOINT_TABLE, "last_stream_id", "VARCHAR(32) NULL");
         jdbcTemplate.update("""
                 UPDATE promotion_projection_checkpoint

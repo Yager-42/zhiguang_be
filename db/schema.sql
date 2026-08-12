@@ -400,7 +400,6 @@ CREATE TABLE IF NOT EXISTS promotion_auction_window (
     window_end_at DATETIME(3) NOT NULL,
     slot_count INT NOT NULL,
     reserve_price BIGINT NOT NULL,
-    decision_path VARCHAR(32) NOT NULL DEFAULT 'LEGACY_BROKER',
     status VARCHAR(16) NOT NULL,
     settled_at DATETIME(3) NULL,
     created_at DATETIME(3) NOT NULL,

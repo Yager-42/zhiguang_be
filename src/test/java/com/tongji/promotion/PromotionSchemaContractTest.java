@@ -27,7 +27,7 @@ class PromotionSchemaContractTest {
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_projection_checkpoint");
         assertThat(schema).contains("last_decision_version BIGINT NOT NULL");
         assertThat(schema).contains("last_stream_id VARCHAR(32) NOT NULL");
-        assertThat(schema).contains("decision_path VARCHAR(32) NOT NULL DEFAULT 'LEGACY_BROKER'");
+        assertThat(schema).doesNotContain("decision_path");
         assertThat(schema).contains("reserve_price BIGINT NOT NULL");
         assertThat(checkpointMapper).contains("SELECT auction_window_id, last_decision_id, last_decision_version");
         assertThat(checkpointMapper).contains("last_decision_version = VALUES(last_decision_version)");
