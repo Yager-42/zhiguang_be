@@ -1,38 +1,31 @@
 ## MODIFIED Requirements
 
-### Requirement: Reconciliation SHALL cover B' position auction command and decision chain
+### Requirement: Reconciliation SHALL recover B' settlement from MySQL facts
 
-The system SHALL repair B' inconsistencies where Kafka decision payloads need replay into MySQL projection facts, where `SETTLED` windows are fully missing slot allocation, and where settled `CAPTURE` / `RELEASE` wallet effects are missing or inconsistent. RocketMQ command records SHALL remain audit-only and SHALL NOT block settled repair when the durable settled chain is otherwise complete. MySQL per-decision facts SHALL NOT be used because `promotion_auction_decision` is removed by the promotion realtime change.
+The system SHALL repair settled B' allocation and wallet-effect drift by invoking the promotion settlement module's expected-facts action over MySQL `promotion_auction_window`, `promotion_bid`, and `promotion_bid_escrow` facts. Reconciliation SHALL retain task creation, actual-fact comparison, retry, and dead-task orchestration. Redis, Redis Stream history, WebSocket state, and historical command records SHALL NOT be expected-settlement inputs.
 
-#### Scenario: Decision is logged but projection is missing
-- **WHEN** Kafka decision log contains an accepted position auction decision
-- **AND** MySQL projection for that decision is missing
-- **THEN** reconciliation schedules or executes projection replay
-- **AND** wallet and bid facts remain idempotent
-
-#### Scenario: Decision log has expired
-- **WHEN** MySQL projection is missing
-- **AND** required Kafka promotion decision facts are older than the configured retention window
-- **THEN** reconciliation marks the task `dead` for operator-visible follow-up
-- **AND** does not use a MySQL per-decision backup table as an alternate replay source
+#### Scenario: Durable facts conflict
+- **WHEN** a settled winner, first price, bid, or escrow authorization cannot be derived consistently
+- **THEN** reconciliation marks the task `dead`
+- **AND** does not infer missing authorization or reconstruct settlement from Redis or WebSocket state
 
 #### Scenario: Slot allocation is fully missing after settled window
-- **WHEN** a position auction window is `SETTLED`
-- **AND** no slot allocation exists for that window
-- **AND** MySQL settled bid and window facts are sufficient to recompute winners and clearing prices
-- **THEN** reconciliation rebuilds allocation from recomputed durable facts
+- **WHEN** a sold position auction window is `SETTLED`
+- **AND** allocation is wholly absent
+- **AND** MySQL settled facts derive one expected allocation
+- **THEN** reconciliation inserts only that allocation
+- **AND** does not execute wallet effects or mutate bid, escrow, or window state
 
 #### Scenario: Slot allocation is partially present after settled window
-- **WHEN** a position auction window is `SETTLED`
-- **AND** slot allocation rows exist but are incomplete or inconsistent
-- **THEN** reconciliation marks the window `dead`
+- **WHEN** a `SETTLED` window has partial or conflicting allocation
+- **THEN** reconciliation marks the task `dead`
 - **AND** does not attempt automatic partial-row repair
 
-#### Scenario: Command record is missing but settled facts are complete
-- **WHEN** a settled window has durable projection, allocation, and wallet facts
-- **AND** the RocketMQ command record is missing
-- **THEN** reconciliation records an operator-visible warning
-- **AND** does not fail or block settled repair on command absence
+#### Scenario: Historical command is absent
+- **WHEN** a settled window has sufficient MySQL settled facts
+- **AND** its historical command is absent
+- **THEN** reconciliation derives expected settlement without that command
+- **AND** does not treat the command as settlement authority
 
 #### Scenario: Wallet effect is missing
 - **WHEN** a recomputed settled result requires capture or release wallet movement
@@ -40,13 +33,13 @@ The system SHALL repair B' inconsistencies where Kafka decision payloads need re
 - **THEN** reconciliation schedules or executes wallet effect repair
 - **AND** repeated repair remains idempotent
 
-### Requirement: Reconciliation SHALL start with minimal projection repair
+### Requirement: Reconciliation SHALL preserve the deep settlement boundary
 
-The system SHALL keep first-phase B' reconciliation compatible with existing projection replay and allocation rebuild, then extend it with settled-window wallet effect repair and operator rerun for promotion auctions. Deep repair SHALL remain scoped to B' promotion auction settled facts and SHALL NOT become a full-platform reconciliation rewrite.
+Deep repair SHALL remain scoped to B' settled facts and SHALL NOT become a full-platform reconciliation rewrite. Expected settlement derivation belongs to promotion; task and ledger/allocation comparison belongs to reconciliation.
 
-#### Scenario: Wallet repair runs from settled facts
+#### Scenario: Wallet repair runs from shared facts
 - **WHEN** wallet ledger repair is triggered for a settled window
-- **THEN** reconciliation derives expected `CAPTURE` / `RELEASE` effects from recomputed MySQL settled facts
+- **THEN** reconciliation consumes expected `CAPTURE` / `RELEASE` effects from shared settlement facts
 - **AND** does not add settled-phase `HOLD` repair
 
 #### Scenario: Non-B' target is encountered
