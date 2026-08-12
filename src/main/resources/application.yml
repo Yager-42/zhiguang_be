@@ -139,14 +139,17 @@ promotion:
   bprime:
     enabled: ${PROMOTION_BPRIME_ENABLED:false}
     hot-state-ttl-seconds: ${PROMOTION_BPRIME_HOT_STATE_TTL_SECONDS:86400}
-    command-idempotency-ttl-seconds: ${PROMOTION_BPRIME_COMMAND_IDEMPOTENCY_TTL_SECONDS:300}
-    command-idempotency-bucket-seconds: ${PROMOTION_BPRIME_COMMAND_IDEMPOTENCY_BUCKET_SECONDS:60}
+    bid-decision-batch-maximum-size: ${PROMOTION_BPRIME_BID_DECISION_BATCH_MAXIMUM_SIZE:256}
+    bid-decision-batch-maximum-argument-bytes: ${PROMOTION_BPRIME_BID_DECISION_BATCH_MAXIMUM_ARGUMENT_BYTES:262144}
     stream-sweep-interval-ms: ${PROMOTION_BPRIME_STREAM_SWEEP_INTERVAL_MS:2000}
     stream-read-batch-size: ${PROMOTION_BPRIME_STREAM_READ_BATCH_SIZE:1000}
     stream-retain-events: ${PROMOTION_BPRIME_STREAM_RETAIN_EVENTS:100000}
     settled-compensation-lookback-seconds: ${PROMOTION_BPRIME_SETTLED_COMPENSATION_LOOKBACK_SECONDS:604800}
-    bid-submission-thread-count: ${PROMOTION_BPRIME_BID_SUBMISSION_THREADS:32}
-    bid-submission-queue-capacity: ${PROMOTION_BPRIME_BID_SUBMISSION_QUEUE_CAPACITY:16384}
+    bid-drainer-thread-count: ${PROMOTION_BPRIME_BID_DRAINER_THREADS:8}
+    bid-ready-window-queue-capacity: ${PROMOTION_BPRIME_BID_READY_WINDOW_QUEUE_CAPACITY:16384}
+    bid-window-pending-capacity: ${PROMOTION_BPRIME_BID_WINDOW_PENDING_CAPACITY:8192}
+    bid-global-pending-capacity: ${PROMOTION_BPRIME_BID_GLOBAL_PENDING_CAPACITY:65536}
+    bid-combiner-maximum-windows: ${PROMOTION_BPRIME_BID_COMBINER_MAXIMUM_WINDOWS:100000}
     bid-route-cache-maximum-size: ${PROMOTION_BPRIME_BID_ROUTE_CACHE_MAXIMUM_SIZE:100000}
     web-socket-inbound-thread-count: ${PROMOTION_BPRIME_WS_INBOUND_THREAD_COUNT:8}
     web-socket-outbound-thread-count: ${PROMOTION_BPRIME_WS_OUTBOUND_THREAD_COUNT:32}

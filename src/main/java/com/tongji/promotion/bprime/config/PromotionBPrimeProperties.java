@@ -19,15 +19,17 @@ public class PromotionBPrimeProperties {
 
     private boolean enabled;
     private long hotStateTtlSeconds = 86_400L;
-    private long commandIdempotencyTtlSeconds = 300L;
-    /** 幂等字段 TTL 余量（HSETEX 字段 TTL = commandIdempotencyTtlSeconds + 本值，保持原桶 300-360s 有效窗口）。 */
-    private long commandIdempotencyBucketSeconds = 60L;
+    private int bidDecisionBatchMaximumSize = 256;
+    private int bidDecisionBatchMaximumArgumentBytes = 262_144;
     private long streamSweepIntervalMs = 2_000L;
     private int streamReadBatchSize = 1_000;
     private long streamRetainEvents = 100_000L;
     private long settledCompensationLookbackSeconds = 604_800L;
-    private int bidSubmissionThreadCount = 32;
-    private int bidSubmissionQueueCapacity = 16_384;
+    private int bidDrainerThreadCount = 8;
+    private int bidReadyWindowQueueCapacity = 16_384;
+    private int bidWindowPendingCapacity = 8_192;
+    private int bidGlobalPendingCapacity = 65_536;
+    private long bidCombinerMaximumWindows = 100_000L;
     private long bidRouteCacheMaximumSize = 100_000L;
     private int webSocketInboundThreadCount = 8;
     private int webSocketOutboundThreadCount = 32;
@@ -47,12 +49,14 @@ public class PromotionBPrimeProperties {
 
     @PostConstruct
     void validate() {
-        if (hotStateTtlSeconds <= 0 || commandIdempotencyTtlSeconds <= 0
-                || commandIdempotencyBucketSeconds < 0
+        if (hotStateTtlSeconds <= 0
+                || bidDecisionBatchMaximumSize <= 0 || bidDecisionBatchMaximumSize > 1_000
+                || bidDecisionBatchMaximumArgumentBytes <= 0
                 || streamSweepIntervalMs <= 0 || streamReadBatchSize <= 0 || streamReadBatchSize > 1_000
                 || streamRetainEvents < 100_000L || settledCompensationLookbackSeconds <= 0
-                || bidSubmissionThreadCount <= 0 || bidSubmissionQueueCapacity <= 0
-                || bidRouteCacheMaximumSize <= 0
+                || bidDrainerThreadCount <= 0 || bidReadyWindowQueueCapacity <= 0
+                || bidWindowPendingCapacity <= 0 || bidGlobalPendingCapacity < bidWindowPendingCapacity
+                || bidCombinerMaximumWindows <= 0 || bidRouteCacheMaximumSize <= 0
                 || webSocketInboundThreadCount <= 0 || webSocketOutboundThreadCount <= 0
                 || webSocketChannelQueueCapacity <= 0 || webSocketNativeSessionQueueCapacity <= 0
                 || publicUpdateFlushIntervalMs <= 0

@@ -2,9 +2,9 @@
 
 | 字段 | 值 |
 |------|-----|
-| **enhancement_contract_version** | `0.1.0` |
-| **status** | **draft**（待 grill 收敛；收敛后冻结为 frozen） |
-| **updated** | 2026-08-10 |
+| **enhancement_contract_version** | `0.3.0` |
+| **status** | **superseded**（竞价热路径 T1/T2/T4 与逐请求线程池基线由 `promotion-window-flat-combining-v1` 取代；关窗 T3 保留独立参考） |
+| **updated** | 2026-08-12 |
 | **enhancement_id** | `promotion-bprime-hotpath-throughput-v1` |
 | **性质** | **enhancement（性能/可靠性增强）**——不改任何对外契约（HTTP API、WS 协议、ACK 字段、错误码均保持），不引入新用户可见能力 |
 | **范围** | 单机、单 Spring Boot 实例下的 `promotion.bprime`（REDIS_STREAM 决策路径）竞价热链路吞吐与洪峰稳定性优化 |
@@ -12,14 +12,16 @@
 | **参考源** | `live-auction-system`（Go）竞价链路逐行对比（Redis Lua 权威裁决 + Stream 事件日志 + Pub/Sub 唤醒 + 网关侧 fast-reject）；仅吸收可映射到当前代码的设计，不复制其业务语义（单物品升价拍卖） |
 
 ---
+> **Supersession notice:** `docs/plans/promotion_window_flat_combining_v1.md` 是当前竞价热路径的唯一实施方案。本文关于价格缓存快拒、逐请求 Lua 瘦身、command bucket 幂等和逐请求 executor 的设计与验收均不再生效；不得与新批量裁决路径并行实施。本文关窗调度 T3 不属于该冲突范围。
+
 
 ## 0. 效力与状态
 
-1. 本文是推广竞价热链路性能改造的 **draft enhancement 边界**。标为 **locked** 的决定不得由实现者自行改写；重大变更须重新 grill 并提升 `enhancement_contract_version`。
-2. 本文只以当前生产代码、运行配置、数据库结构和已观察压测结果为基线；README、CONTEXT、历史架构文档不构成本 enhancement 的规范源。
-3. 本 enhancement 覆盖：出价入站预拒（T1）、Lua 裁决脚本瘦身（T2）、关窗调度（T3）、幂等桶瘦身（T4）、洪峰配置基线验证（T5）。
-4. 本 enhancement **不承诺固定绝对 QPS**。完成标准是相同单机、相同数据、相同负载下取得可重复的正向提升，且功能正确性（版本连续性、幂等、对账）不回退。
-5. 单机持续过载时的行为边界保持不变：线程池队列满后按现有 `UNAVAILABLE` 语义返回；本 enhancement 不引入应用层 429/503。
+1. 本文已被 `promotion-window-flat-combining-v1` 部分取代，不再作为竞价热路径 active implementation contract。
+2. 原 T1（价格缓存快拒）、T2（逐请求 Lua 瘦身）、T4（command bucket）和 T5 中逐请求线程池矩阵仅保留历史背景。
+3. 关窗调度 T3 仍可独立实施，但不得恢复逐请求裁决、command Hash 或旧 fast-reject 路径。
+4. 当前性能验收、幂等与 ACK 契约以新计划和 `ARCHITECTURE_CONTRACT.md` v0.6.0 为准。
+5. 单机持续过载仍必须明确返回有界背压语义，不得使用无限队列。
 
 ---
 

@@ -3,6 +3,7 @@ package com.tongji.promotion.bprime.redis;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
+import com.tongji.promotion.bprime.model.PromotionAuctionCommandBatch;
 import com.tongji.promotion.bprime.model.PromotionAuctionDecision;
 import com.tongji.promotion.bprime.model.PromotionBidRoute;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,22 +67,21 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         initialize(Instant.now().plusSeconds(60));
         authorize(243L, 42L, 500L);
 
-        PromotionAuctionDecision accepted = adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
-        PromotionAuctionDecision replay = adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
-        PromotionAuctionDecision conflict = adapter.decide(bid("cmd-1", "hash-2", 243L, 42L, 200L));
-        PromotionAuctionDecision belowLadder = adapter.decide(bid("cmd-2", "hash-3", 243L, 42L, 250L));
+        PromotionAuctionDecision accepted = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
+        PromotionAuctionDecision replay = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
+        PromotionAuctionDecision conflict = decide(bid("cmd-1", "hash-2", 243L, 42L, 200L));
+        PromotionAuctionDecision belowLadder = decide(bid("cmd-2", "hash-3", 243L, 42L, 250L));
 
         assertThat(accepted.accepted()).isTrue();
         assertThat(replay.decisionId()).isEqualTo(accepted.decisionId());
         assertThat(conflict.rejectionReason()).isEqualTo("IDEMPOTENCY_CONFLICT");
         assertThat(belowLadder.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
-        assertThat(belowLadder.payload().get("requiredAmount")).isEqualTo(300);
-        assertThat(belowLadder.payload().get("currentPriceCents")).isEqualTo(200);
+        assertThat(belowLadder.payload().get("requiredAmount")).isEqualTo(300L);
+        assertThat(belowLadder.payload().get("currentPriceCents")).isEqualTo(200L);
         assertThat(belowLadder.decisionVersion()).isEqualTo(1L);
         assertThat(streamIds()).containsExactly("1-0");
-        Set<String> commandKeys = redis.keys(PREFIX + ":commands");
-        assertThat(commandKeys).hasSize(1);
-        assertThat(redis.opsForHash().hasKey(commandKeys.iterator().next(), "cmd-1")).isTrue();
+        assertThat(redis.hasKey(PREFIX + ":commands")).isFalse();
+        assertThat(redis.opsForHash().get(PREFIX + ":state", "winnerCommandId")).isEqualTo("cmd-1");
     }
 
     @Test
@@ -90,8 +90,8 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         authorize(243L, 42L, 500L);
         authorize(244L, 43L, 500L);
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var first = executor.submit(() -> adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L)));
-            var second = executor.submit(() -> adapter.decide(bid("cmd-2", "hash-2", 244L, 43L, 210L)));
+            var first = executor.submit(() -> decide(bid("cmd-1", "hash-1", 243L, 42L, 200L)));
+            var second = executor.submit(() -> decide(bid("cmd-2", "hash-2", 244L, 43L, 210L)));
 
             PromotionAuctionDecision firstDecision = first.get();
             PromotionAuctionDecision secondDecision = second.get();
@@ -111,15 +111,51 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
     }
 
     @Test
+    void oneBatchAcceptsHighestValidCandidateOnly() {
+        initialize(Instant.now().plusSeconds(60));
+        authorize(243L, 42L, 500L);
+        authorize(244L, 43L, 250L);
+        authorize(245L, 44L, 500L);
+        List<PromotionAuctionCommand> commands = List.of(
+                bid("cmd-high-invalid", "hash-high", 244L, 43L, 400L),
+                bid("cmd-winner", "hash-winner", 245L, 44L, 350L),
+                bid("cmd-low", "hash-low", 243L, 42L, 200L));
+
+        var result = adapter.decide(new PromotionAuctionCommandBatch(WINDOW_ID, commands));
+
+        assertThat(result.items()).extracting(item -> item.outcome().name())
+                .containsExactly("BID_NOT_HIGHER", "ACCEPTED", "BID_NOT_HIGHER");
+        assertThat(result.committedPriceCents()).isEqualTo(350L);
+        assertThat(result.winnerCommandId()).isEqualTo("cmd-winner");
+        assertThat(streamIds()).containsExactly("1-0");
+    }
+
+    @Test
+    void replacingWinnerInSameBatchMakesOldWinnerReplayNotHigher() {
+        initialize(Instant.now().plusSeconds(60));
+        authorize(243L, 42L, 500L);
+        authorize(244L, 43L, 500L);
+        PromotionAuctionCommand oldWinner = bid("cmd-old", "hash-old", 243L, 42L, 200L);
+        assertThat(decide(oldWinner).accepted()).isTrue();
+        PromotionAuctionCommand higher = bid("cmd-new", "hash-new", 244L, 43L, 350L);
+
+        var result = adapter.decide(new PromotionAuctionCommandBatch(WINDOW_ID, List.of(higher, oldWinner)));
+
+        assertThat(result.items()).extracting(item -> item.outcome().name())
+                .containsExactly("ACCEPTED", "BID_NOT_HIGHER");
+        assertThat(streamIds()).containsExactly("1-0", "2-0");
+    }
+
+    @Test
     void escrowAndLadderRulesRejectWithoutAdvancingVersion() {
         initialize(Instant.now().plusSeconds(60));
         authorize(243L, 42L, 240L);
-        adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
+        decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
 
         PromotionAuctionDecision aboveLadder =
-                adapter.decide(bid("cmd-2", "hash-2", 243L, 42L, 250L));
+                decide(bid("cmd-2", "hash-2", 243L, 42L, 250L));
         PromotionAuctionDecision equal =
-                adapter.decide(bid("cmd-3", "hash-3", 243L, 42L, 200L));
+                decide(bid("cmd-3", "hash-3", 243L, 42L, 200L));
 
         assertThat(aboveLadder.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
         assertThat(equal.rejectionReason()).isEqualTo("BID_NOT_HIGHER");
@@ -132,7 +168,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         authorize(243L, 42L, 190L);
 
         PromotionAuctionDecision insufficient =
-                adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
+                decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
 
         assertThat(insufficient.rejectionReason()).isEqualTo("ESCROW_INSUFFICIENT");
         assertThat(streamIds()).isEmpty();
@@ -144,7 +180,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         authorize(243L, 42L, 500L);
         redis.opsForHash().put(PREFIX + ":state", "decisionVersion", "1");
 
-        assertThatThrownBy(() -> adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L)))
+        assertThatThrownBy(() -> decide(bid("cmd-1", "hash-1", 243L, 42L, 200L)))
                 .isInstanceOf(PromotionAuctionUnavailableException.class)
                 .hasMessageContaining("REDIS_STREAM_VERSION_MISMATCH");
         assertThat(streamIds()).isEmpty();
@@ -154,7 +190,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
     void wrongRedisKeyTypePausesAuction() {
         redis.opsForValue().set(PREFIX + ":state", "wrong-type");
 
-        assertThatThrownBy(() -> adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L)))
+        assertThatThrownBy(() -> decide(bid("cmd-1", "hash-1", 243L, 42L, 200L)))
                 .isInstanceOf(PromotionAuctionUnavailableException.class)
                 .hasMessageContaining("REDIS_KEY_TYPE_MISMATCH");
     }
@@ -165,7 +201,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         authorize(243L, 42L, 500L);
 
         PromotionAuctionDecision close = windowCloser.close(WINDOW_ID).orElseThrow();
-        PromotionAuctionDecision rejected = adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
+        PromotionAuctionDecision rejected = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
 
         assertThat(close.type()).isEqualTo("AUCTION_NO_BID");
         assertThat(rejected.rejectionReason()).isEqualTo("WINDOW_CLOSED");
@@ -178,7 +214,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         initialize(Instant.now().plusSeconds(60));
         authorize(243L, 42L, 500L);
         PromotionAuctionDecision accepted =
-                adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
+                decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
         assertThat(accepted.accepted()).isTrue();
         // 让窗口过期（反狙击默认 extendWindowSec=10s 且 endAt 在 60s 外，不触发延长）
         redis.opsForHash().put(PREFIX + ":state", "windowEndAtEpochMs", "1");
@@ -195,8 +231,8 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         initialize(Instant.now().plusSeconds(60), 100L, 300L, 5);
         authorize(243L, 42L, 500L);
 
-        PromotionAuctionDecision capBid = adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 300L));
-        PromotionAuctionDecision afterSold = adapter.decide(bid("cmd-2", "hash-2", 243L, 42L, 300L));
+        PromotionAuctionDecision capBid = decide(bid("cmd-1", "hash-1", 243L, 42L, 300L));
+        PromotionAuctionDecision afterSold = decide(bid("cmd-2", "hash-2", 243L, 42L, 300L));
 
         assertThat(capBid.accepted()).isTrue();
         assertThat(streamIds()).containsExactly("1-0", "2-0");
@@ -210,7 +246,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         authorize(243L, 42L, 500L);
         try (var executor = Executors.newFixedThreadPool(2)) {
             var bidResult = executor.submit(
-                    () -> adapter.decide(bid("cmd-race", "hash-race", 243L, 42L, 200L)));
+                    () -> decide(bid("cmd-race", "hash-race", 243L, 42L, 200L)));
             var closeResult = executor.submit(() -> windowCloser.close(WINDOW_ID).orElseThrow());
 
             assertThat(bidResult.get().rejectionReason()).isEqualTo("WINDOW_CLOSED");
@@ -224,7 +260,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         initialize(Instant.now().plusSeconds(5));
         authorize(243L, 42L, 500L);
 
-        PromotionAuctionDecision accepted = adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
+        PromotionAuctionDecision accepted = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
 
         assertThat(accepted.accepted()).isTrue();
         // 反狙击：endAt-now=5s <= 10s → 延长 10s，AUCTION_EXTENDED @v2
@@ -243,14 +279,14 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         initialize(Instant.now().plusSeconds(5), 100L, 0L, 1);
         authorize(243L, 42L, 500L);
 
-        PromotionAuctionDecision first = adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
+        PromotionAuctionDecision first = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
         assertThat(first.accepted()).isTrue();
         assertThat(redis.opsForHash().get(PREFIX + ":state", "extendCount")).isEqualTo("1");
         // 把 endAt 拉近到 1s 内再出价：extendCount(1) < maxExtensions(1) 不成立 → 不延长
         redis.opsForHash().put(PREFIX + ":state", "windowEndAtEpochMs",
                 String.valueOf(Instant.now().plusSeconds(1).toEpochMilli()));
 
-        PromotionAuctionDecision second = adapter.decide(bid("cmd-2", "hash-2", 243L, 42L, 300L));
+        PromotionAuctionDecision second = decide(bid("cmd-2", "hash-2", 243L, 42L, 300L));
 
         assertThat(second.accepted()).isTrue();
         assertThat(redis.opsForHash().get(PREFIX + ":state", "extendCount")).isEqualTo("1");
@@ -261,7 +297,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
     void capHitThenCloseReturnsAlreadyTerminalAndDropsClosingIndex() {
         initialize(Instant.now().plusSeconds(60), 100L, 300L, 5);
         authorize(243L, 42L, 500L);
-        adapter.decide(bid("cmd-1", "hash-1", 243L, 42L, 300L));
+        decide(bid("cmd-1", "hash-1", 243L, 42L, 300L));
         redis.opsForZSet().add(CLOSING_INDEX, String.valueOf(WINDOW_ID),
                 Instant.now().plusSeconds(60).toEpochMilli());
 
@@ -295,6 +331,11 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
             String commandId, String hash, long campaignId, long bidderUserId, long amount) {
         return new PromotionAuctionCommand(commandId, "idem", hash, WINDOW_ID, campaignId, bidderUserId,
                 1000L + bidderUserId, "FEED_TOP_SLOT", amount, 100L, "OPEN", "BID", Instant.now());
+    }
+
+    private PromotionAuctionDecision decide(PromotionAuctionCommand command) {
+        return adapter.decide(new PromotionAuctionCommandBatch(WINDOW_ID, List.of(command)))
+                .items().getFirst().decision();
     }
 
     private List<String> streamIds() {

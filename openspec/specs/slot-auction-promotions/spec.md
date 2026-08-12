@@ -38,6 +38,19 @@ The system SHALL run each slot auction window as an English ascending-price auct
 - **AND** the shared current price is raised to the accepted amount
 - **AND** subsequent bids must clear the raised price plus the configured increment
 
+#### Scenario: Concurrent bids are amount-linearized
+- **WHEN** bid executions overlap in the same auction window and none has completed
+- **THEN** the system MAY linearize the pending bids by `bidAmount` descending and stable ingress order
+- **AND** one Redis Lua batch accepts at most the highest valid candidate
+- **AND** an intermediate amount is not guaranteed a transient acceptance
+- **AND** the final highest valid winner and first-price amount are not reduced by batching
+
+#### Scenario: Current winner retries
+- **WHEN** the current winner retries the same command id with the same request hash
+- **THEN** Redis Lua replays the current `ACCEPTED` decision exactly
+- **AND** a different request hash for that current command id returns `IDEMPOTENCY_CONFLICT`
+- **AND** after a higher valid bid replaces the winner, retrying the old command is adjudicated against current state and does not replay historical acceptance
+
 #### Scenario: Anti-snipe extension
 - **WHEN** an accepted bid arrives within `extendWindowSec` of the window end
 - **AND** the configured extension budget (`maxExtensions`) is not exhausted

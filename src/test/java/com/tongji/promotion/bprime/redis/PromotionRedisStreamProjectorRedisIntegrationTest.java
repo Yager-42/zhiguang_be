@@ -69,7 +69,7 @@ class PromotionRedisStreamProjectorRedisIntegrationTest {
         properties.setStreamReadBatchSize(1000);
         projector = new PromotionRedisStreamProjector(
                 redis, objectMapper, checkpointMapper, windowMapper, projectionService,
-                fanoutService, metrics, properties, new PromotionBidPriceCache(properties));
+                fanoutService, metrics, properties, new PromotionBidAdmissionState(properties));
         Set<String> keys = redis.keys(PREFIX + "*");
         if (keys != null && !keys.isEmpty()) {
             redis.delete(keys);

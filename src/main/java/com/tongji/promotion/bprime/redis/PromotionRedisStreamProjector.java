@@ -56,7 +56,7 @@ public class PromotionRedisStreamProjector implements MessageListener {
     private final PromotionDecisionFanoutService fanoutService;
     private final PromotionPerformanceMetrics metrics;
     private final PromotionBPrimeProperties properties;
-    private final PromotionBidPriceCache priceCache;
+    private final PromotionBidAdmissionState admissionState;
     private final DefaultRedisScript<Long> trimScript;
     private final Map<Long, ReentrantLock> windowLocks = new ConcurrentHashMap<>();
     private final AtomicBoolean registryRecovered = new AtomicBoolean();
@@ -69,7 +69,7 @@ public class PromotionRedisStreamProjector implements MessageListener {
                                          PromotionDecisionFanoutService fanoutService,
                                          PromotionPerformanceMetrics metrics,
                                          PromotionBPrimeProperties properties,
-                                         PromotionBidPriceCache priceCache) {
+                                         PromotionBidAdmissionState admissionState) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.checkpointMapper = checkpointMapper;
@@ -78,7 +78,7 @@ public class PromotionRedisStreamProjector implements MessageListener {
         this.fanoutService = fanoutService;
         this.metrics = metrics;
         this.properties = properties;
-        this.priceCache = priceCache;
+        this.admissionState = admissionState;
         this.trimScript = new DefaultRedisScript<>();
         this.trimScript.setLocation(new ClassPathResource("redis/lua/promotion-auction-trim.lua"));
         this.trimScript.setResultType(Long.class);
@@ -182,13 +182,9 @@ public class PromotionRedisStreamProjector implements MessageListener {
             }
             items.forEach(item -> {
                 PromotionAuctionDecision decision = item.decision();
-                if ("BID_ACCEPTED".equals(decision.type()) && decision.accepted()) {
-                    // 接受价即新共享当前价，单调上升（Go updateRoomStateFromEvent 同构）
-                    priceCache.update(decision.auctionWindowId(), decision.bidAmount());
-                }
-                if ("AUCTION_SOLD".equals(decision.type()) || "AUCTION_NO_BID".equals(decision.type())) {
-                    // 终态到达即清缓存：下一出价放行 Lua 返回 WINDOW_CLOSED，避免误拒成 BID_NOT_HIGHER
-                    priceCache.invalidate(decision.auctionWindowId());
+                if ("BID_ACCEPTED".equals(decision.type()) || "AUCTION_EXTENDED".equals(decision.type())
+                        || "AUCTION_SOLD".equals(decision.type()) || "AUCTION_NO_BID".equals(decision.type())) {
+                    admissionState.update(decision);
                 }
                 if (fanoutService.publishDecision(decision)) {
                     metrics.recordRealtimeComplete(decision);

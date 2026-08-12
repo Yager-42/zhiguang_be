@@ -1,6 +1,5 @@
 package com.tongji.promotion.bprime.redis;
 
-import java.util.ArrayList;
 import java.util.List;
 
 public final class PromotionAuctionRedisKeys {
@@ -48,25 +47,30 @@ public final class PromotionAuctionRedisKeys {
         return "promotion:auction:{*}:pub";
     }
 
-    /** 幂等命令记录：单 key Hash，字段级 TTL（HSETEX），无时间桶。 */
-    public static String commandBucket(long auctionWindowId) {
-        return prefix(auctionWindowId) + ":commands";
-    }
 
     public static String campaign(long auctionWindowId, long campaignId) {
         return prefix(auctionWindowId) + ":campaign:" + campaignId;
     }
 
-    public static List<String> decisionKeys(long auctionWindowId, long campaignId) {
-        return List.of(
-                state(auctionWindowId),
-                commandBucket(auctionWindowId),
-                ranking(auctionWindowId),
-                campaign(auctionWindowId, campaignId),
-                escrow(auctionWindowId),
-                events(auctionWindowId),
-                publicationChannel(auctionWindowId),
-                publicationWakeup(auctionWindowId));
+    /**
+     * 构造 Cluster-safe 批量裁决 KEYS：公共六键后接批内去重后的 campaign key。
+     *
+     * @param auctionWindowId 拍卖窗口 ID
+     * @param campaignIds 按首次出现顺序去重的 campaign ID
+     * @return 全部包含相同窗口 hash tag 的 Redis key
+     */
+    public static List<String> decisionKeys(long auctionWindowId, List<Long> campaignIds) {
+        List<String> keys = new java.util.ArrayList<>(6 + campaignIds.size());
+        keys.add(state(auctionWindowId));
+        keys.add(ranking(auctionWindowId));
+        keys.add(escrow(auctionWindowId));
+        keys.add(events(auctionWindowId));
+        keys.add(publicationChannel(auctionWindowId));
+        keys.add(publicationWakeup(auctionWindowId));
+        for (Long campaignId : campaignIds) {
+            keys.add(campaign(auctionWindowId, campaignId));
+        }
+        return List.copyOf(keys);
     }
 
     public static List<String> initializationKeys(long auctionWindowId) {

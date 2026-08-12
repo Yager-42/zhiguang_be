@@ -16,12 +16,19 @@ The system SHALL accept fixed position promotion bids as durable commands routed
 
 ### Requirement: Redis Lua SHALL be the hot decision authority
 
-The system SHALL use Redis Lua as the hot decision authority for active position auction windows. The script SHALL maintain window status, command replay, campaign bid state, and ranked bid state atomically for each auction window.
+The system SHALL use batched Redis Lua as the sole hot decision authority for active position auction windows. Each application instance SHALL combine pending commands per window, order overlapping incomplete commands by amount descending with stable ingress tie-break, and submit bounded batches. The script SHALL maintain window status, the current-winner replay slot, campaign bid state, escrow hold, ranked bid state, decision version, and Stream events atomically; each batch SHALL create at most one new accepted decision.
 
-#### Scenario: Command replay returns same decision
-- **WHEN** the same bid command is processed more than once with the same request hash
-- **THEN** Redis Lua returns the original decision
-- **AND** no duplicate rank or wallet hot-state effect is created
+#### Scenario: Current winner command replay returns same decision
+- **WHEN** the current winning command is processed again with the same request hash before a higher bid replaces it
+- **THEN** Redis Lua returns the original current `ACCEPTED` decision
+- **AND** no duplicate rank, Stream, version, or wallet hot-state effect is created
+- **AND** a conflicting request hash returns `IDEMPOTENCY_CONFLICT`
+
+#### Scenario: Historical command is no longer replayable
+- **WHEN** a higher valid bid has replaced a previously accepted command
+- **AND** the previous command is submitted again
+- **THEN** Redis Lua adjudicates it against the current authoritative state
+- **AND** does not replay the historical `ACCEPTED` decision
 
 #### Scenario: Higher bid raises the shared ladder
 - **WHEN** a valid bid command clears the shared current price plus the configured increment (or reaches the buy-now cap)

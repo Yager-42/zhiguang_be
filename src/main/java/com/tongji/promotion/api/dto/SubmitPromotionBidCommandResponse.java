@@ -15,12 +15,15 @@ public record SubmitPromotionBidCommandResponse(
         Long decisionVersion,
         Long bidAmount,
         Instant decidedAt,
-        Long requiredAmount
+        Long requiredAmount,
+        Boolean leadingAtDecision,
+        String winnerCampaignId,
+        Long currentPriceCents
 ) {
     public SubmitPromotionBidCommandResponse(String commandId, String auctionWindowId, String status,
                                              boolean resultAvailable, String rejectionReason) {
         this(commandId, auctionWindowId, status, resultAvailable, rejectionReason,
-                null, null, null, null, null);
+                null, null, null, null, null, null, null, null);
     }
 
     public SubmitPromotionBidCommandResponse(String commandId, String auctionWindowId, String status,

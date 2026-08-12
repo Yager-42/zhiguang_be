@@ -2,9 +2,9 @@
 
 | 字段 | 值 |
 |------|-----|
-| **contract_version** | `0.5.0` |
+| **contract_version** | `0.6.0` |
 | **status** | **active**（本文档首次建立；后续架构/契约变更必须同步修改本文并升版本） |
-| **updated** | 2026-08-10 |
+| **updated** | 2026-08-12 |
 | **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，390 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
 | **roadmap** | OpenSpec 变更与执行顺序见 [`openspec/changes/execution-order.md`](../../openspec/changes/execution-order.md)；本仓为单体演进、微服务拆分仅作约束（见该文件阶段 0） |
 | **out of scope for this doc** | 前端 `zhiguang_fe/`（当前为空占位目录）、`loadtest/` 压测方案细节、各业务请求/响应 JSON 逐字段表（以代码 DTO 为准） |
@@ -33,14 +33,14 @@
 | D7 | 计数模型 | 实体计数（like/fav）三层：**位图分片事实层**（`bm:*`，32768 位/分片）+ **Kafka 事件聚合桶**（`counter-events` → `agg:v1:*`，每秒折叠 SDS）+ **SDS 固定结构**（`cnt:v1:*`，5×uint32 大端）；用户计数 `ucnt:{userId}` 同 SDS 布局（`counter/schema/*.java`） | 计数直接 INCR 单一计数器键 |
 | D8 | 发布语义 | **202 Accepted 只表示 attempt 被受理**：`POST /knowposts/{id}/publish` 恒 202 + `publishAttemptId`；`know_posts.status` 状态机 `draft→publishing→published / publish_failed / rejected / deleted`，全部守卫 UPDATE（`KnowPostMapper.xml`）；`publish_attempt` 独立状态机 + 5 分钟卡死恢复（`PublishAttemptService.java`） | 同步发布返回 200 表示已发布；无守卫状态流转 |
 | D9 | 钱包 | 三态余额 `available/held/escrowed` + **只追加流水** + `(owner_user_id, business_ref)` 幂等 + `wallet_business_ref` 全局 claim 串行化；托管六态状态机不变。推广竞价新增唯一写边界 `POST /api/v1/promotions/campaigns/{id}/escrow`：只在出价前增加 MySQL `held` 与 `promotion_bid_escrow.authorized_amount`，不得进入单条竞价决策路径 | 余额绝对值覆盖写；删改流水；在有序竞价消费者逐条写钱包 |
-| D10 | 推广竞价 | 窗口式 slot 竞价按**英式升价拍卖**结算（GSP 已废除）：窗口共享一条当前价台阶（state `currentPriceCents` 初值 = `reservePrice`），接受出价必须 ≥ `min(currentPrice+increment, cap)`（`capPriceCents=0` 禁用一口价），接受后共享价升至出价额并更新当前赢家；`capPriceCents>0` 时出价达 cap 立即终态 `AUCTION_SOLD`；关窗终态 `AUCTION_SOLD`（有赢家，赢家按**第一价格** = 终态 `currentPriceCents` 结算）/ `AUCTION_NO_BID`（无出价，全部释放）；反狙击 `extendWindowSec/extendSec/maxExtensions`：终窗前 `extendWindowSec` 内接受且未超预算时延长 `extendSec` 并广播 `AUCTION_EXTENDED`（独立决策版本），cap-hit 不延长，MySQL `window_end_at` 不改（实际结束只存 Redis state 与事件载荷）。**Elia 热路径**：保证金预授权 MySQL 事务提交后同步投影 Redis，成功才返回可竞价；STOMP 与原生 WebSocket 共用收单协议，所有请求直接执行同槽 Redis Lua。Lua 使用 Redis TIME，按 `>= endAt` 关窗，先校验 key 类型和 `state.decisionVersion == Stream last id`，再原子完成幂等、required 台阶校验、单 campaign 递增与共享价/赢家更新、授权额度、状态/排名/currentHold 更新、显式 `<decisionVersion>-0` XADD 和 PUBLISH；接受或拒绝结果直接返回原连接，不再返回 `PUBLISHED`。拒绝不推进版本、不写 Stream；相同 commandId+requestHash 重放原结果，hash 冲突稳定拒绝。Pub/Sub 仅作唤醒，fanout 与 MySQL 投影只信 Stream；窗口初始化后登记 `promotion:auction:active-streams`，启动及 2 秒 sweep 只遍历该集合，窗口 SETTLED 且 checkpoint 追平后移除，MySQL 中未完成的 REDIS_STREAM 窗口负责恢复登记，禁止扫描 Redis 全键空间。checkpoint 成功后仅裁剪已投影事件并保留最近 100000 条。Redis 使用 AOF everysec，故障时返回可重试 `PROMOTION_AUCTION_PAUSED`，不得降级到 MySQL 裁决；不承诺金融级零丢失。窗口不可变 decision_path 保证 clean cutover，禁止同一窗口双写或双裁决。 | 网关判定竞价接受；GSP 多槽排名/第二价格结算；绕过 requestHash 幂等；使用应用时钟裁决终场；先修改状态再校验 Stream/version；把 Pub/Sub 当事件事实；全库 SCAN/KEYS 恢复推广 Stream；裁剪未投影事件；Redis 故障时访问 MySQL 接受竞价；返回 `PUBLISHED` 等待二次 outcome；推广竞价使用 RocketMQ/Kafka；同一窗口双路径裁决 |
+| D10 | 推广竞价 | 窗口式 slot 竞价按**英式升价拍卖**结算（GSP 已废除）：窗口共享当前价台阶，接受出价必须 ≥ `min(currentPrice+increment, cap)`，最终赢家按终态 `currentPriceCents` 第一价格结算；cap-hit 原子进入 `AUCTION_SOLD`，反狙击接受可原子延长实际 endAt。**Elia 热路径**：保证金预授权 MySQL 提交后同步投影 Redis；STOMP 与原生 WebSocket 共用同步最终 ACK 协议。每实例使用每窗口有界 flat combiner，将彼此执行时间重叠且尚未完成的请求按 `bidAmount DESC, ingressSequence ASC` 线性化并自然聚批；批量 Redis Lua 是唯一允许返回新 `ACCEPTED` 的权威路径，每批最多接受一个最高有效候选，其余项按脚本结束时最终状态裁决，中间价格不保证短暂接受。Lua 对公共 state、Redis TIME、Stream/version 每批只读一次，并原子更新 state/ranking/escrow/campaign、显式 `<decisionVersion>-0` Stream 及可选延长或终态事件。拒绝不推进版本、不写 Stream；Redis 故障返回可重试暂停，不降级 MySQL。所有动态 campaign KEYS 与公共 key 使用同一 `{windowId}` hash tag；多实例不增加分布式锁。 | 网关或 Java 判定竞价接受；逐请求 FIFO executor 或逐请求 Lua；固定 batching 等待；一批接受多个中间价；GSP 多槽排名/第二价格结算；使用应用时钟裁决终场；先修改状态再校验 Stream/version；把 Pub/Sub 当事件事实；Redis 故障时访问 MySQL 接受竞价；同一窗口双路径裁决 |
 | D11 | 对账补偿 | 独立对账模块：任务表 + checkpoint 扫描 + 10 个 Reconciler + Redisson 锁执行器（指数退避、卡死恢复），事件消费失败与周期扫描双来源建任务（`reconciliation/**`） | 事件丢失不补；手工修数 |
 | D12 | 通知 | 幂等键 `notifications.event_key` 唯一 + 捕获 `DuplicateKeyException`；点赞通知 5 分钟 Redis 窗口聚合，以 `notif:like:bucket:due` ZSet 按窗口结束时间登记，30 秒定时限量读取到期成员并落库 | 同事件重复落多条；在共享 Redis 使用 `KEYS`/全库 `SCAN` 查找到期桶 |
 | D13 | 场景开关 | 外部系统默认关闭、显式开启：`canal.enabled=false`、`recommendation.gorse.enabled=false`、`promotion.bprime.enabled=false`、`moderation.llm.enabled=false`、`counter.rebuild.enabled=false`、`feed.home.mixed-enabled=false`（`application.yml`）；bprime 关闭时保证金事务在冻结资金前暂停，Redis Stream worker 与实时推送不得执行 | 生产依赖未开启的能力 |
 | D14 | 大整数序列化 | 所有 Snowflake ID（>2^53）出参一律 **String 序列化** 防 JS 精度丢失（DTO 注释与实现：`NotificationItemResponse`、`KnowPostDraftCreateResponse`、`ModerationReportResponse`、`PromotionRankingItem` 等） | long 直出到 JSON |
-| D15 | 幂等三支柱 | ① 请求幂等：评论/发布使用唯一键；推广出价以 `(window,user,idempotencyKey)` 生成确定性 commandId，同槽分钟桶 hash 以 commandId field 紧凑保存 `requestHash+decision`，当前桶写入、TTL 范围内各桶回放，默认保留 10 分钟且桶整体过期；保证金授权由 `promotion_bid_escrow uk(window,campaign)` 与钱包 businessRef 判等；② 事件幂等：消费端去重键/唯一键与推广 checkpoint；③ 对账兜底：事件失败建对账任务（§6.4） | 依赖 at-most-once 投递；为每个高频推广请求创建独立 Redis key |
+| D15 | 幂等三支柱 | ① 请求幂等：评论/发布使用唯一键；推广出价以 `(window,user,idempotencyKey)` 生成确定性 commandId。推广窗口 state 仅以 `winnerCommandId/winnerRequestHash/winnerAck` 保存**当前最高价**的强幂等槽：当前赢家相同 commandId+requestHash 精确重放 `ACCEPTED`，相同 commandId 不同 hash 返回 `IDEMPOTENCY_CONFLICT`；更高有效价接受后原子覆盖该槽，旧接受和所有拒绝均按当前权威状态重新裁决，不保存 command Hash 历史记录。保证金授权由 `promotion_bid_escrow uk(window,campaign)` 与钱包 businessRef 判等；② 事件幂等：消费端去重键/唯一键与推广 checkpoint；③ 对账兜底：事件失败建对账任务（§6.4） | 依赖 at-most-once 投递；为推广拒绝或历史接受保存逐命令 Redis 记录；被超过后重放失效的历史 `ACCEPTED` |
 | D16 | 技术栈绑定 | Spring Boot 3.5.10 / Java 21 / MyBatis 3.0.3 + MySQL 8.4 / Redis 7.4 AOF everysec + Redisson 3.52 / Kafka（spring-kafka，非推广域）/ Cassandra 4.1 / ES（客户端 8.12.2，容器 9.2.1+IK）/ MinIO / Spring AI 1.1.2（DashScope，审核）/ Sentinel core 1.8.10（规则外部下发）/ Caffeine 3.1.8 / Canal client 1.1.8 / WebSocket STOMP（推广实时） | 未 ADR 换主框架；推广重新接入 broker |
-| D17 | 推广实时性能 | 公共合并事件显式携带 `[fromDecisionVersion,toDecisionVersion]`，客户端以该区间是否覆盖本地 `decisionVersion + 1` 判断真实缺口；`eventVersion` 仅保留为 `toDecisionVersion` 兼容字段，不得按逐消息连续序号解释。原生 WebSocket 维护 `windowId -> SessionWriter set` 房间索引，公共事件不得遍历全体连接；每连接仍由专用有界 outbound executor 执行单写泵，私有 ACK 使用 FIFO，公共状态使用可覆盖槽。公共合并周期在配置的 100–250ms 范围内按房间订阅数与待写公共槽占比自适应，同 campaign 覆盖不得触发 snapshot，只有区间缺口才恢复。网关使用有界本地 route L1，Redis route 仍是冷启动与跨实例事实；单标热路径缓存命中后只执行一次 Redis Lua。裁决执行器使用可配置的固定线程数与有界队列，过载明确返回 `UNAVAILABLE`。Lua 以 Stream `last-generated-id` 校验版本、减少重复 TTL 写，并用同槽 wakeup key 将多次 XADD 合并为一次 Pub/Sub 提示；Stream 始终是 fanout 与投影事实。 | 把合并后的 `eventVersion` 当逐消息连续序号；公共事件遍历全体连接；每标读取 Redis route；无界裁决并发或队列；把 Pub/Sub 当逐事件事实 |
+| D17 | 推广实时性能 | 公共合并事件显式携带 `[fromDecisionVersion,toDecisionVersion]`，客户端仅以最大 `decisionVersion` 的公共事件或 snapshot 合并当前赢家状态；区间缺口恢复完成前不得显示确定领先。`RANKING_DELTA.details` 必须携带 `winnerCampaignId/currentPriceCents/nextRequiredAmount/decisionVersion`。私有 ACK 的 `leadingAtDecision` 仅表示对应原子裁决版本领先，不能覆盖更新公共版本。原生 WebSocket 使用窗口房间索引和每连接有界单写泵。网关使用有界 route L1 和版本化 admission state；只允许依据 Redis 已确认 `committedPrice`、真实 required、非当前赢家命令和安全终场 margin 做零 Redis 确定性拒绝。裁决任务粒度为窗口：每窗口一个有界 pending、最多一个 drainer，不同窗口共享有界 ready-window drainer executor；每轮至多一个受批量数与 ARGV 字节双上限约束的批次后公平重排，所有 pending/Future/窗口状态均有界。Lua 返回后先同步推进本实例 admission state 再完成 Future；Stream 始终是 fanout 与投影事实。 | 把私有历史 ACK 当当前领先；空公共赢家 details；逐请求 executor/FIFO；无限 pending、批次或 Future；用 pending 候选作本地拒绝阈值；本地接受；把 Pub/Sub 当逐事件事实 |
 
 ### 1.1 已废弃 / 未采纳
 
@@ -136,7 +136,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `commentReadExecutor` | 8/16 | 200 | CallerRuns | 评论页 Cassandra/Counter 并行读取 |
 | `commentOutboxExecutor` | 2/4 | 50 | CallerRuns | 评论 outbox future 协调 |
 | `commentCacheInvalidationScheduler` | 1 | 100ms 合并窗口 | 专用单线程延迟调度，不注册为 Spring `TaskScheduler` | 评论缓存失效去重与合并 |
-| `promotionBidSubmissionExecutor` | 32/32（可配置） | 16384（可配置） | **Abort** | Redis Lua 同步裁决；固定并发避免队列先于线程扩容 |
+| `promotionBidDrainerExecutor` | 可配置固定并发 | 可配置有界 ready-window 队列 | **Abort** | 每窗口 flat combiner 的共享 drainer；任务单位为窗口，每轮至多一个有界批次 |
 | `promotionBidWebSocketOutboundExecutor` | 32/32（可配置） | 65536（可配置） | **Abort** | 原生 WebSocket 私有 ACK 与可覆盖公共状态单写泵；跨 session 并行、单 session 串行 |
 | `promotionPublicUpdateScheduler` | 2（可配置） | 100ms 基础 tick，按房间压力自适应至 250ms（可配置） | **Abort** | 按窗口合并公共增量 |
 
@@ -232,7 +232,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 缓存 | `feed:timeline:{userId}` | TimelinePage JSON / 300s（仅默认页大小） | `FollowFeedServiceImpl` |
 | 缓存 | `feed:author:{authorId}:head` | List<TimelineItem> JSON / 120s（singleflight `feed-author-head` 重建） | 同上 |
 | 推广 | `promotion:allocation:active:{type}` | JSON 列表 / 300s | `PromotionAllocationCacheService` |
-| 推广 | `promotion:auction:{{windowId}}:state` / `:commands:{minuteBucket}` / `:ranking` / `:campaign:{cid}` / `:escrow` / `:events` / `:pub` / `:wakeup` | 窗口内 key 使用同一 Redis Cluster hash slot；state 内含 `decisionVersion/status/reservePrice/windowEndAtEpochMs` 及英式升价字段 `currentPriceCents/winnerCampaignId/incrementCents/capPriceCents/extendWindowSec/extendSec/maxExtensions/extendCount/bidCount`，escrow hash 字段为 `{campaignId}:authorizedAmount/currentHold`；ranking score=`-bidAmount`，member 以前导零首次接受版本保证同价先到优先；commands 分钟桶 hash 以 commandId field 保存紧凑 `requestHash+decision`，默认 10 分钟 TTL；`:pub` 仅发送 Stream ID 唤醒 | `PromotionAuctionRedisKeys`+Lua |
+| 推广 | `promotion:auction:{{windowId}}:state` / `:ranking` / `:campaign:{cid}` / `:escrow` / `:events` / `:pub` / `:wakeup` | 全部窗口 key 使用同一 Redis Cluster hash slot；state 除英式升价字段外保存 `winnerCommandId/winnerRequestHash/winnerAck` 当前赢家幂等槽；escrow hash 保存 `{campaignId}:authorizedAmount/currentHold`；ranking score=`-bidAmount`；批量决策 KEYS 为公共 6 key 后接去重 campaign key，不再使用 command bucket；`:pub` 仅发送 Stream ID 唤醒 | `PromotionAuctionRedisKeys`+Lua |
 | 推广 | `promotion:auction:active-streams` | set；登记需投影/恢复的 REDIS_STREAM 窗口，窗口 SETTLED 且 checkpoint 追平后移除 | `PromotionAuctionHotStateRepository`/`PromotionRedisStreamProjector` |
 | 推广 | `promotion:bprime:route:{campaignId}` | 保证金授权后写入的出价路由 JSON（owner/window/post/resource/reserve/status/endAt）/ 覆盖窗口结束后的有界 TTL | `PromotionBidRouteRepository` |
 | 通知 | `notif:like:event:{eventId}` | 去重 / 6h | `LikeNotificationConsumer` |
@@ -274,7 +274,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 - 每窗口 Stream：`promotion:auction:{windowId}:events`；Pub/Sub：`promotion:auction:{windowId}:pub`。全部窗口内 key 使用相同 `{windowId}` hash tag。
 - Stream ID 固定为 `<decisionVersion>-0`；`decision` 字段保存完整 JSON 决策。state 版本与最后 Stream ID 必须锁步。
-- `BID_ACCEPTED`、`AUCTION_EXTENDED`（反狙击）、`AUCTION_SOLD`（cap-hit 或到期有赢家）、`AUCTION_NO_BID`（到期无出价）写 Stream；业务拒绝直接返回并缓存幂等结果，不推进版本。保证金授权以 MySQL 为事实并同步投影 Redis，不写竞价 Stream。
+- `BID_ACCEPTED`、`AUCTION_EXTENDED`（反狙击）、`AUCTION_SOLD`（cap-hit 或到期有赢家）、`AUCTION_NO_BID`（到期无出价）写 Stream；普通拒绝不写 Stream、不推进版本、不持久化 command record。`BID_ACCEPTED` 载荷携带接受后的 `winnerCampaignId/currentPriceCents/nextRequiredAmount`。批量 Lua 每批最多写一个新 `BID_ACCEPTED`，并可原子追加一次延长或终态事件。保证金授权以 MySQL 为事实并同步投影 Redis，不写竞价 Stream。
 - Pub/Sub 仅提示窗口可能有新事件。窗口初始化登记 `promotion:auction:active-streams`；启动先从 MySQL 恢复 OPEN 或 checkpoint 未追平的 REDIS_STREAM 窗口，再每 2 秒只遍历该 set 并从 checkpoint 继续 XRANGE；不得直接消费 Pub/Sub payload 作为事实，不得扫描 Redis 全键空间。
 - MySQL checkpoint 提交后，允许裁剪 `min(checkpointVersion, currentVersion-100000)` 之前的事件；checkpoint 落后或不可用时停止裁剪。窗口结算且投影追平后，热键保留 24 小时。
 
@@ -284,7 +284,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 |------|------|
 | 评论提交 | `pending_comments uk(creator,client_request_id)` + `DuplicateKeyException` 返回既有 |
 | 发布受理 | `publish_attempt uk(creator,post,idempotent_key)` |
-| 推广竞价 | 确定性 commandId + `request_hash`（SHA-256）一致校验 + Redis Lua 在 TTL 覆盖的同槽分钟桶中按 commandId field 重放；接受结果与 Stream append 同一 Lua 原子完成并直接返回，拒绝缓存结果但不写 Stream |
+| 推广竞价 | 确定性 commandId + `requestHash`；Redis Lua 在窗口 state 仅保存当前赢家 `winnerCommandId/winnerRequestHash/winnerAck`。当前赢家同 hash 精确重放，冲突 hash 稳定拒绝；被超过的历史接受与所有拒绝按当前状态重新裁决，不保存历史 command record。接受与 Stream append 在同一批量 Lua 原子完成。 |
 | 推广保证金 | `promotion_bid_escrow uk(window,campaign)` + 授权目标金额 businessRef + Redis `authorizedAmount` 仅接受单调增加 |
 | 决策投影 | checkpoint 版本严格连续校验 + 同版本同 decisionId 幂等跳过 |
 | 关系事件 | `dedup:rel:*` SET NX（10m）+ follower 表 upsert |
@@ -530,5 +530,5 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 - 全局：`ZhiGuangApplication.java`、`config/ThreadPoolConfig.java`、`config/RedissonConfig.java`、`config/ElasticsearchConfig.java`、`config/RestTemplateConfig.java`
 - 契约常量：`common/exception/ErrorCode.java`（27 码）、`common/id/IdNamespace.java`（11 命名空间）、`relation/outbox/OutboxTopics.java`（`canal-outbox`）、`counter/event/CounterTopics.java`（`counter-events`）、`promotion/bprime/config/PromotionBPrimeProperties.java`（主题/组）
 - 状态机 SQL：`resources/mapper/KnowPostMapper.xml`、`PublishAttemptMapper.xml`、`CommentOutboxMapper.xml`、`ModerationReportMapper.xml`、`ReconciliationTaskMapper.xml`、`WalletEscrowMapper.xml`
-- 原子脚本：`resources/redis/lua/promotion-auction-decision.lua`（推广决策）、`common/singleflight/RedisSingleFlightCoordinatorRepository.java`（6 Lua）、`counter/service/impl/CounterServiceImpl.java`（TOGGLE_LUA 等）
+- 原子脚本：`resources/redis/lua/promotion-auction-decision-batch.lua`（推广批量决策）、`common/singleflight/RedisSingleFlightCoordinatorRepository.java`（6 Lua）、`counter/service/impl/CounterServiceImpl.java`（TOGGLE_LUA 等）
 - DDL：`db/schema.sql`（26 表）、`db/cassandra/init.cql`（4 表）
