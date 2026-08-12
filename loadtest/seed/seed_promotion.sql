@@ -7,15 +7,15 @@ VALUES (3000001, __USER_ID_BASE__ + 1, __POST_ID_BASE__ + 1, 'FEED_TOP_SLOT', 'A
         NOW(3), NOW(3) + INTERVAL 2 HOUR, NOW(3), NOW(3))
 ON DUPLICATE KEY UPDATE resource_type = 'FEED_TOP_SLOT', status = 'ACTIVE', start_at = NOW(3), end_at = NOW(3) + INTERVAL 2 HOUR, updated_at = NOW(3);
 
-INSERT INTO promotion_auction_window (id, resource_type, window_start_at, window_end_at, slot_count, reserve_price, decision_path, status, settled_at, created_at, updated_at)
-VALUES (3000002, 'FEED_TOP_SLOT', NOW(3) - INTERVAL 10 MINUTE, NOW(3) + INTERVAL 50 MINUTE, 1, 1, 'REDIS_STREAM', 'OPEN', NULL, NOW(3), NOW(3))
+INSERT INTO promotion_auction_window (id, resource_type, window_start_at, window_end_at, slot_count, reserve_price, status, settled_at, created_at, updated_at)
+VALUES (3000002, 'FEED_TOP_SLOT', NOW(3) - INTERVAL 10 MINUTE, NOW(3) + INTERVAL 50 MINUTE, 1, 1, 'OPEN', NULL, NOW(3), NOW(3))
 ON DUPLICATE KEY UPDATE resource_type = 'FEED_TOP_SLOT', window_start_at = NOW(3) - INTERVAL 10 MINUTE, window_end_at = NOW(3) + INTERVAL 50 MINUTE,
-                        slot_count = 1, reserve_price = 1, decision_path = 'REDIS_STREAM', status = 'OPEN', settled_at = NULL, updated_at = NOW(3);
+                        slot_count = 1, reserve_price = 1, status = 'OPEN', settled_at = NULL, updated_at = NOW(3);
 
-INSERT INTO promotion_auction_window (id, resource_type, window_start_at, window_end_at, slot_count, reserve_price, decision_path, status, settled_at, created_at, updated_at)
-VALUES (3000003, 'SEARCH_TOP_SLOT', NOW(3) - INTERVAL 10 MINUTE, NOW(3) + INTERVAL 50 MINUTE, 1, 1, 'REDIS_STREAM', 'OPEN', NULL, NOW(3), NOW(3))
+INSERT INTO promotion_auction_window (id, resource_type, window_start_at, window_end_at, slot_count, reserve_price, status, settled_at, created_at, updated_at)
+VALUES (3000003, 'SEARCH_TOP_SLOT', NOW(3) - INTERVAL 10 MINUTE, NOW(3) + INTERVAL 50 MINUTE, 1, 1, 'OPEN', NULL, NOW(3), NOW(3))
 ON DUPLICATE KEY UPDATE resource_type = 'SEARCH_TOP_SLOT', window_start_at = NOW(3) - INTERVAL 10 MINUTE, window_end_at = NOW(3) + INTERVAL 50 MINUTE,
-                        slot_count = 1, reserve_price = 1, decision_path = 'REDIS_STREAM', status = 'OPEN', settled_at = NULL, updated_at = NOW(3);
+                        slot_count = 1, reserve_price = 1, status = 'OPEN', settled_at = NULL, updated_at = NOW(3);
 
 SET @promotion_campaign_n := __PROMOTION_CAMPAIGN_N__;
 SET @promotion_user_base := __USER_ID_BASE__;
