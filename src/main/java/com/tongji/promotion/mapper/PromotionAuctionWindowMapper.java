@@ -20,6 +20,8 @@ public interface PromotionAuctionWindowMapper {
 
     PromotionAuctionWindow findById(@Param("id") long id);
 
+    PromotionAuctionWindow findByIdForUpdate(@Param("id") long id);
+
     /** 当前处于 OPEN 且时间覆盖 now 的窗口（收单窗口）。 */
     PromotionAuctionWindow findOpenWindow(@Param("resourceType") PromotionResourceType resourceType,
                                           @Param("now") Instant now);
@@ -32,8 +34,8 @@ public interface PromotionAuctionWindowMapper {
     /** 已到期（window_end_at <= now）且仍 OPEN 的窗口，按到期时间升序，限量结算。 */
     List<PromotionAuctionWindow> listClosableWindows(@Param("now") Instant now,
                                                      @Param("batchSize") int batchSize);
-    /** 启动恢复所需的 REDIS_STREAM 活跃窗口。 */
-    List<PromotionAuctionWindow> listActiveRedisStreamWindows();
+    /** 启动恢复所需的 OPEN 活跃窗口。 */
+    List<PromotionAuctionWindow> listActiveWindows();
 
     /** 已结算窗口游标，用于对账按 settled_at + id 稳定推进。 */
     List<PromotionAuctionWindow> listSettledWindowsCursor(@Param("lastSettledAt") Instant lastSettledAt,
@@ -43,4 +45,6 @@ public interface PromotionAuctionWindowMapper {
 
     /** 标记窗口已结算：status=SETTLED + settled_at。 */
     int markSettled(@Param("id") long id, @Param("settledAt") Instant settledAt);
+
+    int markSettledIfOpen(@Param("id") long id, @Param("settledAt") Instant settledAt);
 }

@@ -11,7 +11,6 @@
         <result column="window_end_at" property="windowEndAt"/>
         <result column="slot_count" property="slotCount"/>
         <result column="reserve_price" property="reservePrice"/>
-        <result column="decision_path" property="decisionPath"/>
         <result column="status" property="status"/>
         <result column="settled_at" property="settledAt"/>
         <result column="created_at" property="createdAt"/>
@@ -21,16 +20,16 @@
     <insert id="insert" parameterType="com.tongji.promotion.model.PromotionAuctionWindow">
         INSERT INTO promotion_auction_window (
             id, resource_type, window_start_at, window_end_at, slot_count, reserve_price,
-            decision_path, status, settled_at, created_at, updated_at
+            status, settled_at, created_at, updated_at
         ) VALUES (
             #{id}, #{resourceType}, #{windowStartAt}, #{windowEndAt}, #{slotCount}, #{reservePrice},
-            COALESCE(#{decisionPath}, 'LEGACY_BROKER'), #{status}, #{settledAt}, #{createdAt}, #{updatedAt}
+            #{status}, #{settledAt}, #{createdAt}, #{updatedAt}
         )
     </insert>
 
     <sql id="WindowColumns">
         id, resource_type, window_start_at, window_end_at, slot_count, reserve_price,
-        decision_path, status, settled_at, created_at, updated_at
+        status, settled_at, created_at, updated_at
     </sql>
 
     <select id="findById" parameterType="long" resultMap="PromotionAuctionWindowResultMap">
@@ -38,6 +37,14 @@
         FROM promotion_auction_window
         WHERE id = #{id}
         LIMIT 1
+    </select>
+
+    <select id="findByIdForUpdate" parameterType="long" resultMap="PromotionAuctionWindowResultMap">
+        SELECT <include refid="WindowColumns"/>
+        FROM promotion_auction_window
+        WHERE id = #{id}
+        LIMIT 1
+        FOR UPDATE
     </select>
 
     <select id="findOpenWindow" resultMap="PromotionAuctionWindowResultMap">
@@ -68,11 +75,10 @@
         LIMIT #{batchSize}
     </select>
 
-    <select id="listActiveRedisStreamWindows" resultMap="PromotionAuctionWindowResultMap">
+    <select id="listActiveWindows" resultMap="PromotionAuctionWindowResultMap">
         SELECT <include refid="WindowColumns"/>
         FROM promotion_auction_window
-        WHERE decision_path = 'REDIS_STREAM'
-          AND status = 'OPEN'
+        WHERE status = 'OPEN'
         ORDER BY id ASC
     </select>
 
@@ -97,5 +103,14 @@
             settled_at = #{settledAt},
             updated_at = #{settledAt}
         WHERE id = #{id}
+    </update>
+
+    <update id="markSettledIfOpen">
+        UPDATE promotion_auction_window
+        SET status     = 'SETTLED',
+            settled_at = #{settledAt},
+            updated_at = #{settledAt}
+        WHERE id = #{id}
+          AND status = 'OPEN'
     </update>
 </mapper>
