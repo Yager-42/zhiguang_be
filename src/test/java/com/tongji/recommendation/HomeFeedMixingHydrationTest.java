@@ -2,6 +2,7 @@ package com.tongji.recommendation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
+import com.tongji.common.singleflight.DistributedSingleFlightService;
 import com.tongji.cache.hotkey.HotKeyDetector;
 import com.tongji.counter.service.CounterService;
 import com.tongji.counter.service.FeedPageCounterState;
@@ -56,6 +57,8 @@ class HomeFeedMixingHydrationTest {
 
     @Mock
     private PromotionAllocationService promotionAllocationService;
+    @Mock
+    private DistributedSingleFlightService singleFlightService;
 
     private KnowPostFeedServiceImpl service;
 
@@ -69,7 +72,8 @@ class HomeFeedMixingHydrationTest {
                 feedPublicCache,
                 feedMineCache,
                 hotKeyDetector,
-                promotionAllocationService
+                promotionAllocationService,
+                singleFlightService
         );
     }
 

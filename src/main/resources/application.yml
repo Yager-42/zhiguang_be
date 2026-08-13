@@ -236,6 +236,15 @@ singleflight:
     moderation-llm:
       enabled: ${SINGLEFLIGHT_MODERATION_LLM_ENABLED:true}
       mode: ${SINGLEFLIGHT_MODERATION_LLM_MODE:}
+    knowpost-public-feed:
+      enabled: ${SINGLEFLIGHT_KNOWPOST_PUBLIC_FEED_ENABLED:true}
+      mode: distributed
+      result-ttl-millis: ${SINGLEFLIGHT_KNOWPOST_PUBLIC_FEED_RESULT_TTL_MILLIS:3000}
+      failed-result-ttl-millis: ${SINGLEFLIGHT_KNOWPOST_PUBLIC_FEED_FAILED_TTL_MILLIS:1000}
+      l1-cache-enabled: false
+    knowpost-detail:
+      enabled: ${SINGLEFLIGHT_KNOWPOST_DETAIL_ENABLED:true}
+      mode: local
     comment-page-head:
       enabled: ${SINGLEFLIGHT_COMMENT_PAGE_ENABLED:true}
       mode: distributed

@@ -3,6 +3,7 @@ package com.tongji.knowpost.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.tongji.common.singleflight.DistributedSingleFlightService;
 import com.tongji.cache.hotkey.HotKeyDetector;
 import com.tongji.common.id.IdService;
 import com.tongji.counter.service.CounterService;
@@ -49,7 +50,8 @@ class KnowPostServiceImplDetailHotPathTest {
                 redis,
                 detailCache,
                 hotKey,
-                mock(OutboxMapper.class));
+                mock(OutboxMapper.class),
+                mock(DistributedSingleFlightService.class));
 
         KnowPostDetailResponse response = service.getDetail(21L, 42L);
 
