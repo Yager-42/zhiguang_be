@@ -5,6 +5,7 @@ import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentFeedbackEvent;
 import com.tongji.comment.event.CommentFeedbackProducer;
 import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.metrics.CommentMetrics;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -21,7 +22,8 @@ class CommentFeedbackConsumerTest {
     @Test
     void createdEventKeepsStableEventIdentity() throws Exception {
         CommentFeedbackProducer producer = mock(CommentFeedbackProducer.class);
-        CommentFeedbackConsumer consumer = new CommentFeedbackConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentFeedbackConsumer consumer = new CommentFeedbackConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 producer, mock(CommentMetrics.class));
 
         consumer.onMessage(json());
@@ -37,7 +39,8 @@ class CommentFeedbackConsumerTest {
         CommentFeedbackProducer producer = mock(CommentFeedbackProducer.class);
         doThrow(new IllegalStateException("kafka unavailable")).when(producer)
                 .publishReliable(org.mockito.ArgumentMatchers.any());
-        CommentFeedbackConsumer consumer = new CommentFeedbackConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentFeedbackConsumer consumer = new CommentFeedbackConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 producer, mock(CommentMetrics.class));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> consumer.onMessage(json()))

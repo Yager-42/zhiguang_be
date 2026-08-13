@@ -9,15 +9,11 @@ import com.tongji.comment.cache.CommentBaseItem;
 import com.tongji.comment.cache.CommentBasePage;
 import com.tongji.comment.cache.CommentCacheKeys;
 import com.tongji.comment.cache.CommentPageCacheService;
+import com.tongji.comment.event.CommentEventWriter;
+import com.tongji.comment.event.CommentWriteRequest;
 import com.tongji.comment.mapper.CommentMapper;
-import com.tongji.comment.mapper.CommentOutboxMapper;
 import com.tongji.comment.mapper.PendingCommentMapper;
 import com.tongji.comment.model.Comment;
-import com.tongji.comment.model.CommentOutbox;
-import com.tongji.comment.event.CommentEventType;
-import com.tongji.comment.event.CommentOutboxEvent;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.comment.metrics.CommentMetrics;
 import com.tongji.comment.service.CommentService;
@@ -56,35 +52,32 @@ public class CommentServiceImpl implements CommentService {
     private final PendingCommentMapper pendingCommentMapper;
     private final TextStorageService textStorageService;
     private final IdService idService;
-    private final CommentOutboxMapper commentOutboxMapper;
     private final CounterService counterService;
-    private final ObjectMapper objectMapper;
     private final CommentPageCacheService pageCacheService;
     private final Executor commentReadExecutor;
     private final CommentMutationService mutationService;
+    private final CommentEventWriter eventWriter;
     private final CommentMetrics metrics;
 
     public CommentServiceImpl(CommentMapper commentMapper,
                               PendingCommentMapper pendingCommentMapper,
                               TextStorageService textStorageService,
                               IdService idService,
-                              CommentOutboxMapper commentOutboxMapper,
                               CounterService counterService,
-                              ObjectMapper objectMapper,
                               CommentPageCacheService pageCacheService,
                               @Qualifier("commentReadExecutor") Executor commentReadExecutor,
                               CommentMutationService mutationService,
+                              CommentEventWriter eventWriter,
                               CommentMetrics metrics) {
         this.commentMapper = commentMapper;
         this.pendingCommentMapper = pendingCommentMapper;
         this.textStorageService = textStorageService;
         this.idService = idService;
-        this.commentOutboxMapper = commentOutboxMapper;
         this.counterService = counterService;
-        this.objectMapper = objectMapper;
         this.pageCacheService = pageCacheService;
         this.commentReadExecutor = commentReadExecutor;
         this.mutationService = mutationService;
+        this.eventWriter = eventWriter;
         this.metrics = metrics;
     }
 
@@ -136,17 +129,8 @@ public class CommentServiceImpl implements CommentService {
             }
             throw exception;
         }
-        long eventId = idService.nextId(IdNamespace.OUTBOX_EVENT);
-        CommentOutboxEvent event = new CommentOutboxEvent(eventId, CommentEventType.COMMENT_WRITE_REQUESTED,
-                commentId, postId, rootId, parentId, creatorId, request.clientRequestId(), request.body(), now);
-        commentOutboxMapper.insert(CommentOutbox.builder()
-                .eventId(eventId)
-                .eventType(CommentEventType.COMMENT_WRITE_REQUESTED.name())
-                .aggregateId(commentId)
-                .payload(serialize(event))
-                .nextAttemptAt(now)
-                .createdAt(now)
-                .build());
+        eventWriter.writeRequested(new CommentWriteRequest(
+                commentId, postId, rootId, parentId, creatorId, request.clientRequestId(), request.body(), now));
         return new CommentSubmitResponse(request.clientRequestId(), String.valueOf(commentId), PENDING);
     }
 
@@ -311,13 +295,6 @@ public class CommentServiceImpl implements CommentService {
         return value == null || value.isBlank();
     }
 
-    private String serialize(CommentOutboxEvent event) {
-        try {
-            return objectMapper.writeValueAsString(event);
-        } catch (JsonProcessingException exception) {
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "comment outbox serialization failed");
-        }
-    }
 
     private static boolean positive(Long value) {
         return value != null && value > 0;

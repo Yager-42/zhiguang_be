@@ -40,3 +40,9 @@
 审核流水线拥有举报目标内容加载、prompt 构建、模型响应解析、decision 归一、置信度校验与失败分类。提供者 adapter 只拥有具体 `ChatModel` 与模型名的选择，不复制审核语义。
 
 `moderation.llm.provider` 选择 `dashscope` 或 `opencode`；默认 `dashscope`。启用审核时只允许装配一个 `ModerationLlmClient`。新增提供者必须复用同一审核流水线，而不是复制 implementation。
+
+## 评论变更事件
+
+评论域使用独立 `comment_outbox` 可靠性状态机。它拥有评论写入请求及创建、删除、审核变更事件，不与共享 Canal outbox 合并。
+
+`CommentEventWriter` 是评论事件 ID、稳定 envelope 序列化、outbox 持久化和进程内变更通知的唯一 implementation。`COMMENT_WRITE_REQUESTED` 只写可靠 outbox；`COMMENT_CREATED/DELETED/MODERATED` 同时发布本地事件，本地消费必须在 transaction `AFTER_COMMIT` 后执行。`CommentEventReader` 是 Kafka envelope 解析和本地缓存变更映射的唯一 implementation。

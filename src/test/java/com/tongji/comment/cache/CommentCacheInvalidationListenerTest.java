@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.comment.event.CommentEventReader;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -35,7 +36,8 @@ class CommentCacheInvalidationListenerTest {
         when(sets.members(CommentCacheKeys.rootHeadIndex(11L))).thenReturn(Set.of("root-head"));
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         CommentCacheInvalidationListener listener = new CommentCacheInvalidationListener(
-                cache, redis, objectMapper, mock(CommentCacheInvalidationScheduler.class), 100L);
+                cache, redis, new CommentEventReader(objectMapper),
+                mock(CommentCacheInvalidationScheduler.class), 100L);
         CommentMutationEvent deleted = new CommentMutationEvent(
                 201L, CommentEventType.COMMENT_DELETED, 12L, 9L, 11L, 11L);
         CommentMutationEvent created = new CommentMutationEvent(

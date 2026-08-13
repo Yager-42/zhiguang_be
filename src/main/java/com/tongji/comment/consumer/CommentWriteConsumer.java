@@ -1,9 +1,8 @@
 package com.tongji.comment.consumer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.mapper.PendingCommentMapper;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.comment.service.impl.CommentMaterializationService;
@@ -19,18 +18,18 @@ import java.time.Duration;
 
 @Component
 public class CommentWriteConsumer {
-    private final ObjectMapper objectMapper;
+    private final CommentEventReader eventReader;
     private final PendingCommentMapper pendingCommentMapper;
     private final TextStorageService textStorageService;
     private final CommentMaterializationService materializationService;
     private final CommentMetrics metrics;
 
-    public CommentWriteConsumer(ObjectMapper objectMapper,
+    public CommentWriteConsumer(CommentEventReader eventReader,
                                 PendingCommentMapper pendingCommentMapper,
                                 TextStorageService textStorageService,
                                 CommentMaterializationService materializationService,
                                 CommentMetrics metrics) {
-        this.objectMapper = objectMapper;
+        this.eventReader = eventReader;
         this.pendingCommentMapper = pendingCommentMapper;
         this.textStorageService = textStorageService;
         this.materializationService = materializationService;
@@ -52,7 +51,7 @@ public class CommentWriteConsumer {
             containerFactory = "commentWriteKafkaListenerContainerFactory"
     )
     public void onMessage(String message) {
-        handle(read(message));
+        handle(eventReader.read(message));
     }
 
     void handle(CommentOutboxEvent event) {
@@ -94,7 +93,7 @@ public class CommentWriteConsumer {
 
     @DltHandler
     public void onDlt(String message) {
-        CommentOutboxEvent event = read(message);
+        CommentOutboxEvent event = eventReader.read(message);
         int updated = pendingCommentMapper.updateStatusIfCurrent(event.commentId(), "failed", "pending");
         if (updated == 1) {
             metrics.dlt("failed_pending");
@@ -109,11 +108,4 @@ public class CommentWriteConsumer {
         throw new IllegalStateException("comment DLT could not transition pending row to failed");
     }
 
-    private CommentOutboxEvent read(String message) {
-        try {
-            return objectMapper.readValue(message, CommentOutboxEvent.class);
-        } catch (JsonProcessingException exception) {
-            throw new IllegalArgumentException("invalid comment outbox event", exception);
-        }
-    }
 }

@@ -1,9 +1,8 @@
 package com.tongji.comment.consumer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.counter.event.CounterEvent;
 import com.tongji.counter.event.CounterEventProducer;
 import com.tongji.counter.schema.CounterSchema;
@@ -16,16 +15,16 @@ import java.time.ZoneId;
 
 @Component
 public class CommentCounterConsumer {
-    private final ObjectMapper objectMapper;
+    private final CommentEventReader eventReader;
     private final CounterService counterService;
     private final CounterEventProducer counterEventProducer;
     private final CommentMetrics metrics;
 
-    public CommentCounterConsumer(ObjectMapper objectMapper,
+    public CommentCounterConsumer(CommentEventReader eventReader,
                                   CounterService counterService,
                                   CounterEventProducer counterEventProducer,
                                   CommentMetrics metrics) {
-        this.objectMapper = objectMapper;
+        this.eventReader = eventReader;
         this.counterService = counterService;
         this.counterEventProducer = counterEventProducer;
         this.metrics = metrics;
@@ -35,7 +34,7 @@ public class CommentCounterConsumer {
             groupId = "${comment.kafka.counter-group:comment-counter-consumer}",
             containerFactory = "commentEventKafkaListenerContainerFactory")
     public void onMessage(String message) {
-        CommentOutboxEvent event = read(message);
+        CommentOutboxEvent event = eventReader.read(message);
         if (event.eventType() != CommentEventType.COMMENT_CREATED) {
             return;
         }
@@ -51,11 +50,4 @@ public class CommentCounterConsumer {
         metrics.sideEffect("counter", "success");
     }
 
-    private CommentOutboxEvent read(String message) {
-        try {
-            return objectMapper.readValue(message, CommentOutboxEvent.class);
-        } catch (JsonProcessingException exception) {
-            throw new IllegalArgumentException("invalid comment counter event", exception);
-        }
-    }
 }

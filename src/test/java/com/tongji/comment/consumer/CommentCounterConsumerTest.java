@@ -3,6 +3,7 @@ package com.tongji.comment.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.metrics.CommentMetrics;
 import com.tongji.counter.event.CounterEvent;
 import com.tongji.counter.event.CounterEventProducer;
@@ -23,7 +24,8 @@ class CommentCounterConsumerTest {
     void topLevelRoutesStableEventToPostCounter() throws Exception {
         CounterService counterService = mock(CounterService.class);
         CounterEventProducer producer = mock(CounterEventProducer.class);
-        CommentCounterConsumer consumer = new CommentCounterConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentCounterConsumer consumer = new CommentCounterConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 counterService, producer, mock(CommentMetrics.class));
 
         consumer.onMessage(json(event(CommentEventType.COMMENT_CREATED, 0L, 0L)));
@@ -39,7 +41,8 @@ class CommentCounterConsumerTest {
     @Test
     void replyRoutesStableEventToRootCounter() throws Exception {
         CounterEventProducer producer = mock(CounterEventProducer.class);
-        CommentCounterConsumer consumer = new CommentCounterConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentCounterConsumer consumer = new CommentCounterConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 mock(CounterService.class), producer, mock(CommentMetrics.class));
 
         consumer.onMessage(json(event(CommentEventType.COMMENT_CREATED, 51L, 51L)));
@@ -55,7 +58,8 @@ class CommentCounterConsumerTest {
     void nonCreatedEventIsSkipped() throws Exception {
         CounterService counterService = mock(CounterService.class);
         CounterEventProducer producer = mock(CounterEventProducer.class);
-        CommentCounterConsumer consumer = new CommentCounterConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentCounterConsumer consumer = new CommentCounterConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 counterService, producer, mock(CommentMetrics.class));
 
         consumer.onMessage(json(event(CommentEventType.COMMENT_DELETED, 0L, 0L)));
