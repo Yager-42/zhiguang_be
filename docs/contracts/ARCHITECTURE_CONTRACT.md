@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **contract_version** | `0.8.0` |
+| **contract_version** | `0.9.0` |
 | **status** | **active**（本文档首次建立；后续架构/契约变更必须同步修改本文并升版本） |
 | **updated** | 2026-08-13 |
 | **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，390 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
@@ -332,15 +332,17 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 **API**（`/api/v1/...`）：`POST posts/{postId}/comments`（**恒 202**）、`GET comments/{pendingCommentId}/status`、`GET posts/{postId}/comments`（游标 `cursorCreateTime+cursorCommentId`，1≤limit≤100）、`GET comments/{commentId}/replies`（按 root_id，两级评论）、`DELETE comments/{commentId}`（204 属主软删）、`POST/DELETE comments/{commentId}/like`（仅返回 `{changed}`；生效时才发 feedback like/unlike 事件；点赞状态在 counter 模块 `ActionController` 以 `{changed,liked}` 返回）。
 
-**写路径**：`submit` 幂等（`pending_comments` 查重/唯一键）→ 同事务写 `comment_outbox(COMMENT_WRITE_REQUESTED)` → `CommentOutboxDispatcher` 批量 claim、异步发送并按成功/失败子集批量更新 → `CommentWriteConsumer` 读取并校验 pending 后先对 Cassandra 正文做固定版本幂等 upsert，再把已校验 pending 传入代理后的短事务 `CommentMaterializationService`，原子写 `comments`、`pending=succeeded` 与 `COMMENT_CREATED` outbox；仅在条件更新丢失并发竞争时回读 pending。`COMMENT_CREATED` 由 Counter、Reward、Feedback 三个独立 consumer group 处理，物化线程不串行执行副作用；DLT 仅将仍为 pending 的记录置 failed。
+**写路径**：`submit` 幂等（`pending_comments` 查重/唯一键）→ 同事务经 `CommentEventWriter.writeRequested` 写 `comment_outbox(COMMENT_WRITE_REQUESTED)` → `CommentOutboxDispatcher` 批量 claim、异步发送并按成功/失败子集批量更新 → `CommentWriteConsumer` 经 `CommentEventReader` 解析并校验 pending 后先对 Cassandra 正文做固定版本幂等 upsert，再把已校验 pending 传入代理后的短事务 `CommentMaterializationService`，原子写 `comments`、`pending=succeeded` 与 `COMMENT_CREATED` outbox；仅在条件更新丢失并发竞争时回读 pending。`COMMENT_CREATED` 由 Counter、Reward、Feedback 三个独立 consumer group 处理，物化线程不串行执行副作用；DLT 仅将仍为 pending 的记录置 failed。
 
 **outbox 状态机**（`CommentOutboxMapper.xml`）：`ready(0)→claimed(1)→published(2)` 或退回 `ready(0)`（重试退避）；claim 超时可回收。published 保留 24 小时后由 cleaner 每批最多删除 1000 条。旧 `comment_write_outbox` 不迁移、不双写，clean cutover 前置检查要求旧表无未发布记录。
+
+**事件 module**：`CommentEventWriter` 是事件 ID、稳定 `CommentOutboxEvent` 序列化、`comment_outbox` 行构建和本地变更事件发布的唯一 implementation；写请求用严格 insert 且不触发缓存失效，created/deleted/moderated 用幂等 insert 并发布 `CommentMutationEvent`。`CommentEventReader` 是所有 comment Kafka consumer 的 envelope 解析 seam，并统一映射缓存变更。事务调用方仍拥有状态变化；缓存 listener 以 `@TransactionalEventListener(AFTER_COMMIT)` 消费本地事件，Kafka 重投以相同 eventId 去重。
 
 **不变量**：回复必须 parent 为顶层（`parent.parentId==0`）、post_id 一致、status=0；`root_id=parent_id=parent.commentId`；已删评论 body 恒 `[deleted]` 且不查 Cassandra；计数服务故障降级为空 Map 不影响列表。
 
 **缓存失效**：事务提交事件与 Kafka 重投以 outbox eventId 去重，默认在 100ms 窗口内按 post/root scope 合并；一批反向索引只读取一次，Caffeine 批量失效，Redis index/item/scope key 使用单次 multi-key `UNLINK`。页面重建使用 pipeline 批量写 item fragment，index metadata 保持独立的短 `MULTI/EXEC`；缓存失效调度器不参与 Spring 全局 `@Scheduled` 任务调度。
 
-**关键类**：`service/impl/CommentServiceImpl.java`、`service/impl/CommentMaterializationService.java`、`service/impl/CommentMutationService.java`、`event/CommentOutboxDispatcher.java`、`event/CommentOutboxCleaner.java`、`consumer/CommentWriteConsumer.java`、`consumer/CommentCounterConsumer.java`、`consumer/CommentRewardConsumer.java`、`consumer/CommentFeedbackConsumer.java`、`config/CommentKafkaConfig.java`、`config/CommentOutboxSchemaInitializer.java`。
+**关键类**：`event/CommentEventWriter.java`、`event/CommentEventReader.java`、`service/impl/CommentServiceImpl.java`、`service/impl/CommentMaterializationService.java`、`service/impl/CommentMutationService.java`、`event/CommentOutboxDispatcher.java`、`event/CommentOutboxCleaner.java`、`consumer/CommentWriteConsumer.java`、`consumer/CommentCounterConsumer.java`、`consumer/CommentRewardConsumer.java`、`consumer/CommentFeedbackConsumer.java`、`config/CommentKafkaConfig.java`、`config/CommentOutboxSchemaInitializer.java`。
 
 ### 7.4 counter
 

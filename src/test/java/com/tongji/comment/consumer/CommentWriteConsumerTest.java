@@ -3,6 +3,7 @@ package com.tongji.comment.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.mapper.PendingCommentMapper;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.comment.service.impl.CommentMaterializationService;
@@ -44,7 +45,7 @@ class CommentWriteConsumerTest {
         TextStorageService textStorageService = mock(TextStorageService.class);
         CommentMaterializationService finalizer = mock(CommentMaterializationService.class);
         CommentWriteConsumer consumer = new CommentWriteConsumer(
-                new ObjectMapper().findAndRegisterModules(), pendingMapper, textStorageService, finalizer,
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()), pendingMapper, textStorageService, finalizer,
                 mock(CommentMetrics.class));
         CommentOutboxEvent event = event();
         PendingComment pending = PendingComment.builder()
@@ -66,7 +67,7 @@ class CommentWriteConsumerTest {
         TextStorageService textStorageService = mock(TextStorageService.class);
         CommentMaterializationService finalizer = mock(CommentMaterializationService.class);
         CommentWriteConsumer consumer = new CommentWriteConsumer(
-                new ObjectMapper().findAndRegisterModules(), pendingMapper, textStorageService, finalizer,
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()), pendingMapper, textStorageService, finalizer,
                 mock(CommentMetrics.class));
         CommentOutboxEvent event = event();
         PendingComment pending = PendingComment.builder()
@@ -84,7 +85,8 @@ class CommentWriteConsumerTest {
         PendingCommentMapper pendingMapper = mock(PendingCommentMapper.class);
         CommentMetrics metrics = mock(CommentMetrics.class);
         when(pendingMapper.updateStatusIfCurrent(101L, "failed", "pending")).thenReturn(1);
-        CommentWriteConsumer consumer = new CommentWriteConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentWriteConsumer consumer = new CommentWriteConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 pendingMapper, mock(TextStorageService.class), mock(CommentMaterializationService.class), metrics);
 
         try {
@@ -103,7 +105,8 @@ class CommentWriteConsumerTest {
         when(pendingMapper.updateStatusIfCurrent(101L, "failed", "pending")).thenReturn(0);
         when(pendingMapper.findById(101L)).thenReturn(PendingComment.builder()
                 .pendingCommentId(101L).status("succeeded").build());
-        CommentWriteConsumer consumer = new CommentWriteConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentWriteConsumer consumer = new CommentWriteConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 pendingMapper, mock(TextStorageService.class), mock(CommentMaterializationService.class), metrics);
         String message = new ObjectMapper().findAndRegisterModules().writeValueAsString(event());
 

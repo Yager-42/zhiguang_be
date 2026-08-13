@@ -1,11 +1,9 @@
 package com.tongji.comment.cache;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.event.CommentEventType;
-import com.tongji.comment.event.CommentOutboxEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,7 +32,7 @@ public class CommentCacheInvalidationListener {
 
     private final Cache<String, CommentBasePage> localCache;
     private final StringRedisTemplate redisTemplate;
-    private final ObjectMapper objectMapper;
+    private final CommentEventReader eventReader;
     private final CommentCacheInvalidationScheduler invalidationScheduler;
     private final long invalidationWindowMillis;
     private final Cache<Long, Boolean> recentlyInvalidatedEvents = Caffeine.newBuilder()
@@ -48,7 +46,7 @@ public class CommentCacheInvalidationListener {
     public CommentCacheInvalidationListener(
             @Qualifier("commentPageCache") Cache<String, CommentBasePage> localCache,
             StringRedisTemplate redisTemplate,
-            ObjectMapper objectMapper,
+            CommentEventReader eventReader,
             CommentCacheInvalidationScheduler invalidationScheduler,
             @Value("${comment.cache.invalidation-window-ms:100}") long invalidationWindowMillis) {
         if (invalidationWindowMillis <= 0) {
@@ -56,7 +54,7 @@ public class CommentCacheInvalidationListener {
         }
         this.localCache = localCache;
         this.redisTemplate = redisTemplate;
-        this.objectMapper = objectMapper;
+        this.eventReader = eventReader;
         this.invalidationScheduler = invalidationScheduler;
         this.invalidationWindowMillis = invalidationWindowMillis;
     }
@@ -72,16 +70,9 @@ public class CommentCacheInvalidationListener {
             containerFactory = "commentEventKafkaListenerContainerFactory"
     )
     public void onMessage(String message) {
-        try {
-            CommentOutboxEvent event = objectMapper.readValue(message, CommentOutboxEvent.class);
-            if (event.eventType() == CommentEventType.COMMENT_CREATED
-                    || event.eventType() == CommentEventType.COMMENT_DELETED
-                    || event.eventType() == CommentEventType.COMMENT_MODERATED) {
-                enqueueInvalidation(new CommentMutationEvent(event.eventId(), event.eventType(), event.commentId(),
-                        event.postId(), value(event.rootId()), value(event.parentId())));
-            }
-        } catch (JsonProcessingException exception) {
-            throw new IllegalArgumentException("invalid comment cache event", exception);
+        CommentMutationEvent event = eventReader.mutation(message);
+        if (event != null) {
+            enqueueInvalidation(event);
         }
     }
 

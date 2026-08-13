@@ -1,25 +1,24 @@
 package com.tongji.comment.consumer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentFeedbackEvent;
 import com.tongji.comment.event.CommentFeedbackProducer;
 import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.comment.event.CommentEventReader;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import com.tongji.comment.metrics.CommentMetrics;
 
 @Component
 public class CommentFeedbackConsumer {
-    private final ObjectMapper objectMapper;
+    private final CommentEventReader eventReader;
     private final CommentFeedbackProducer feedbackProducer;
     private final CommentMetrics metrics;
 
-    public CommentFeedbackConsumer(ObjectMapper objectMapper,
+    public CommentFeedbackConsumer(CommentEventReader eventReader,
                                    CommentFeedbackProducer feedbackProducer,
                                    CommentMetrics metrics) {
-        this.objectMapper = objectMapper;
+        this.eventReader = eventReader;
         this.feedbackProducer = feedbackProducer;
         this.metrics = metrics;
     }
@@ -28,7 +27,7 @@ public class CommentFeedbackConsumer {
             groupId = "${comment.kafka.feedback-group:comment-feedback-consumer}",
             containerFactory = "commentEventKafkaListenerContainerFactory")
     public void onMessage(String message) {
-        CommentOutboxEvent event = read(message);
+        CommentOutboxEvent event = eventReader.read(message);
         if (event.eventType() != CommentEventType.COMMENT_CREATED) {
             return;
         }
@@ -38,11 +37,4 @@ public class CommentFeedbackConsumer {
         metrics.sideEffect("feedback", "success");
     }
 
-    private CommentOutboxEvent read(String message) {
-        try {
-            return objectMapper.readValue(message, CommentOutboxEvent.class);
-        } catch (JsonProcessingException exception) {
-            throw new IllegalArgumentException("invalid comment feedback event", exception);
-        }
-    }
 }

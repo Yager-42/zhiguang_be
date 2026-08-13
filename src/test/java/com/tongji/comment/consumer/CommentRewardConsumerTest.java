@@ -3,6 +3,7 @@ package com.tongji.comment.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.metrics.CommentMetrics;
 import com.tongji.wallet.service.ContentRewardService;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,8 @@ class CommentRewardConsumerTest {
         ContentRewardService rewardService = mock(ContentRewardService.class);
         CommentMetrics metrics = mock(CommentMetrics.class);
         when(rewardService.rewardCommentCreation(7L, 101L)).thenReturn(2L);
-        CommentRewardConsumer consumer = new CommentRewardConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentRewardConsumer consumer = new CommentRewardConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 rewardService, metrics);
 
         consumer.onMessage(json(CommentEventType.COMMENT_CREATED));
@@ -33,7 +35,8 @@ class CommentRewardConsumerTest {
     @Test
     void nonCreatedEventDoesNotReward() throws Exception {
         ContentRewardService rewardService = mock(ContentRewardService.class);
-        CommentRewardConsumer consumer = new CommentRewardConsumer(new ObjectMapper().findAndRegisterModules(),
+        CommentRewardConsumer consumer = new CommentRewardConsumer(
+                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
                 rewardService, mock(CommentMetrics.class));
 
         consumer.onMessage(json(CommentEventType.COMMENT_MODERATED));
