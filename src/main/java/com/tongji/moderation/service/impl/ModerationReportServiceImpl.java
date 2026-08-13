@@ -18,7 +18,7 @@ import com.tongji.moderation.model.ModerationReport;
 import com.tongji.moderation.model.ModerationStatus;
 import com.tongji.moderation.model.ModerationTargetType;
 import com.tongji.moderation.service.ModerationReportService;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

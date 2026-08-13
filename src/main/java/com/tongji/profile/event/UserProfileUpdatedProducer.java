@@ -3,7 +3,7 @@ package com.tongji.profile.event;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import org.springframework.stereotype.Component;
 
 @Component

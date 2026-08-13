@@ -17,7 +17,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.tongji.counter.service.CounterService;
 import com.tongji.counter.service.FeedPageCounterState;
 import com.tongji.storage.MinioStorageService;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import com.tongji.cache.hotkey.HotKeyDetector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

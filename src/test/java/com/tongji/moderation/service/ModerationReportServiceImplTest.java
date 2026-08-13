@@ -13,7 +13,7 @@ import com.tongji.moderation.api.dto.ModerationReportResponse;
 import com.tongji.moderation.mapper.ModerationReportMapper;
 import com.tongji.moderation.model.ModerationReport;
 import com.tongji.moderation.service.impl.ModerationReportServiceImpl;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

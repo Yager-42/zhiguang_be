@@ -1,20 +1,19 @@
-package com.tongji.relation.outbox;
+package com.tongji.relation.consumer;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.outbox.OutboxMessageReader;
+import com.tongji.outbox.OutboxTopics;
 import com.tongji.relation.event.RelationEvent;
 import com.tongji.relation.processor.RelationEventProcessor;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
-import com.tongji.common.util.OutboxMessageUtil;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.task.TaskExecutor;
 
 /**
  * Canal Outbox 消费者。
@@ -22,6 +21,7 @@ import org.springframework.core.task.TaskExecutor;
  */
 @Service
 public class CanalOutboxConsumer {
+    private final OutboxMessageReader messageReader;
     private final ObjectMapper objectMapper;
     private final RelationEventProcessor processor;
     private final TaskExecutor taskExecutor;
@@ -32,9 +32,11 @@ public class CanalOutboxConsumer {
      * @param processor 关系事件处理器
      * @param taskExecutor 关系事件执行器
      */
-    public CanalOutboxConsumer(ObjectMapper objectMapper,
+    public CanalOutboxConsumer(OutboxMessageReader messageReader,
+                               ObjectMapper objectMapper,
                                RelationEventProcessor processor,
                                @Qualifier("relationEventExecutor") TaskExecutor taskExecutor) {
+        this.messageReader = messageReader;
         this.objectMapper = objectMapper;
         this.processor = processor;
         this.taskExecutor = taskExecutor;
@@ -48,29 +50,18 @@ public class CanalOutboxConsumer {
      */
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX, groupId = "relation-outbox-consumer")
     public void onMessage(String message, Acknowledgment ack) {
-        try {
-            List<JsonNode> rows = OutboxMessageUtil.extractRows(objectMapper, message);
-            if (rows.isEmpty()) {
-                ack.acknowledge();
-                return;
-            }
-            List<RelationEvent> events = new ArrayList<>();
-            for (JsonNode row : rows) {
-                JsonNode payloadNode = row.get("payload");
-                if (payloadNode == null) {
-                    continue;
-                }
+        List<RelationEvent> events = messageReader.read(message).stream()
+                .map(event -> event.payloadAs(objectMapper, RelationEvent.class))
+                .flatMap(java.util.Optional::stream)
+                .toList();
+        if (events.isEmpty()) {
+            ack.acknowledge();
+            return;
+        }
 
-                events.add(objectMapper.readValue(payloadNode.asText(), RelationEvent.class));
-            }
-            if (events.isEmpty()) {
-                ack.acknowledge();
-                return;
-            }
-
-            CountDownLatch completionLatch = new CountDownLatch(events.size());
-            AtomicReference<Throwable> failure = new AtomicReference<>();
-            for (RelationEvent event : events) {
+        CountDownLatch completionLatch = new CountDownLatch(events.size());
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        for (RelationEvent event : events) {
                 try {
                     taskExecutor.execute(() -> {
                         try {
@@ -90,10 +81,14 @@ public class CanalOutboxConsumer {
                 }
             }
 
+        try {
             completionLatch.await();
-            if (failure.get() == null) {
-                ack.acknowledge();
-            }
-        } catch (Exception ignored) {}
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        if (failure.get() == null) {
+            ack.acknowledge();
+        }
     }
 }

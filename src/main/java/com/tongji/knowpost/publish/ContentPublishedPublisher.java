@@ -6,7 +6,7 @@ import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;

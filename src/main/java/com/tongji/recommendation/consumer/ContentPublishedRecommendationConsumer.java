@@ -1,14 +1,15 @@
 package com.tongji.recommendation.consumer;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tongji.common.util.OutboxMessageUtil;
+import com.tongji.outbox.OutboxEvent;
+import com.tongji.outbox.OutboxMessageReader;
+import com.tongji.outbox.OutboxPayload;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
 import com.tongji.reconciliation.service.ReconciliationService;
 import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
-import com.tongji.relation.outbox.OutboxTopics;
+import com.tongji.outbox.OutboxTopics;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -69,53 +70,22 @@ public class ContentPublishedRecommendationConsumer {
 
     private List<PublishedItem> parse(String message) {
         List<PublishedItem> items = new ArrayList<>();
-        for (JsonNode row : OutboxMessageUtil.extractRows(objectMapper, message)) {
-            JsonNode payloadNode = row.get("payload");
-            if (payloadNode == null) {
+        for (OutboxEvent event : OutboxMessageReader.read(objectMapper, message)) {
+            OutboxPayload payload = event.parsePayload(objectMapper).orElse(null);
+            if (payload == null || !"content_published".equals(payload.text("eventType"))) {
                 continue;
             }
-            try {
-                JsonNode payload = objectMapper.readTree(payloadNode.asText());
-                if (!"content_published".equals(text(payload.get("eventType")))) {
-                    continue;
-                }
-                Long postId = longValue(payload.get("postId"));
-                Long authorId = longValue(payload.get("authorId"));
-                Instant publishedAt = instantValue(payload.get("publishedAt"));
-                if (postId != null && authorId != null && publishedAt != null) {
-                    items.add(new PublishedItem(postId, authorId, publishedAt));
-                }
-            } catch (Exception ignored) {
+            Long postId = payload.longValue("postId");
+            Long authorId = payload.longValue("authorId");
+            Instant publishedAt = payload.instantValue("publishedAt");
+            if (postId != null && authorId != null && publishedAt != null) {
+                items.add(new PublishedItem(postId, authorId, publishedAt));
             }
         }
         return items;
     }
 
-    private String text(JsonNode node) {
-        return node == null ? null : node.asText();
-    }
 
-    private Long longValue(JsonNode node) {
-        if (node == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(node.asText());
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private Instant instantValue(JsonNode node) {
-        if (node == null || node.asText().isBlank()) {
-            return null;
-        }
-        try {
-            return Instant.parse(node.asText());
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
 
     private record PublishedItem(long postId, long authorId, Instant publishedAt) {
     }

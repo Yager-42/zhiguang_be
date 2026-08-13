@@ -12,7 +12,7 @@ import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.moderation.model.ModerationReport;
 import com.tongji.moderation.service.impl.ModerationContentActionServiceImpl;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
