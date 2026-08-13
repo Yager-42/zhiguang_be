@@ -15,36 +15,33 @@ import com.tongji.moderation.service.ModerationLlmClient;
 import com.tongji.storage.text.TextStorageService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.converter.BeanOutputConverter;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-@Service
-@ConditionalOnProperty(prefix = "moderation.llm", name = "enabled", havingValue = "true")
-public class SpringAiAlibabaModerationLlmClient implements ModerationLlmClient {
-    private static final String PROVIDER = "dashscope";
+final class SpringAiModerationPipeline implements ModerationLlmClient {
     private static final ObjectMapper PROMPT_OBJECT_MAPPER = new ObjectMapper();
 
     private final ChatClient chatClient;
-    private final ModerationProperties properties;
+    private final String provider;
     private final String modelName;
+    private final ModerationProperties properties;
     private final KnowPostMapper knowPostMapper;
     private final CommentMapper commentMapper;
     private final TextStorageService textStorageService;
 
-    public SpringAiAlibabaModerationLlmClient(ChatClient.Builder chatClientBuilder,
-                                             ModerationProperties properties,
-                                             @Value("${spring.ai.dashscope.chat.options.model:qwen-plus}") String modelName,
-                                             KnowPostMapper knowPostMapper,
-                                             CommentMapper commentMapper,
-                                             TextStorageService textStorageService) {
-        this.properties = properties;
+    SpringAiModerationPipeline(ChatClient.Builder chatClientBuilder,
+                               String provider,
+                               String modelName,
+                               ModerationProperties properties,
+                               KnowPostMapper knowPostMapper,
+                               CommentMapper commentMapper,
+                               TextStorageService textStorageService) {
+        this.provider = provider;
         this.modelName = modelName;
+        this.properties = properties;
         this.knowPostMapper = knowPostMapper;
         this.commentMapper = commentMapper;
         this.textStorageService = textStorageService;
@@ -66,11 +63,11 @@ public class SpringAiAlibabaModerationLlmClient implements ModerationLlmClient {
         try {
             input = loadInput(report);
         } catch (RuntimeException exception) {
-            return ModerationLlmResult.retryableFailure(PROVIDER, modelName, "INPUT_UNAVAILABLE", exception.getMessage());
+            return ModerationLlmResult.retryableFailure(provider, modelName, "INPUT_UNAVAILABLE", exception.getMessage());
         }
         if ((input.title() == null || input.title().isBlank())
                 && (input.body() == null || input.body().isBlank())) {
-            return ModerationLlmResult.invalidFailure(PROVIDER, modelName, "INPUT_INSUFFICIENT", "target content is empty");
+            return ModerationLlmResult.invalidFailure(provider, modelName, "INPUT_INSUFFICIENT", "target content is empty");
         }
         try {
             BeanOutputConverter<ModerationLlmResponse> converter = new BeanOutputConverter<>(ModerationLlmResponse.class);
@@ -79,19 +76,19 @@ public class SpringAiAlibabaModerationLlmClient implements ModerationLlmClient {
                     .call()
                     .entity(converter);
             if (response == null) {
-                return ModerationLlmResult.invalidFailure(PROVIDER, modelName, "INVALID_RESPONSE", "LLM response is empty");
+                return ModerationLlmResult.invalidFailure(provider, modelName, "INVALID_RESPONSE", "LLM response is empty");
             }
             return ModerationLlmResult.decision(
-                    PROVIDER,
+                    provider,
                     modelName,
                     normalize(response.decision()),
                     normalizeConfidence(response.confidence()),
                     response.summary()
             );
         } catch (IllegalArgumentException exception) {
-            return ModerationLlmResult.invalidFailure(PROVIDER, modelName, "INVALID_RESPONSE", exception.getMessage());
+            return ModerationLlmResult.invalidFailure(provider, modelName, "INVALID_RESPONSE", exception.getMessage());
         } catch (RuntimeException exception) {
-            return ModerationLlmResult.retryableFailure(PROVIDER, modelName, "LLM_UNAVAILABLE", exception.getMessage());
+            return ModerationLlmResult.retryableFailure(provider, modelName, "LLM_UNAVAILABLE", exception.getMessage());
         }
     }
 

@@ -34,3 +34,9 @@
 公共知文 Feed 的 singleflight 只共享不含当前用户 liked/faved 的基础页。用户计数与状态在 singleflight 之外逐请求叠加，避免 owner 的用户态污染 follower。
 
 知文详情回源可能包含访问权限判断，因此使用 viewer-scoped 的本地 flight；详情缓存命中仍必须重新判断“公开或本人”。不得在不同 viewer 之间回放授权结果。
+
+## 审核流水线
+
+审核流水线拥有举报目标内容加载、prompt 构建、模型响应解析、decision 归一、置信度校验与失败分类。提供者 adapter 只拥有具体 `ChatModel` 与模型名的选择，不复制审核语义。
+
+`moderation.llm.provider` 选择 `dashscope` 或 `opencode`；默认 `dashscope`。启用审核时只允许装配一个 `ModerationLlmClient`。新增提供者必须复用同一审核流水线，而不是复制 implementation。

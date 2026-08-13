@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ModerationDependencyContractTest {
 
     @Test
-    void pomUsesSpringAiAlibabaDashScopeOnApprovedVersionLine() throws Exception {
+    void pomProvidesBothSpringAiProviderAdaptersOnApprovedVersionLine() throws Exception {
         String pom = Files.readString(Path.of("pom.xml"));
 
         assertThat(pom).contains("<version>3.5.10</version>");
@@ -19,6 +19,7 @@ class ModerationDependencyContractTest {
         assertThat(pom).contains("<artifactId>spring-ai-bom</artifactId>");
         assertThat(pom).contains("<artifactId>spring-ai-alibaba-extensions-bom</artifactId>");
         assertThat(pom).contains("<artifactId>spring-ai-alibaba-starter-dashscope</artifactId>");
+        assertThat(pom).contains("<artifactId>spring-ai-starter-model-openai</artifactId>");
         assertThat(pom).doesNotContain("2.0.0-M1.1");
     }
 }
