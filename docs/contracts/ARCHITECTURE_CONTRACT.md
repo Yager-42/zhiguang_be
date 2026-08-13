@@ -220,7 +220,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 计数 | `bm:{metric}:{etype}:{eid}:{chunk}` | 位图事实（chunk=uid/32768，bit=uid%32768） | `BitmapShard` |
 | 计数 | `bm:index:{metric}:{etype}:{eid}` | 分片索引（启动 SCAN 回填） | `CounterBitmapShardIndexInitializer` |
 | 计数 | `agg:v1:{etype}:{eid}` / `agg:v1:dirty` | hash 聚合桶 + dirty set（每秒折叠） | `CounterAggregationConsumer` |
-| 计数 | `ucnt:{userId}` / `ucnt:chk:{userId}` | 用户 SDS / 采样锁 300s | `UserCounterKeys`/`RelationController` |
+| 计数 | `ucnt:{userId}` / `ucnt:chk:{userId}` | 用户 SDS / 采样锁 300s | `UserCounterKeys`/`UserCounterReader` |
 | 关系 | `uf:flws:{userId}` / `uf:fans:{userId}` | zset（score=时间戳）/ 2h | `RelationEventProcessor`/`RelationServiceImpl` |
 | 关系 | `dedup:rel:{type}:{from}:{to}:{id}` | SET NX 幂等 / 10m | `RelationEventProcessor` |
 | 关系 | `rl:follow:{fromUserId}` | hash 令牌桶（容量100，速率1/s）Lua / 60s | `RelationManagerImpl` |
@@ -351,9 +351,9 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 2. 事件层：`CounterEventProducer` → `counter-events`（无 key）→ `CounterAggregationConsumer`（`HINCRBY aggKey` + dirty set，手动 ack）→ 每秒 `@Scheduled(fixedDelay=1000)` 折叠 SDS（INCR_FIELD_LUA 大端 uint32 下限 0 → DECR_FIELD → HLEN==0 才 DEL 桶）；
 3. 读取层：`cnt:v1:*` SDS（5×4B，idx：like=1,fav=2,comment=3）；缺失 → singleflight（stage `counter-sds`，flight key=`{etype}:{eid}:{metrics}`）从位图重建；限流时返回零值。
 
-**用户计数**（`UserCounterServiceImpl`）：`ucnt:{userId}` 同布局（段1 关注/段2 粉丝/段3 发文/段4 获赞/段5 获藏）；增量走 Lua 折叠；`UserCounterRebuildAdapter.rebuildAndRead` 全量重建（聚合作者全部知文 like/fav；`counter.rebuild.enabled` 时另有 Kafka earliest 回放消费者 `CounterRebuildConsumer`）。
+**用户计数**（`UserCounterServiceImpl` / `UserCounterReaderImpl`）：`ucnt:{userId}` 同布局（段1 关注/段2 粉丝/段3 发文/段4 获赞/段5 获藏）；增量走 Lua 折叠；读取以不可变 `UserCounters` 暴露事实，`find` 只读取现有 SDS，`getVerified` 执行 300s 采样校验并在缺失、结构异常或不一致时通过 singleflight `user-counter` 全量重建（聚合作者全部知文 like/fav；`counter.rebuild.enabled` 时另有 Kafka earliest 回放消费者 `CounterRebuildConsumer`）。SDS 编解码、采样与重建协调属于 counter 模块实现，relation 不读取原始字节；“大V”阈值属于 relation/feed 消费策略。
 
-**关键类**：`service/impl/CounterServiceImpl.java`、`service/impl/UserCounterServiceImpl.java`、`schema/CounterSchema.java`、`schema/CounterKeys.java`、`schema/BitmapShard.java`、`event/CounterAggregationConsumer.java`、`service/CounterBitmapShardIndexInitializer.java`（启动 SCAN `bm:*` 回填分片索引）。
+**关键类**：`service/impl/CounterServiceImpl.java`、`service/impl/UserCounterServiceImpl.java`、`service/impl/UserCounterReaderImpl.java`、`service/UserCounters.java`、`schema/CounterSchema.java`、`schema/CounterKeys.java`、`schema/BitmapShard.java`、`event/CounterAggregationConsumer.java`、`service/CounterBitmapShardIndexInitializer.java`（启动 SCAN `bm:*` 回填分片索引）。
 
 ### 7.5 relation
 

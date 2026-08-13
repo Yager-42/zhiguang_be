@@ -1,5 +1,6 @@
 package com.tongji.relation.service.impl;
 
+import com.tongji.counter.service.UserCounterReader;
 import com.tongji.recommendation.feed.FollowedAuthorRow;
 import com.tongji.relation.mapper.RelationMapper;
 import com.tongji.relation.service.RelationService;
@@ -21,14 +22,12 @@ import java.util.Date;
 import java.util.function.IntFunction;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import java.nio.charset.StandardCharsets;
-import org.springframework.data.redis.core.RedisCallback;
 
 /**
  * 关系服务实现。
  * 设计要点：
  * - 读路径：优先读取 Redis ZSet（关注/粉丝）并按需回填，支持偏移与游标两种分页；大V用户启用本地 Top 缓存；
- * - 计数：用户维度计数（关注/粉丝等）通过独立服务维护，阈值判断如“大V”基于 SDS 段值；
+ * - 计数：用户维度计数事实由 counter 模块提供；“大V”阈值仍属于关系读策略；
  * - 并发与一致性：回填后设置短 TTL，降低陈旧风险。
  */
 @Service
@@ -38,6 +37,7 @@ public class RelationServiceImpl implements RelationService {
     private final Cache<Long, List<Long>> flwsTopCache;
     private final Cache<Long, List<Long>> fansTopCache;
     private final UserMapper userMapper;
+    private final UserCounterReader userCounterReader;
     
 
     /**
@@ -48,12 +48,14 @@ public class RelationServiceImpl implements RelationService {
      */
     public RelationServiceImpl(RelationMapper mapper,
                                StringRedisTemplate redis,
-                               UserMapper userMapper) {
+                               UserMapper userMapper,
+                               UserCounterReader userCounterReader) {
         this.mapper = mapper;
         this.redis = redis;
         this.flwsTopCache = Caffeine.newBuilder().maximumSize(1000).expireAfterWrite(Duration.ofMinutes(10)).build();
         this.fansTopCache = Caffeine.newBuilder().maximumSize(1000).expireAfterWrite(Duration.ofMinutes(10)).build();
         this.userMapper = userMapper;
+        this.userCounterReader = userCounterReader;
     }
 
     /**
@@ -206,20 +208,9 @@ public class RelationServiceImpl implements RelationService {
      * @return 是否为大V
      */
     private boolean isBigV(long userId) {
-        byte[] raw = redis.execute((RedisCallback<byte[]>) c -> c.stringCommands().get(("ucnt:" + userId).getBytes(StandardCharsets.UTF_8)));
-
-        if (raw == null || raw.length < 20) {
-            return false;
-        }
-
-        long n = 0;
-        int off = 2 * 4;
-
-        for (int i = 0; i < 4; i++) {
-            n = (n << 8) | (raw[off + i] & 0xFFL);
-        }
-
-        return n >= 500_000L;
+        return userCounterReader.find(userId)
+                .map(counters -> counters.followers() >= 500_000L)
+                .orElse(false);
     }
 
     /**

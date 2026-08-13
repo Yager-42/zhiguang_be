@@ -25,10 +25,7 @@ class RelationManagerControllerWiringTest {
                 AuthConfiguration authConfiguration = new AuthConfiguration(authProperties);
                 return new JwtService(authConfiguration.jwtEncoder(), authConfiguration.jwtDecoder(), authProperties);
             })
-            .withBean(org.springframework.data.redis.core.StringRedisTemplate.class, TestStringRedisTemplate::new)
-            .withBean(com.tongji.counter.service.UserCounterRebuildAdapter.class, () -> mock(com.tongji.counter.service.UserCounterRebuildAdapter.class))
-            .withBean(com.tongji.relation.mapper.RelationMapper.class, () -> mock(com.tongji.relation.mapper.RelationMapper.class))
-            .withBean(com.tongji.common.singleflight.DistributedSingleFlightService.class, () -> mock(com.tongji.common.singleflight.DistributedSingleFlightService.class))
+            .withBean(com.tongji.counter.service.UserCounterReader.class, () -> mock(com.tongji.counter.service.UserCounterReader.class))
             .withBean(RelationController.class);
 
     @Test
