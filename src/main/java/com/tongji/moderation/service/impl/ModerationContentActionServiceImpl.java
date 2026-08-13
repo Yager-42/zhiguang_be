@@ -15,7 +15,7 @@ import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.moderation.model.ModerationReport;
 import com.tongji.moderation.model.ModerationTargetType;
 import com.tongji.moderation.service.ModerationContentActionService;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.SetOperations;

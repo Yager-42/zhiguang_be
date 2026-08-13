@@ -7,7 +7,7 @@ import com.tongji.common.resilience.ResilienceGuard;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
 import com.tongji.relation.mapper.RelationMapper;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

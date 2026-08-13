@@ -1,9 +1,10 @@
 package com.tongji.search.outbox;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tongji.relation.outbox.OutboxTopics;
-import com.tongji.common.util.OutboxMessageUtil;
+import com.tongji.outbox.OutboxEvent;
+import com.tongji.outbox.OutboxMessageReader;
+import com.tongji.outbox.OutboxPayload;
+import com.tongji.outbox.OutboxTopics;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
 import com.tongji.reconciliation.service.ReconciliationService;
@@ -31,71 +32,43 @@ public class CanalOutboxConsumerSearch {
      */
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX, groupId = "search-index-consumer")
     public void onMessage(String message, Acknowledgment ack) {
-        try {
-            List<JsonNode> rows = OutboxMessageUtil.extractRows(objectMapper, message);
-
-            if (rows.isEmpty()) {
-                ack.acknowledge();
-                return;
-            }
-
-            for (JsonNode row : rows) {
-                JsonNode payloadNode = row.get("payload");
-                if (payloadNode == null) {
-                    continue;
-                }
-
-                JsonNode payload = objectMapper.readTree(payloadNode.asText());
-                String eventType = text(payload.get("eventType"));
-                if ("content_published".equals(eventType)) {
-                    Long postId = asLong(payload.get("postId"));
-                    if (postId == null) {
-                        continue;
-                    }
-                    try {
-                        indexService.upsertKnowPostStrict(postId);
-                    } catch (RuntimeException e) {
-                        reconciliationService.createTaskIfAbsent(
-                                ReconciliationTaskType.ES_INDEX,
-                                ReconciliationTargetType.POST,
-                                postId
-                        );
-                    }
-                    continue;
-                }
-
-                String entity = text(payload.get("entity"));
-                String op = text(payload.get("op"));
-                Long id = asLong(payload.get("id"));
-                if (!"knowpost".equals(entity) || id == null) {
-                    continue;
-                }
-
-                // 软删与 upsert，均覆盖写入同一文档 ID，保证幂等
-                if ("delete".equalsIgnoreCase(op)) {
-                    indexService.softDeleteKnowPost(id);
-                } else {
-                    indexService.upsertKnowPost(id);
-                }
-            }
-            // 提交位点，确保“已处理”的语义
+        List<OutboxEvent> events = OutboxMessageReader.read(objectMapper, message);
+        if (events.isEmpty()) {
             ack.acknowledge();
-        } catch (Exception ignored) {}
-    }
-
-    private String text(JsonNode n) {
-        return n == null ? null : n.asText();
-    }
-
-    private Long asLong(JsonNode n) {
-        if (n == null) {
-            return null;
+            return;
         }
-
-        try {
-            return Long.parseLong(n.asText());
-        } catch (Exception e) {
-            return null;
+        for (OutboxEvent event : events) {
+            OutboxPayload payload = event.parsePayload(objectMapper).orElse(null);
+            if (payload == null) {
+                continue;
+            }
+            if ("content_published".equals(payload.text("eventType"))) {
+                Long postId = payload.longValue("postId");
+                if (postId == null) {
+                    continue;
+                }
+                try {
+                    indexService.upsertKnowPostStrict(postId);
+                } catch (RuntimeException failure) {
+                    reconciliationService.createTaskIfAbsent(
+                            ReconciliationTaskType.ES_INDEX,
+                            ReconciliationTargetType.POST,
+                            postId
+                    );
+                }
+                continue;
+            }
+            Long id = payload.longValue("id");
+            if (!"knowpost".equals(payload.text("entity")) || id == null) {
+                continue;
+            }
+            if ("delete".equalsIgnoreCase(payload.text("op"))) {
+                indexService.softDeleteKnowPost(id);
+            } else {
+                indexService.upsertKnowPost(id);
+            }
         }
+        ack.acknowledge();
     }
+
 }

@@ -2,8 +2,10 @@ package com.tongji.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.relation.event.RelationEvent;
-import com.tongji.relation.outbox.CanalKafkaBridge;
-import com.tongji.relation.outbox.CanalOutboxConsumer;
+import com.tongji.outbox.CanalKafkaBridge;
+import com.tongji.outbox.CanalOutboxBatchPublisher;
+import com.tongji.outbox.OutboxMessageReader;
+import com.tongji.relation.consumer.CanalOutboxConsumer;
 import com.tongji.relation.processor.RelationEventProcessor;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -29,7 +31,7 @@ import static org.mockito.Mockito.mock;
 class ThreadPoolConfigTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(ThreadPoolConfig.class, CanalKafkaBridge.class, CanalOutboxConsumer.class)
+            .withUserConfiguration(ThreadPoolConfig.class, CanalKafkaBridge.class, CanalOutboxBatchPublisher.class, OutboxMessageReader.class, CanalOutboxConsumer.class)
             .withBean(ProducerFactory.class, () -> new DefaultKafkaProducerFactory<String, String>(Map.of()))
             .withBean(KafkaTemplate.class, () -> new KafkaTemplate<>(mock(ProducerFactory.class)))
             .withBean(RelationEventProcessor.class, NoOpRelationEventProcessor::new)
@@ -80,7 +82,8 @@ class ThreadPoolConfigTest {
         BlockingRelationEventProcessor processor = new BlockingRelationEventProcessor();
         RecordingAcknowledgment acknowledgment = new RecordingAcknowledgment();
         TaskExecutor asyncExecutor = runnable -> new Thread(runnable, "test-relation-event").start();
-        CanalOutboxConsumer consumer = new CanalOutboxConsumer(new ObjectMapper(), processor, asyncExecutor);
+        ObjectMapper objectMapper = new ObjectMapper();
+        CanalOutboxConsumer consumer = new CanalOutboxConsumer(new OutboxMessageReader(objectMapper), objectMapper, processor, asyncExecutor);
         CountDownLatch consumerFinished = new CountDownLatch(1);
 
         Thread consumerThread = new Thread(() -> {

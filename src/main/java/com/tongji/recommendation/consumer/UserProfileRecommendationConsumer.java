@@ -1,12 +1,13 @@
 package com.tongji.recommendation.consumer;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tongji.common.util.OutboxMessageUtil;
+import com.tongji.outbox.OutboxEvent;
+import com.tongji.outbox.OutboxMessageReader;
+import com.tongji.outbox.OutboxPayload;
+import com.tongji.outbox.OutboxTopics;
 import com.tongji.profile.event.UserProfileUpdatedEvent;
 import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
-import com.tongji.relation.outbox.OutboxTopics;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
@@ -32,27 +33,17 @@ public class UserProfileRecommendationConsumer {
             acknowledgment.acknowledge();
             return;
         }
-        for (JsonNode row : OutboxMessageUtil.extractRows(objectMapper, message)) {
-            JsonNode payloadNode = row.get("payload");
-            if (payloadNode == null) {
+        for (OutboxEvent event : OutboxMessageReader.read(objectMapper, message)) {
+            OutboxPayload payload = event.parsePayload(objectMapper).orElse(null);
+            if (payload == null || !"user_profile_updated".equals(payload.text("eventType"))) {
                 continue;
             }
-            UserProfileUpdatedEvent event;
-            try {
-                JsonNode payload = objectMapper.readTree(payloadNode.asText());
-                if (!"user_profile_updated".equals(text(payload.get("eventType")))) {
-                    continue;
-                }
-                JsonNode userNode = payload.get("user");
-                if (userNode == null || userNode.isNull()) {
-                    continue;
-                }
-                event = objectMapper.treeToValue(userNode, UserProfileUpdatedEvent.class);
-            } catch (Exception ignored) {
+            UserProfileUpdatedEvent user = payload.fieldAs("user", UserProfileUpdatedEvent.class);
+            if (user == null) {
                 continue;
             }
             try {
-                gorseClient.upsertUser(event);
+                gorseClient.upsertUser(user);
             } catch (RuntimeException ignored) {
                 return;
             }
@@ -60,7 +51,4 @@ public class UserProfileRecommendationConsumer {
         acknowledgment.acknowledge();
     }
 
-    private String text(JsonNode node) {
-        return node == null ? null : node.asText();
-    }
 }

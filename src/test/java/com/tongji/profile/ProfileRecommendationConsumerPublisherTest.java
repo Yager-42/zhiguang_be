@@ -7,7 +7,7 @@ import com.tongji.profile.api.dto.ProfilePatchRequest;
 import com.tongji.profile.event.UserProfileUpdatedEvent;
 import com.tongji.profile.event.UserProfileUpdatedProducer;
 import com.tongji.profile.service.impl.ProfileServiceImpl;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import com.tongji.user.domain.User;
 import com.tongji.user.mapper.UserMapper;
 import org.junit.jupiter.api.Test;

@@ -28,7 +28,7 @@
 | D2 | 模块分层 | 每域模块 = `api`（Controller+DTO）→ `service`(+`impl`) → `manager`/`mapper`/`event`/`consumer`/`model`；跨模块调用走 **service 接口** 或 **Kafka 事件**（详见 §3.3 模块依赖） | controller 直连 mapper；跨模块直读他人表 |
 | D3 | HTTP 错误契约 | 全局 `@RestControllerAdvice`（`common/web/GlobalExceptionHandler.java`）：`BusinessException`→400 + `{code,message}`；`@Valid` 失败→400 + `BAD_REQUEST`；无匹配资源→404 + `{code:"NOT_FOUND",message:"请求资源不存在"}`；兜底 `Exception`→500 + `{code:"INTERNAL_ERROR", message:"服务异常，请稍后重试"}`；业务码枚举 `common/exception/ErrorCode.java`（27 值） | 各 controller 自造错误体 |
 | D4 | ID 生成 | 统一 `IdService.nextId(IdNamespace)`（`common/id/`）：**Snowflake** 为默认（41+5+5+12 位，EPOCH 2024-01-01，时钟回拨抛 `ClockBackwardException`），推广历史 command 与保证金分别使用 `PROMOTION_COMMAND`、`PROMOTION_ESCROW`；**Segment**（`leaf_alloc` 表双缓冲，50% 阈值预加载）仅用于 `reconciliation_task/admin_operation/audit_log`；命名空间见 `IdNamespace.java` | 各模块自造随机/自增 ID |
-| D5 | 异步一致性 | **outbox 表 + Canal CDC + Kafka `canal-outbox` 主题** 为跨模块事件总线（`CanalKafkaBridge.java` 监听 `zhiguang.outbox`，仅转发 INSERT/UPDATE 的 payload 列）；业务事务内写 outbox，事务提交后被转发；**at-least-once + 消费端幂等** | 业务事务内直发 Kafka |
+| D5 | 异步一致性 | **outbox 表 + Canal CDC + Kafka `canal-outbox` 主题** 为跨模块事件总线（`outbox/`）：业务事务内写 outbox；`CanalKafkaBridge` 转发完整 outbox 行并等待该批全部 Kafka send 成功后 ack，解析/发送失败 rollback；**at-least-once + 消费端幂等** | 业务事务内直发 Kafka；未等待 broker 确认即推进 Canal 位点 |
 | D6 | 存储分工 | **MySQL**：长期事实/账务（用户、帖子、评论、发布尝试、outbox、钱包总余额、推广保证金授权与投影、对账、通知、关系）；**Redis**：推广窗口运行期间的竞价状态、顺序、排名、已授权保证金占用与 Stream 决策日志实时权威，以及计数 SDS/位图事实、缓存、分布式协调（singleflight/锁）；推广 Stream 在 MySQL checkpoint 推进后安全裁剪并保留最近 100000 条；**Kafka**：非推广域异步事件总线；**Cassandra**：长文本正文与关注流时间线；**Elasticsearch**：搜索；**MinIO**：对象。见 §5 | 将 Redis 余额占用扩展为可超出 MySQL 预授权总额的账务事实；未投影事件被裁剪；正文大字段进 MySQL |
 | D7 | 计数模型 | 实体计数（like/fav）三层：**位图分片事实层**（`bm:*`，32768 位/分片）+ **Kafka 事件聚合桶**（`counter-events` → `agg:v1:*`，每秒折叠 SDS）+ **SDS 固定结构**（`cnt:v1:*`，5×uint32 大端）；用户计数 `ucnt:{userId}` 同 SDS 布局（`counter/schema/*.java`） | 计数直接 INCR 单一计数器键 |
 | D8 | 发布语义 | **202 Accepted 只表示 attempt 被受理**：`POST /knowposts/{id}/publish` 恒 202 + `publishAttemptId`；`know_posts.status` 状态机 `draft→publishing→published / publish_failed / rejected / deleted`，全部守卫 UPDATE（`KnowPostMapper.xml`）；`publish_attempt` 独立状态机 + 5 分钟卡死恢复（`PublishAttemptService.java`） | 同步发布返回 200 表示已发布；无守卫状态流转 |
@@ -114,7 +114,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `storage` | MinIO 预签名直传 + Cassandra 正文读写（`text` 子包） | `StorageController` |
 | `wallet` | 三态余额账务 + 托管 + 注册赠币 + 内容奖励（只读 HTTP） | `WalletController` |
 | `reconciliation` | 对账任务/扫描/修复器/结算补偿分析 | `ReconciliationController` |
-| `common` | 异常/ID/Sentinel 守卫/singleflight/缓存/热键/outbox 解析 | — |
+| `outbox` | 跨模块 outbox 持久化、Canal 桥、完整 envelope 解析与 Kafka 主题 | — |
 | `cache` | Caffeine L1 缓存 Bean + 热点检测 | — |
 | `config` | ES/Redisson/RestTemplate/线程池配置 | — |
 
@@ -254,8 +254,8 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 ### 6.1 outbox → Canal → Kafka 总线（跨模块主总线）
 
 1. **写**：业务事务内 `outboxMapper.insert(id, aggregateType, aggregateId, type, payloadJson)`（`OutboxMapper.xml`）；id=`IdNamespace.OUTBOX_EVENT`（Snowflake）。
-2. **桥**：`CanalKafkaBridge`（`relation/outbox/CanalKafkaBridge.java`）`SmartLifecycle`，`canal.enabled` 门控；订阅 `zhiguang.outbox`（`canal.filter`），只转发 `EventType.INSERT/UPDATE`，**只取 `payload` 列**，封装 `{"table":"outbox","type":"INSERT|UPDATE","data":[{payload:...}]}` 发到 `canal-outbox`；批次 ack（至少一次）。
-3. **解**：`OutboxMessageUtil.extractRows`（`common/util/`）——`table==outbox && type∈{INSERT,UPDATE} && data` 数组才返回行。
+2. **桥**：`CanalKafkaBridge` + `CanalOutboxBatchPublisher`（`outbox/`）由 `SmartLifecycle` 与 `canal.enabled` 门控；订阅 `zhiguang.outbox`，只处理 `EventType.INSERT/UPDATE`，转发完整 after-column 行为 `{"table":"outbox","type":"INSERT|UPDATE","data":[{id,aggregate_type,aggregate_id,type,payload,created_at}]}`。每条 `KafkaTemplate.send` 都在 `canal.kafka-send-timeout-ms` 内等待 broker 结果；批次全部成功才 ack，解析/序列化/发送失败对该 batch rollback。
+3. **解**：`OutboxMessageReader`（`outbox/`）唯一解析 Canal envelope，返回类型化 `OutboxEvent`；`OutboxPayload` 统一 text/long/Instant/类型转换。业务事件反序列化仍留在 relation/moderation/recommendation/search/notification 各自 adapter，防止共享模块反向依赖业务类型。
 4. **事件类型注册表**（outbox `type` 字段，代码字面量）：`user_profile_updated`（profile）、`content_published` / `publish_derived_failure` / `KnowPostMetadataUpdated` / `KnowPostDeleted` / `KnowPostModerationRejected`（knowpost+moderation）、`review_requested`（moderation）、`FollowCreated` / `FollowCanceled`（relation，payload=RelationEvent JSON）、`moderation` 处置 delete 事件（`{entity:knowpost, op:delete, source:moderation}`）。
 
 ### 6.2 Kafka 主题清单（精确字符串）
@@ -451,7 +451,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 - **SingleFlight**（`common/singleflight/`，`singleflight.enabled`）：分布式协调 Redis Lua 6 脚本（meta/result/owner-seq）+ Stream 通知（非 pub/sub）+ L1 LRU 回放缓存 + 心跳（1s，takeover 10s）+ 结果编码（Base64+gzip+SHA-256）；失败分类 TIMEOUT/OVERLOAD/PROVIDER/VALIDATION/UNEXPECTED；`MAX_ATTEMPTS=3`；mode DISABLED/LOCAL/DISTRIBUTED/HYBRID；实际 stage：`counter-sds`、`moderation-llm`（`user-counter`/`feed-author-head` 见配置与调用点）。
 - **缓存/热键**：Caffeine L1 三 Bean（feedPublic 15s/1000、feedMine 10s/1000、detail 30s/5000）；`HotKeyDetector` 分段滑动窗口（6×10s；≥50 LOW/≥200 MEDIUM/≥500 HIGH）→ TTL 延长 +20/60/120s。
 - **全局异常**：见 D3/§4.1。
-- **OutboxMessageUtil**：Canal 行提取唯一解析器。
+- **OutboxMessageReader / OutboxPayload**：Canal envelope 与共享标量转换的唯一实现；业务事件类型由各消费模块拥有。
 
 ---
 
@@ -495,7 +495,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `promotion.slot-auction.*` | 槽位/保留价/60min 窗口/缓存 300s/批 50/30s | `PromotionProperties` |
 | `promotion.bprime.*` | enabled false、热状态 24h、命令幂等 10m/分钟桶、active-streams sweep 2s、读取批次 1000、保留事件 100000、结算回看 7d、WebSocket 出站线程与有界队列、公共增量 100–250ms 自适应/调度线程/窗口上限、英式拍卖规则 `auction-rules.*`（per-resource：incrementCents/capPriceCents/extendWindowSec/extendSec/maxExtensions） | `PromotionBPrimeProperties` |
 | `storage.*` | MinIO endpoint/bucket/公开域名 | `StorageProperties` |
-| `canal.*` | enabled false、host/port/destination/filter=`zhiguang.outbox`/100/1000ms | @Value |
+| `canal.*` | enabled false、host/port/destination/filter=`zhiguang.outbox`/batchSize 100/interval 1000ms/Kafka send timeout 10000ms | @Value |
 | `counter.rebuild` | enabled false | — |
 | `moderation.*` | llm enabled false/0.8/4000 字/3 次；platform-actor 0 | `ModerationProperties` |
 | `recommendation.gorse.*` | enabled false、endpoint、timeout 300ms、api-key | `GorseProperties` |
@@ -528,7 +528,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 ## 11. 代码锚点索引（快速导航）
 
 - 全局：`ZhiGuangApplication.java`、`config/ThreadPoolConfig.java`、`config/RedissonConfig.java`、`config/ElasticsearchConfig.java`、`config/RestTemplateConfig.java`
-- 契约常量：`common/exception/ErrorCode.java`（27 码）、`common/id/IdNamespace.java`（11 命名空间）、`relation/outbox/OutboxTopics.java`（`canal-outbox`）、`counter/event/CounterTopics.java`（`counter-events`）、`promotion/bprime/config/PromotionBPrimeProperties.java`（主题/组）
+- 契约常量：`common/exception/ErrorCode.java`（27 码）、`common/id/IdNamespace.java`（11 命名空间）、`outbox/OutboxTopics.java`（`canal-outbox`）、`counter/event/CounterTopics.java`（`counter-events`）、`promotion/bprime/config/PromotionBPrimeProperties.java`（主题/组）
 - 状态机 SQL：`resources/mapper/KnowPostMapper.xml`、`PublishAttemptMapper.xml`、`CommentOutboxMapper.xml`、`ModerationReportMapper.xml`、`ReconciliationTaskMapper.xml`、`WalletEscrowMapper.xml`
 - 原子脚本：`resources/redis/lua/promotion-auction-decision-batch.lua`（推广批量决策）、`common/singleflight/RedisSingleFlightCoordinatorRepository.java`（6 Lua）、`counter/service/impl/CounterServiceImpl.java`（TOGGLE_LUA 等）
 - DDL：`db/schema.sql`（26 表）、`db/cassandra/init.cql`（4 表）

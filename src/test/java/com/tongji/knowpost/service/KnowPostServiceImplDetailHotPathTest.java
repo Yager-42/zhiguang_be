@@ -11,7 +11,7 @@ import com.tongji.counter.service.UserCounterService;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.service.impl.KnowPostServiceImpl;
-import com.tongji.relation.outbox.OutboxMapper;
+import com.tongji.outbox.OutboxMapper;
 import com.tongji.storage.MinioStorageService;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
