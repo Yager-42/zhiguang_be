@@ -109,13 +109,11 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
      */
     public void publishWindowExtended(PromotionAuctionDecision decision) {
         Objects.requireNonNull(decision, "decision must not be null");
-        if (!"AUCTION_EXTENDED".equals(decision.type())) {
-            throw new IllegalArgumentException("extension public event requires AUCTION_EXTENDED decision");
-        }
+        PromotionAuctionDecision.ExtensionFacts facts = decision.extensionFacts();
         long nextEventVersion = decision.decisionVersion();
         Map<String, Object> details = new LinkedHashMap<>();
-        details.put("endAtEpochMs", decision.payload().getOrDefault("endAtEpochMs", 0L));
-        details.put("extendCount", decision.payload().getOrDefault("extendCount", 0));
+        details.put("endAtEpochMs", facts.endAtEpochMs());
+        details.put("extendCount", facts.extendCount());
         publisher.publishPublic(new PromotionAuctionRealtimeEvent(
                 "decision-" + decision.decisionId() + ":public:" + nextEventVersion,
                 PromotionAuctionRealtimeEvent.AUCTION_EXTENDED,
@@ -227,6 +225,8 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         private long lastPublishedAtNanos;
 
         private synchronized void merge(PromotionAuctionDecision decision) {
+            PromotionAuctionDecision.AdmissionFacts facts = decision.admissionFacts();
+            PromotionAuctionDecision.BidFacts bidFacts = decision.bidFacts();
             if (deltas.isEmpty()) {
                 pendingFromDecisionVersion = decision.decisionVersion();
             }
@@ -240,11 +240,9 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
             latestDecisionId = decision.decisionId();
             latestDecisionVersion = decision.decisionVersion();
             latestOccurredAt = decision.decidedAt();
-            latestWinnerCampaignId = decision.payload().getOrDefault(
-                    "winnerCampaignId", String.valueOf(decision.campaignId()));
-            latestCurrentPriceCents = decision.payload().getOrDefault(
-                    "currentPriceCents", decision.bidAmount());
-            latestNextRequiredAmount = decision.payload().getOrDefault("nextRequiredAmount", 0L);
+            latestWinnerCampaignId = facts.winnerCampaignId();
+            latestCurrentPriceCents = facts.currentPriceCents();
+            latestNextRequiredAmount = bidFacts.nextRequiredAmount().orElse(0L);
         }
 
         private synchronized boolean hasPending() {
@@ -304,13 +302,14 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         private synchronized int publishWindowClosed(
                 PromotionAuctionDecision decision,
                 PromotionAuctionRealtimePublisher publisher) {
+            PromotionAuctionDecision.TerminalFacts facts = decision.terminalFacts();
             int deltaCount = publishPending(publisher);
             long nextEventVersion = decision.decisionVersion();
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("terminalStatus", decision.type());
-            details.put("winnerCampaignId", decision.payload().getOrDefault("winnerCampaignId", ""));
-            details.put("winningAmount", decision.payload().getOrDefault("winningAmount", 0L));
-            details.put("actualEndAtEpochMs", decision.payload().getOrDefault("actualEndAtEpochMs", 0L));
+            details.put("winnerCampaignId", facts.winnerCampaignId().map(String::valueOf).orElse(""));
+            details.put("winningAmount", facts.winningAmount().orElse(0L));
+            details.put("actualEndAtEpochMs", facts.actualEndAtEpochMs());
             publisher.publishPublic(new PromotionAuctionRealtimeEvent(
                     "decision-" + decision.decisionId() + ":public:" + nextEventVersion,
                     PromotionAuctionRealtimeEvent.WINDOW_CLOSED,
@@ -320,7 +319,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
                     nextEventVersion,
                     decision.decisionVersion(),
                     decision.decisionVersion(),
-                    String.valueOf(decision.payload().getOrDefault("finalWindowStatus", "SETTLED")),
+                    facts.finalWindowStatus(),
                     decision.ranking(),
                     List.of(),
                     details,

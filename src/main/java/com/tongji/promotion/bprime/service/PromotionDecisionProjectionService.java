@@ -122,22 +122,14 @@ public class PromotionDecisionProjectionService {
      * </ul>
      */
     private void settleWindow(PromotionAuctionDecision decision) {
-        boolean sold = "AUCTION_SOLD".equals(decision.decisionType());
+        PromotionAuctionDecision.TerminalFacts facts = decision.terminalFacts();
+        boolean sold = decision.kind() == com.tongji.promotion.bprime.model.PromotionDecisionType.AUCTION_SOLD;
         settlementModule.settle(new PromotionAuctionTerminalInput(
                 decision.auctionWindowId(),
                 sold ? PromotionAuctionTerminalInput.Kind.SOLD : PromotionAuctionTerminalInput.Kind.NO_BID,
-                sold ? payloadLong(decision, "winnerCampaignId") : null,
-                sold ? payloadLong(decision, "winningAmount") : null,
+                facts.winnerCampaignId().orElse(null),
+                facts.winningAmount().orElse(null),
                 decision.decidedAt()));
-    }
-
-    private long payloadLong(PromotionAuctionDecision decision, String key) {
-        Object value = decision.payload().get(key);
-        if (value == null) {
-            throw new IllegalStateException("promotion terminal decision is missing payload field: "
-                    + key + ", type=" + decision.decisionType());
-        }
-        return Long.parseLong(String.valueOf(value));
     }
 
 

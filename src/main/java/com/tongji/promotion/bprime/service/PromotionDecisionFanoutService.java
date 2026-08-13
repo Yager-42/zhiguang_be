@@ -39,10 +39,10 @@ public class PromotionDecisionFanoutService {
             return false;
         }
         try {
-            switch (decision.type()) {
-                case "BID_ACCEPTED" -> publicUpdateCoalescer.enqueueBid(decision);
-                case "AUCTION_EXTENDED" -> publicUpdateCoalescer.publishWindowExtended(decision);
-                case "AUCTION_SOLD", "AUCTION_NO_BID" ->
+            switch (decision.kind()) {
+                case BID_ACCEPTED -> publicUpdateCoalescer.enqueueBid(decision);
+                case AUCTION_EXTENDED -> publicUpdateCoalescer.publishWindowExtended(decision);
+                case AUCTION_SOLD, AUCTION_NO_BID ->
                         publicUpdateCoalescer.publishWindowClosed(withFinalRanking(decision));
                 default -> throw new IllegalArgumentException(
                         "unsupported promotion Stream event: " + decision.type());
@@ -55,25 +55,7 @@ public class PromotionDecisionFanoutService {
     }
 
     private PromotionAuctionDecision withFinalRanking(PromotionAuctionDecision decision) {
-        return new PromotionAuctionDecision(
-                decision.decisionId(),
-                decision.commandId(),
-                decision.requestHash(),
-                decision.auctionWindowId(),
-                decision.decisionVersion(),
-                decision.previousVersion(),
-                decision.campaignId(),
-                decision.bidderUserId(),
-                decision.postId(),
-                decision.resourceType(),
-                decision.type(),
-                decision.accepted(),
-                decision.rejectionReason(),
-                decision.bidAmount(),
-                snapshotAdapter.snapshot(decision.auctionWindowId()).ranking(),
-                decision.walletEffects(),
-                decision.payload(),
-                decision.decidedAt());
+        return decision.withRanking(snapshotAdapter.snapshot(decision.auctionWindowId()).ranking());
     }
 
     private boolean requireVisibleVersionOrder(PromotionAuctionDecision decision) {

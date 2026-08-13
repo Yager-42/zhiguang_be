@@ -158,6 +158,7 @@ public class PromotionCommandSubmissionService {
     }
 
     private SubmitPromotionBidCommandResponse response(PromotionAuctionDecision decision) {
+        PromotionAuctionDecision.BidFacts facts = decision.bidFacts();
         return new SubmitPromotionBidCommandResponse(
                 decision.commandId(),
                 String.valueOf(decision.auctionWindowId()),
@@ -168,28 +169,10 @@ public class PromotionCommandSubmissionService {
                 decision.decisionVersion(),
                 decision.bidAmount(),
                 decision.decidedAt(),
-                requiredAmount(decision),
+                facts.requiredAmount().orElse(null),
                 decision.accepted(),
-                payloadString(decision, "winnerCampaignId"),
-                payloadLong(decision, "currentPriceCents"));
-    }
-
-    private Long requiredAmount(PromotionAuctionDecision decision) {
-        Object value = decision.payload().get("requiredAmount");
-        return value instanceof Number number ? number.longValue() : null;
-    }
-
-    private String payloadString(PromotionAuctionDecision decision, String field) {
-        Object value = decision.payload().get(field);
-        return value == null ? null : String.valueOf(value);
-    }
-
-    private Long payloadLong(PromotionAuctionDecision decision, String field) {
-        Object value = decision.payload().get(field);
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        return value instanceof String text && !text.isBlank() ? Long.valueOf(text) : null;
+                facts.winnerCampaignId().orElse(null),
+                facts.currentPriceCents().orElse(null));
     }
 
     private SubmitPromotionBidCommandResponse unavailable(PromotionAuctionCommand command) {
