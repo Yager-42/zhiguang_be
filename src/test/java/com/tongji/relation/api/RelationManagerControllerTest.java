@@ -4,6 +4,8 @@ import com.tongji.auth.config.AuthConfiguration;
 import com.tongji.auth.config.AuthProperties;
 import com.tongji.auth.token.JwtService;
 import com.tongji.common.web.GlobalExceptionHandler;
+import com.tongji.counter.service.UserCounterReader;
+import com.tongji.counter.service.UserCounters;
 import com.tongji.profile.api.dto.ProfileResponse;
 import com.tongji.relation.manager.RelationManager;
 import com.tongji.relation.manager.RelationWriteResult;
@@ -40,6 +42,7 @@ class RelationManagerControllerTest {
 
     private RelationManager relationManager;
     private RelationService relationService;
+    private UserCounterReader userCounterReader;
     private MockMvc mockMvc;
     private Jwt jwt;
 
@@ -47,16 +50,14 @@ class RelationManagerControllerTest {
     void setUp() {
         relationManager = Mockito.mock(RelationManager.class);
         relationService = Mockito.mock(RelationService.class);
+        userCounterReader = Mockito.mock(UserCounterReader.class);
         JwtService jwtService = buildJwtService();
 
         RelationController controller = new RelationController(
                 relationManager,
                 relationService,
                 jwtService,
-                new org.springframework.data.redis.core.StringRedisTemplate(),
-                Mockito.mock(com.tongji.counter.service.UserCounterRebuildAdapter.class),
-                Mockito.mock(com.tongji.relation.mapper.RelationMapper.class),
-                Mockito.mock(com.tongji.common.singleflight.DistributedSingleFlightService.class)
+                userCounterReader
         );
 
         HandlerMethodArgumentResolver jwtArgumentResolver = new HandlerMethodArgumentResolver() {
@@ -143,6 +144,24 @@ class RelationManagerControllerTest {
                 .andExpect(jsonPath("$[0].id").value(OTHER_USER_ID));
 
         verify(relationService).followingProfiles(OTHER_USER_ID, 20, 0, null);
+    }
+
+    @Test
+    void counterEndpointPreservesFiveFieldJsonContract() throws Exception {
+        when(userCounterReader.getVerified(OTHER_USER_ID))
+                .thenReturn(new UserCounters(1L, 2L, 3L, 4L, 5L));
+
+        mockMvc.perform(get("/api/v1/relation/counter")
+                        .queryParam("userId", String.valueOf(OTHER_USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.followings").value(1L))
+                .andExpect(jsonPath("$.followers").value(2L))
+                .andExpect(jsonPath("$.posts").value(3L))
+                .andExpect(jsonPath("$.likedPosts").value(4L))
+                .andExpect(jsonPath("$.favedPosts").value(5L))
+                .andExpect(jsonPath("$.length()").value(5));
+
+        verify(userCounterReader).getVerified(OTHER_USER_ID);
     }
 
     private JwtService buildJwtService() {

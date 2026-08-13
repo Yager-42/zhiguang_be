@@ -1,23 +1,17 @@
 package com.tongji.relation.api;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.tongji.auth.token.JwtService;
-import com.tongji.common.singleflight.DistributedSingleFlightService;
-import com.tongji.counter.service.UserCounterRebuildAdapter;
+import com.tongji.counter.service.UserCounterReader;
+import com.tongji.counter.service.UserCounters;
 import com.tongji.profile.api.dto.ProfileResponse;
 import com.tongji.relation.manager.RelationManager;
 import com.tongji.relation.service.RelationService;
-import org.springframework.data.redis.core.RedisCallback;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.IntFunction;
-import java.nio.charset.StandardCharsets;
 
 /**
  * 关系接口控制器。
@@ -30,25 +24,16 @@ public class RelationController {
     private final RelationManager relationManager;
     private final RelationService relationService;
     private final JwtService jwtService;
-    private final StringRedisTemplate redis;
-    private final UserCounterRebuildAdapter userCounterRebuildAdapter;
-    private final com.tongji.relation.mapper.RelationMapper relationMapper;
-    private final DistributedSingleFlightService singleFlightService;
+    private final UserCounterReader userCounterReader;
 
     public RelationController(RelationManager relationManager,
                               RelationService relationService,
                               JwtService jwtService,
-                              StringRedisTemplate redis,
-                              UserCounterRebuildAdapter userCounterRebuildAdapter,
-                              com.tongji.relation.mapper.RelationMapper relationMapper,
-                              DistributedSingleFlightService singleFlightService) {
+                              UserCounterReader userCounterReader) {
         this.relationManager = relationManager;
         this.relationService = relationService;
         this.jwtService = jwtService;
-        this.redis = redis;
-        this.userCounterRebuildAdapter = userCounterRebuildAdapter;
-        this.relationMapper = relationMapper;
-        this.singleFlightService = singleFlightService;
+        this.userCounterReader = userCounterReader;
     }
 
     /**
@@ -122,80 +107,14 @@ public class RelationController {
     }
 
     /**
-     * 获取用户维度计数（SDS）。
-     * 结构与一致性：SDS 由 5 个 4 字节段组成（关注/粉丝/发文/获赞/获藏），按需触发采样校验与重建，保证接口稳定可用。
+     * 获取用户维度计数。
+     *
+     * <p>存储格式、采样校验与按需重建由计数模块拥有。</p>
      * @param userId 用户ID
      * @return 各计数指标的值
      */
     @GetMapping("/counter")
-    public Map<String, Long> counter(@RequestParam("userId") long userId) {
-        // 从 Redis 读取用户计数字符串（SDS，键：ucnt:{userId}）
-        byte[] raw = redis.execute((RedisCallback<byte[]>)
-                c -> c.stringCommands().get(("ucnt:" + userId).getBytes(StandardCharsets.UTF_8)));
-
-        // 拼接计数结果
-        Map<String, Long> m = new LinkedHashMap<>();
-
-        // 缺失或结构异常（少于 5 段 × 每段 4 字节）时尝试重建
-        if (raw == null || raw.length < 20) {
-            return rebuildUserCounters(userId);
-        }
-
-        final byte[] buf = raw;
-        // 段数（每段 4 字节，按大端 32 位整型编码）
-        final int seg = buf.length / 4;
-
-        // 读取第 idx 段的计数（1 基坐标），大端拼接为 long
-        IntFunction<Long> read = idx -> {
-            if (idx < 1 || idx > seg) return 0L;
-            int off = (idx - 1) * 4;
-            long n = 0;
-            for (int i = 0; i < 4; i++) {
-                n = (n << 8) | (buf[off + i] & 0xFFL);
-            }
-            return n;
-        };
-
-        long sdsFollowings = read.apply(1);
-        long sdsFollowers = read.apply(2);
-
-        String chkKey = "ucnt:chk:" + userId;
-        // 采样校验：使用 Redis 锁限流，每用户 300s 触发一次
-        Boolean doCheck = redis.opsForValue().setIfAbsent(chkKey, "1", java.time.Duration.ofSeconds(300));
-
-        if (Boolean.TRUE.equals(doCheck)) {
-            int dbFollowings = 0;
-            int dbFollowers = 0;
-
-            // 仅校验关注/粉丝的有效关系计数，与 SDS 值对比
-            try {
-                dbFollowings = relationMapper.countFollowingActive(userId);
-            } catch (Exception ignored) {}
-            try {
-                dbFollowers = relationMapper.countFollowerActive(userId);
-            } catch (Exception ignored) {}
-
-            // 段数异常或值不一致则触发全量重建
-            if ((seg != 5) || sdsFollowings != (long) dbFollowings || sdsFollowers != (long) dbFollowers) {
-                return rebuildUserCounters(userId);
-            }
-        }
-
-        // 正常路径：直接返回 SDS 中的计数值
-        m.put("followings", sdsFollowings);
-        m.put("followers", sdsFollowers);
-        m.put("posts", read.apply(3));
-        m.put("likedPosts", read.apply(4));
-        m.put("favedPosts", read.apply(5));
-        return m;
-    }
-
-    private Map<String, Long> rebuildUserCounters(long userId) {
-        return singleFlightService.execute(
-                "user-counter",
-                String.valueOf(userId),
-                new TypeReference<Map<String, Long>>() {},
-                () -> userCounterRebuildAdapter.rebuildAndRead(userId)
-        );
+    public UserCounters counter(@RequestParam("userId") long userId) {
+        return userCounterReader.getVerified(userId);
     }
 }
