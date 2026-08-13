@@ -2,9 +2,9 @@
 
 | 字段 | 值 |
 |------|-----|
-| **contract_version** | `0.7.0` |
+| **contract_version** | `0.8.0` |
 | **status** | **active**（本文档首次建立；后续架构/契约变更必须同步修改本文并升版本） |
-| **updated** | 2026-08-12 |
+| **updated** | 2026-08-13 |
 | **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，390 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
 | **roadmap** | OpenSpec 变更与执行顺序见 [`openspec/changes/execution-order.md`](../../openspec/changes/execution-order.md)；本仓为单体演进、微服务拆分仅作约束（见该文件阶段 0） |
 | **out of scope for this doc** | 前端 `zhiguang_fe/`（当前为空占位目录）、`loadtest/` 压测方案细节、各业务请求/响应 JSON 逐字段表（以代码 DTO 为准） |
@@ -63,7 +63,7 @@
 
 - 不是微服务/分布式网关架构（单体演进，`execution-order.md` 阶段 0）；
 - 不依赖 Gorse/Canal/moderation-LLM/bprime 默认可用（默认关闭，§D13）；
-- 不使用 LangChain/独立 AI 内核：LLM 仅经 Spring AI 用于内容审核（`moderation/service/impl/SpringAi*ModerationLlmClient.java`）；
+- 不使用 LangChain/独立 AI 内核：LLM 仅经 Spring AI 审核流水线 `SpringAiModerationPipeline`，由 DashScope/OpenAI-compatible provider adapter 构造；
 - `zhiguang_fe/` 当前为空，前端契约不在本仓。
 
 ---
@@ -376,7 +376,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 **状态机**：`pending → approved | rejected | ignored`（无 reviewing 态，`ModerationStatus` 常量）；重试在 pending 内自循环。失败码字面量：`INPUT_UNAVAILABLE/LLM_UNAVAILABLE/LLM_DISABLED`(retryable)、`INPUT_INSUFFICIENT/INVALID_RESPONSE/LOW_CONFIDENCE`(invalid)。
 
-**LLM 客户端**：`SpringAiModerationLlmClient`（provider=opencode，`spring.ai.openai.chat.options.model` 默认 `deepseek-v4-flash-free`）与 `SpringAiAlibabaModerationLlmClient`（provider=dashscope，默认 `qwen-plus`）逐行同构；`BeanOutputConverter` 强制 JSON、prompt 声明 JSON 不可信防注入；`DisabledModerationLlmClient`（enabled=false）恒 `LLM_DISABLED`。
+**LLM 客户端**：`SpringAiModerationPipeline` 是唯一审核流水线 implementation，集中输入加载、prompt、`BeanOutputConverter` JSON 解析、decision/置信度归一与错误分类；`ModerationLlmProviderConfiguration` 以窄 adapter seam 根据 `moderation.llm.provider=dashscope|opencode`（默认 dashscope）选择 `dashScopeChatModel`/`openAiChatModel` 和对应模型名，启用时只装配一个 `ModerationLlmClient`。prompt 将用户内容编码为不可信 JSON 防注入；`DisabledModerationLlmClient`（enabled=false）恒 `LLM_DISABLED`。
 
 ### 7.7 notification
 
@@ -467,7 +467,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 消息 | spring-kafka（manual ack，非推广域）+ Redis Stream（推广竞价）+ canal client 1.1.8 |
 | 搜索 | elasticsearch-java/rest-client 8.12.2（容器镜像 9.2.1+IK 分词） |
 | 对象存储 | MinIO 8.5.9（预签名） |
-| AI | spring-ai-alibaba-starter-dashscope 1.1.2（审核 LLM，可关） |
+| AI | Spring AI 1.1.2：spring-ai-alibaba DashScope 1.1.2.2 + OpenAI adapter（审核 LLM，可关且单 provider） |
 | 流控 | sentinel-core 1.8.10（仅 SDK，规则外部下发） |
 | 邮件 | spring-boot-starter-mail（声明未用）[INFERENCE：无消费代码] |
 | 工程 | Lombok 1.18.46、Maven；测试：spring-boot-starter-test + Mockito + Testcontainers(Cassandra) |
@@ -497,7 +497,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `storage.*` | MinIO endpoint/bucket/公开域名 | `StorageProperties` |
 | `canal.*` | enabled false、host/port/destination/filter=`zhiguang.outbox`/batchSize 100/interval 1000ms/Kafka send timeout 10000ms | @Value |
 | `counter.rebuild` | enabled false | — |
-| `moderation.*` | llm enabled false/0.8/4000 字/3 次；platform-actor 0 | `ModerationProperties` |
+| `moderation.*` | llm enabled false、provider dashscope（可选 opencode）、0.8/4000 字/3 次；platform-actor 0 | `ModerationProperties` |
 | `recommendation.gorse.*` | enabled false、endpoint、timeout 300ms、api-key | `GorseProperties` |
 | `feed.*` | home.mixed-enabled false、fanout 阈值 10000、cache TTL、inbox.ttl-days 30 | @Value |
 | `cache.*` | L1 TTL/容量 + 热键阈值 | `CacheProperties` |

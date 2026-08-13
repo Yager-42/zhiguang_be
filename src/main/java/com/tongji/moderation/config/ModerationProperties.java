@@ -16,6 +16,7 @@ public class ModerationProperties {
     @Data
     public static class Llm {
         private boolean enabled = false;
+        private String provider = "dashscope";
         private BigDecimal minConfidence = new BigDecimal("0.8000");
         private int maxContentChars = 4000;
         private int maxRetries = 3;
