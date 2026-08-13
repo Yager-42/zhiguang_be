@@ -9,9 +9,8 @@ import com.tongji.promotion.bprime.model.PromotionDecisionProjectionItem;
 import com.tongji.promotion.bprime.model.PromotionProjectionCheckpointRecord;
 import com.tongji.promotion.bprime.service.PromotionDecisionFanoutService;
 import com.tongji.promotion.bprime.service.PromotionDecisionProjectionService;
-import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
-import com.tongji.promotion.model.PromotionAuctionWindow;
-import com.tongji.promotion.model.PromotionAuctionWindowStatus;
+import com.tongji.promotion.bprime.service.PromotionAuctionHotStateLifecycle;
+import com.tongji.promotion.bprime.service.PromotionDecisionStreamConsumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,10 +46,10 @@ class PromotionRedisStreamProjectorRedisIntegrationTest {
     private static final String PREFIX = "promotion:auction:{901}";
 
     @Mock private PromotionProjectionCheckpointMapper checkpointMapper;
-    @Mock private PromotionAuctionWindowMapper windowMapper;
     @Mock private PromotionDecisionProjectionService projectionService;
     @Mock private PromotionDecisionFanoutService fanoutService;
     @Mock private PromotionPerformanceMetrics metrics;
+    @Mock private PromotionAuctionHotStateLifecycle hotStateLifecycle;
 
     private LettuceConnectionFactory connectionFactory;
     private StringRedisTemplate redis;
@@ -67,9 +66,10 @@ class PromotionRedisStreamProjectorRedisIntegrationTest {
         objectMapper = new ObjectMapper().findAndRegisterModules();
         PromotionBPrimeProperties properties = new PromotionBPrimeProperties();
         properties.setStreamReadBatchSize(1000);
-        projector = new PromotionRedisStreamProjector(
-                redis, objectMapper, checkpointMapper, windowMapper, projectionService,
-                fanoutService, metrics, properties, new PromotionBidAdmissionState(properties));
+        PromotionDecisionStreamConsumer consumer = new PromotionDecisionStreamConsumer(
+                redis, objectMapper, checkpointMapper, projectionService, fanoutService, metrics, properties,
+                new PromotionBidAdmissionState(properties), hotStateLifecycle);
+        projector = new PromotionRedisStreamProjector(redis, consumer, hotStateLifecycle);
         Set<String> keys = redis.keys(PREFIX + "*");
         if (keys != null && !keys.isEmpty()) {
             redis.delete(keys);
@@ -143,16 +143,10 @@ class PromotionRedisStreamProjectorRedisIntegrationTest {
         checkpoint.setLastDecisionVersion(1L);
         checkpoint.setLastStreamId("1-0");
         when(checkpointMapper.findByAuctionWindowId(WINDOW_ID)).thenReturn(checkpoint);
-        when(windowMapper.findById(WINDOW_ID)).thenReturn(PromotionAuctionWindow.builder()
-                .id(WINDOW_ID)
-                .status(PromotionAuctionWindowStatus.SETTLED)
-                .build());
 
         projector.processWindow(WINDOW_ID);
 
-        assertThat(redis.opsForHash().get(PREFIX + ":state", "status")).isEqualTo("SETTLED");
-        assertThat(redis.getExpire(PREFIX + ":state")).isPositive();
-        assertThat(redis.getExpire(PREFIX + ":events")).isPositive();
+        verify(hotStateLifecycle).retireSettledState(WINDOW_ID);
     }
 
     private void append(PromotionAuctionDecision decision, String streamId) throws Exception {

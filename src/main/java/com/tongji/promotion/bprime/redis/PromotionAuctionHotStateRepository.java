@@ -10,6 +10,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.time.Duration;
 
 /**
  * 通过 Lua 幂等初始化窗口热状态并同步低频保证金授权。
@@ -90,6 +91,31 @@ public class PromotionAuctionHotStateRepository {
                 String.valueOf(properties.getHotStateTtlSeconds()));
         requireSuccess(result, "project escrow authorization");
     }
+    public void recoverActiveWindows(List<PromotionAuctionWindow> activeWindows) {
+        if (activeWindows == null || activeWindows.isEmpty()) {
+            return;
+        }
+        String[] windowIds = activeWindows.stream()
+                .map(window -> String.valueOf(window.getId()))
+                .toArray(String[]::new);
+        redisTemplate.opsForSet().add(PromotionAuctionRedisKeys.activeStreams(), windowIds);
+        for (PromotionAuctionWindow window : activeWindows) {
+            redisTemplate.opsForZSet().add(PromotionAuctionRedisKeys.closingIndex(),
+                    String.valueOf(window.getId()), window.getWindowEndAt().toEpochMilli());
+        }
+    }
+
+    public void retireSettled(long auctionWindowId) {
+        Duration ttl = Duration.ofSeconds(properties.getHotStateTtlSeconds());
+        redisTemplate.opsForHash().put(PromotionAuctionRedisKeys.state(auctionWindowId), "status", "SETTLED");
+        redisTemplate.expire(PromotionAuctionRedisKeys.state(auctionWindowId), ttl);
+        redisTemplate.expire(PromotionAuctionRedisKeys.ranking(auctionWindowId), ttl);
+        redisTemplate.expire(PromotionAuctionRedisKeys.escrow(auctionWindowId), ttl);
+        redisTemplate.expire(PromotionAuctionRedisKeys.events(auctionWindowId), ttl);
+        redisTemplate.opsForSet().remove(PromotionAuctionRedisKeys.activeStreams(), String.valueOf(auctionWindowId));
+        redisTemplate.opsForZSet().remove(PromotionAuctionRedisKeys.closingIndex(), String.valueOf(auctionWindowId));
+    }
+
 
     private DefaultRedisScript<String> script(String location) {
         DefaultRedisScript<String> script = new DefaultRedisScript<>();

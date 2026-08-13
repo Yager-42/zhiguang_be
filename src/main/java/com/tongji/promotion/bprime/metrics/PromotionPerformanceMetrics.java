@@ -169,30 +169,20 @@ public class PromotionPerformanceMetrics {
     }
 
     private String result(PromotionAuctionDecision decision) {
-        String type = decision.decisionType();
-        if ("AUCTION_SOLD".equals(type) || "AUCTION_NO_BID".equals(type)) {
-            return "terminal";
-        }
-        if ("AUCTION_EXTENDED".equals(type)) {
-            return "extended";
-        }
-        return decision.accepted() ? "accepted" : "rejected";
+        return switch (decision.kind()) {
+            case AUCTION_SOLD, AUCTION_NO_BID -> "terminal";
+            case AUCTION_EXTENDED -> "extended";
+            default -> decision.accepted() ? "accepted" : "rejected";
+        };
     }
 
     private Instant submittedAt(PromotionAuctionDecision decision) {
-        Object value = decision.payload().get("submittedAt");
-        if (value instanceof Instant instant) {
-            return instant;
+        Instant submittedAt = decision.submittedAt().orElse(null);
+        if (submittedAt == null && decision.hasSubmittedAtPayload()) {
+            registry.counter("promotion.bprime.metrics.invalid.submitted.at",
+                    "decision_type", decision.decisionType().toLowerCase(Locale.ROOT)).increment();
         }
-        if (value instanceof String text && !text.isBlank()) {
-            try {
-                return Instant.parse(text);
-            } catch (RuntimeException ignored) {
-                registry.counter("promotion.bprime.metrics.invalid.submitted.at",
-                        "decision_type", decision.decisionType().toLowerCase(Locale.ROOT)).increment();
-            }
-        }
-        return null;
+        return submittedAt;
     }
 
     private void recordElapsed(Timer timer, Instant start) {

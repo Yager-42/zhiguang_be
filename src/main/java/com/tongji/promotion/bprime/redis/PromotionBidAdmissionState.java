@@ -34,18 +34,16 @@ public class PromotionBidAdmissionState {
 
     /** Stream 事实按版本推进其他实例状态。 */
     public void update(PromotionAuctionDecision decision) {
-        long price = payloadLong(decision, "currentPriceCents", decision.bidAmount());
-        long winnerCampaignId = payloadLong(decision, "winnerCampaignId", decision.campaignId());
-        long endAt = payloadLong(decision, "endAtEpochMs",
-                payloadLong(decision, "actualEndAtEpochMs", Long.MAX_VALUE));
-        String status = switch (decision.type()) {
-            case "AUCTION_SOLD" -> "SOLD";
-            case "AUCTION_NO_BID" -> "NO_BID";
-            default -> "OPEN";
-        };
-        merge(decision.auctionWindowId(), new Snapshot(price,
-                decision.accepted() && "BID_ACCEPTED".equals(decision.type()) ? decision.commandId() : null,
-                winnerCampaignId, status, endAt, decision.decisionVersion()));
+        PromotionAuctionDecision.AdmissionFacts facts = decision.admissionFacts();
+        long winnerCampaignId;
+        try {
+            winnerCampaignId = Long.parseLong(facts.winnerCampaignId());
+        } catch (NumberFormatException exception) {
+            throw new IllegalStateException("promotion winner campaign id is not numeric", exception);
+        }
+        merge(decision.auctionWindowId(), new Snapshot(facts.currentPriceCents(),
+                facts.winnerCommandId(), winnerCampaignId, facts.status(), facts.actualEndAtEpochMs(),
+                decision.decisionVersion()));
     }
 
     public Snapshot get(long windowId) {
@@ -70,20 +68,6 @@ public class PromotionBidAdmissionState {
         });
     }
 
-    private long payloadLong(PromotionAuctionDecision decision, String field, long fallback) {
-        Object value = decision.payload().get(field);
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        if (value instanceof String text && !text.isBlank()) {
-            try {
-                return Long.parseLong(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
 
     public record Snapshot(
             long committedPriceCents,
