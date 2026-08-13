@@ -26,3 +26,11 @@
 桥只有在当前 Canal 批次的全部相关 Kafka 发送得到 broker 成功结果后才推进位点；解析、序列化或发送失败会回滚当前批次。因此总线提供 at-least-once 投递，业务消费者必须保持幂等。
 
 共享 envelope 包含 outbox 行的 `id`、聚合类型与 ID、事件类型、payload 和创建时间。具体 payload 的业务含义仍由生产和消费该领域事件的模块拥有；`outbox` 模块不依赖关系、推荐、通知、搜索或审核类型。
+
+## 缓存回源单飞
+
+应用只使用 `common/singleflight` 提供的单飞模块；业务模块不自行维护 `ConcurrentHashMap` 或 `synchronized` flight map。
+
+公共知文 Feed 的 singleflight 只共享不含当前用户 liked/faved 的基础页。用户计数与状态在 singleflight 之外逐请求叠加，避免 owner 的用户态污染 follower。
+
+知文详情回源可能包含访问权限判断，因此使用 viewer-scoped 的本地 flight；详情缓存命中仍必须重新判断“公开或本人”。不得在不同 viewer 之间回放授权结果。

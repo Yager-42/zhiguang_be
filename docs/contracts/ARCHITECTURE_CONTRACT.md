@@ -224,8 +224,8 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 关系 | `uf:flws:{userId}` / `uf:fans:{userId}` | zset（score=时间戳）/ 2h | `RelationEventProcessor`/`RelationServiceImpl` |
 | 关系 | `dedup:rel:{type}:{from}:{to}:{id}` | SET NX 幂等 / 10m | `RelationEventProcessor` |
 | 关系 | `rl:follow:{fromUserId}` | hash 令牌桶（容量100，速率1/s）Lua / 60s | `RelationManagerImpl` |
-| 缓存 | `knowpost:detail:{id}:v1` | JSON 或 `"NULL"` 防穿透 / 60s±rand（热点 +20/60/120s） | `KnowPostServiceImpl` |
-| 缓存 | `feed:public:ids:{size}:{hourSlot}:{page}` | list 片段 / 60–89s（`frTtl=60+rand(0..29)`） | `KnowPostFeedServiceImpl` |
+| 缓存 | `knowpost:detail:{id}:v1` | JSON 或 `"NULL"` 防穿透 / 60s±rand（热点 +20/60/120s）；miss 经 local singleflight `knowpost-detail`，flight key 含 viewer，缓存命中仍校验公开/本人 | `KnowPostServiceImpl` |
+| 缓存 | `feed:public:ids:{size}:{hourSlot}:{page}` | list 片段 / 60–89s（`frTtl=60+rand(0..29)`）；miss 经 distributed singleflight `knowpost-public-feed`，只共享不含用户 liked/faved 的基础页，result 3s、禁用 local replay | `KnowPostFeedServiceImpl` |
 | 缓存 | `feed:public:ids:{size}:{hourSlot}:{page}:hasMore` | string 软缓存 / 10–20s（满页 true 10+rand(0..10)，否则 10s） | 同上 |
 | 缓存 | `feed:public:index:{postId}:{hourSlot}` | 反向索引 set（SADD+expire frTtl 60–89s，内容更新时定位受影响页） | 同上 |
 | 缓存 | `feed:public:pages` | 页面键集合（仅 SADD，无 TTL/清理） | 同上 |
@@ -326,7 +326,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 **事件**：outbox `content_published` 驱动 ES 索引（`CanalOutboxConsumerSearch`，失败建 ES_INDEX 对账）、Gorse upsert（失败建 GORSE_ITEM_UPSERT）、关注流扇出（`TimelineDispatcher`，失败建 FOLLOW_INBOX）。
 
-**关键类**：`manager/PublishManagerImpl.java`、`manager/PublishAttemptService.java`、`manager/PublishValidationHelper.java`、`publish/ContentPublishedPublisher.java`、`service/impl/KnowPostServiceImpl.java`、`service/impl/KnowPostFeedServiceImpl.java`、`listener/FeedCacheInvalidationListener.java`。
+**关键类**：`manager/PublishManagerImpl.java`、`manager/PublishAttemptService.java`、`manager/PublishValidationHelper.java`、`publish/ContentPublishedPublisher.java`、`service/impl/KnowPostServiceImpl.java`（详情缓存 + local singleflight `knowpost-detail`，viewer-scoped flight，缓存命中重验权限）、`service/impl/KnowPostFeedServiceImpl.java`（公共页三级缓存 + distributed singleflight `knowpost-public-feed`；基础页共享、用户状态在 flight 外叠加）、`listener/FeedCacheInvalidationListener.java`。
 
 ### 7.3 comment
 
@@ -448,7 +448,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 - **ID**：见 D4；Snowflake 位布局 `1+41+5+5+12`，EPOCH `1704067200000`；时钟回拨 ≤5ms 睡等重试、>5ms 抛 `ClockBackwardException`；segment 双缓冲 50% 预加载、等待超时 500ms。
 - **Resilience**：`ResilienceGuard.execute(resourceName, op, fallback, classifier)` → `SentinelResilienceGuard`（SphU.entry；Block/异常→fallback；classifier 真时 `Tracer.trace`）；**代码内无 FlowRule 下发**（规则外部供给）；实际资源名：`publish:content-published`、`publish:user-counter`、`relation:outbox-publish`；消费方 `requireCriticalGuardSuccess` 拒绝降级。
-- **SingleFlight**（`common/singleflight/`，`singleflight.enabled`）：分布式协调 Redis Lua 6 脚本（meta/result/owner-seq）+ Stream 通知（非 pub/sub）+ L1 LRU 回放缓存 + 心跳（1s，takeover 10s）+ 结果编码（Base64+gzip+SHA-256）；失败分类 TIMEOUT/OVERLOAD/PROVIDER/VALIDATION/UNEXPECTED；`MAX_ATTEMPTS=3`；mode DISABLED/LOCAL/DISTRIBUTED/HYBRID；实际 stage：`counter-sds`、`moderation-llm`（`user-counter`/`feed-author-head` 见配置与调用点）。
+- **SingleFlight**（`common/singleflight/`，`singleflight.enabled`）：唯一单飞实现；分布式协调 Redis Lua 6 脚本 + Stream 通知（非 pub/sub）+ 可选 L1 回放缓存 + 心跳（1s，takeover 10s），本地模式由有界生命周期的 `LocalSingleFlightService` 承担，不允许业务模块自建 `ConcurrentHashMap+synchronized`。失败分类 TIMEOUT/OVERLOAD/PROVIDER/VALIDATION/UNEXPECTED；`MAX_ATTEMPTS=3`；mode DISABLED/LOCAL/DISTRIBUTED/HYBRID。实际 stage：`counter-sds`、`user-counter`、`feed-author-head`、`moderation-llm`、`comment-page-head`、`knowpost-public-feed`（distributed，result 3s，L1 replay 关闭）、`knowpost-detail`（local，flight key 含 viewer）。
 - **缓存/热键**：Caffeine L1 三 Bean（feedPublic 15s/1000、feedMine 10s/1000、detail 30s/5000）；`HotKeyDetector` 分段滑动窗口（6×10s；≥50 LOW/≥200 MEDIUM/≥500 HIGH）→ TTL 延长 +20/60/120s。
 - **全局异常**：见 D3/§4.1。
 - **OutboxMessageReader / OutboxPayload**：Canal envelope 与共享标量转换的唯一实现；业务事件类型由各消费模块拥有。
@@ -488,7 +488,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `auth.*` | jwt ttl 15m/7d、issuer、kid、PEM；verification 6 位/5m/5 次/60s/10 次；password min 8/bcrypt 12 | `AuthProperties` |
 | `id.snowflake` | worker/datacenter 1 | `SnowflakeProperties` |
 | `id.segment` | wait-timeout 500ms、preload-threads 2 | `SegmentIdProperties` |
-| `singleflight.*` | enabled/mode/defaults(13 项)/stages(4) | `SingleFlightProperties` |
+| `singleflight.*` | enabled/mode/defaults(13 项)/stages(7)；knowpost public feed 为 distributed 3s result，detail 固定 local | `SingleFlightProperties` |
 | `comment.kafka.*` / `comment.outbox.*` | write/event/feedback topic；write 初始并发 4；dispatcher batch 500、claim 30s、in-flight 2、clean batch 1000、retention 24h | @Value |
 | `wallet.*` | platform-user-id 0、registration-grant-amount 100 | `WalletProperties` |
 | `content-reward.*` | enabled true、post 10、comment 2 | `ContentRewardProperties` |
