@@ -9,6 +9,7 @@ import com.tongji.comment.metrics.CommentMetrics;
 import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -36,20 +37,26 @@ public class CommentPageCacheService {
     private final ObjectMapper objectMapper;
     private final DistributedSingleFlightService singleFlightService;
     private final CommentMetrics metrics;
+    private final boolean headCacheEnabled;
 
     public CommentPageCacheService(@Qualifier("commentPageCache") Cache<String, CommentBasePage> localCache,
                                    StringRedisTemplate redisTemplate,
                                    ObjectMapper objectMapper,
                                    DistributedSingleFlightService singleFlightService,
-                                   CommentMetrics metrics) {
+                                   CommentMetrics metrics,
+                                   @Value("${comment.cache.head-enabled:false}") boolean headCacheEnabled) {
         this.localCache = localCache;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.singleFlightService = singleFlightService;
         this.metrics = metrics;
+        this.headCacheEnabled = headCacheEnabled;
     }
 
     public CommentBasePage getHead(String baseKey, String reverseIndexKey, Supplier<CommentBasePage> loader) {
+        if (!headCacheEnabled) {
+            return loader.get();
+        }
         CommentBasePage local = localCache.getIfPresent(baseKey);
         if (local != null) {
             metrics.cache("l1", "hit");
