@@ -117,7 +117,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         publisher.publishPublic(new PromotionAuctionRealtimeEvent(
                 "decision-" + decision.decisionId() + ":public:" + nextEventVersion,
                 PromotionAuctionRealtimeEvent.AUCTION_EXTENDED,
-                decision.auctionWindowId(),
+                String.valueOf(decision.auctionWindowId()),
                 decision.decisionId(),
                 decision.decisionVersion(),
                 nextEventVersion,
@@ -281,7 +281,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
             PromotionAuctionRealtimeEvent event = new PromotionAuctionRealtimeEvent(
                     "window-" + latestDecisionId + ":public:" + nextEventVersion,
                     PromotionAuctionRealtimeEvent.RANKING_DELTA,
-                    auctionWindowId,
+                    String.valueOf(auctionWindowId),
                     latestDecisionId,
                     latestDecisionVersion,
                     nextEventVersion,
@@ -313,7 +313,7 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
             publisher.publishPublic(new PromotionAuctionRealtimeEvent(
                     "decision-" + decision.decisionId() + ":public:" + nextEventVersion,
                     PromotionAuctionRealtimeEvent.WINDOW_CLOSED,
-                    decision.auctionWindowId(),
+                    String.valueOf(decision.auctionWindowId()),
                     decision.decisionId(),
                     decision.decisionVersion(),
                     nextEventVersion,

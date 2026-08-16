@@ -12,7 +12,7 @@ public final class PromotionAuctionRealtimeChannels {
     private PromotionAuctionRealtimeChannels() {
     }
 
-    public static String publicTopic(long auctionWindowId) {
+    public static String publicTopic(String auctionWindowId) {
         return PUBLIC_TOPIC_PREFIX + auctionWindowId;
     }
 }

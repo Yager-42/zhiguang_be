@@ -14,7 +14,7 @@ import java.util.Map;
 public record PromotionAuctionRealtimeEvent(
         String eventId,
         String eventType,
-        long auctionWindowId,
+        String auctionWindowId,
         String decisionId,
         long decisionVersion,
         long eventVersion,
@@ -42,7 +42,7 @@ public record PromotionAuctionRealtimeEvent(
     public PromotionAuctionRealtimeEvent(
             String eventId,
             String eventType,
-            long auctionWindowId,
+            String auctionWindowId,
             String decisionId,
             long decisionVersion,
             long eventVersion,
