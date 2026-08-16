@@ -54,7 +54,8 @@ class CanalKafkaBridgeTest {
                 "",
                 "outbox",
                 100,
-                0L
+                0L,
+                5_000L
         );
     }
 }
