@@ -75,7 +75,7 @@ public class AuthService {
      * 注册场景要求标识不存在；登录/重置密码场景要求标识存在。
      *
      * @param request 请求体，包含：标识类型与值、场景。
-     * @return 响应体，包含目标标识、场景与验证码过期秒数。
+     * @return 响应体，包含目标标识、场景、验证码过期秒数，以及演示模式下可选的注册或登录验证码。
      * @throws BusinessException 当标识格式错误或存在性不符合场景要求时抛出。
      */
     public SendCodeResponse sendCode(SendCodeRequest request) {
@@ -89,7 +89,10 @@ public class AuthService {
             throw new BusinessException(ErrorCode.IDENTIFIER_NOT_FOUND);
         }
         SendCodeResult result = verificationService.sendCode(request.scene(), normalized);
-        return new SendCodeResponse(result.identifier(), result.scene(), result.expireSeconds());
+        boolean exposeDemoCode = request.scene() != VerificationScene.RESET_PASSWORD
+                && authProperties.getVerification().isDemoCodeEnabled();
+        String demoCode = exposeDemoCode ? result.code() : null;
+        return new SendCodeResponse(result.identifier(), result.scene(), result.expireSeconds(), demoCode);
     }
 
     /**

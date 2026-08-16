@@ -55,7 +55,7 @@ public class VerificationService {
         String code = generateNumericCode(cfg.getCodeLength());
         codeStore.saveCode(scene.name(), identifier, code, cfg.getTtl(), cfg.getMaxAttempts());
         codeSender.sendCode(scene, identifier, code, (int) cfg.getTtl().toMinutes());
-        return new SendCodeResult(identifier, scene, (int) cfg.getTtl().toSeconds());
+        return new SendCodeResult(identifier, scene, (int) cfg.getTtl().toSeconds(), code);
     }
 
     /**

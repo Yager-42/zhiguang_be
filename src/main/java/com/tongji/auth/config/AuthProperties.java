@@ -48,6 +48,8 @@ public class AuthProperties {
     public static class Verification {
         /** 验证码位数。 */
         private int codeLength = 6;
+        /** 是否在注册和登录响应中返回验证码，供无短信和邮件服务的演示环境自动回填。 */
+        private boolean demoCodeEnabled = false;
         /** 验证码有效时间。 */
         private Duration ttl = Duration.ofMinutes(5);
         /** 最大校验尝试次数。 */
