@@ -6,11 +6,15 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -26,7 +30,7 @@ public class GorseClient {
 
     @Autowired
     public GorseClient(GorseProperties properties) {
-        this(new RestTemplate(), properties);
+        this(createDefaultRestTemplate(properties), properties);
     }
 
     public GorseClient(RestTemplate restTemplate, GorseProperties properties) {
@@ -36,6 +40,16 @@ public class GorseClient {
             factory.setConnectTimeout(properties.getTimeoutMs());
             factory.setReadTimeout(properties.getTimeoutMs());
         }
+    }
+
+    private static RestTemplate createDefaultRestTemplate(GorseProperties properties) {
+        Duration timeout = Duration.ofMillis(properties.getTimeoutMs());
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(timeout)
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(timeout);
+        return new RestTemplate(requestFactory);
     }
 
     public List<String> recommend(long userId, int count) {
@@ -52,12 +66,60 @@ public class GorseClient {
         return Arrays.asList(response);
     }
 
-    public void upsertItem(long postId, long authorId, Instant publishedAt) {
+    /**
+     * 获取指定知文的标签相似推荐。
+     */
+    public List<String> related(long postId, int count) {
+        String url = UriComponentsBuilder.fromUriString(properties.getEndpoint())
+                .pathSegment("api", "item-to-item", properties.getItemToItemName(), String.valueOf(postId))
+                .queryParam("n", count)
+                .build()
+                .encode()
+                .toUriString();
+        GorseScoredItem[] response = restTemplate.exchange(
+                url,
+                HttpMethod.GET,
+                new HttpEntity<>(headers()),
+                GorseScoredItem[].class
+        ).getBody();
+        if (response == null || response.length == 0) {
+            return List.of();
+        }
+        return Arrays.stream(response)
+                .map(GorseScoredItem::id)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * 插入或更新 Gorse 知文物料，标签用于无模型训练的相似度计算。
+     */
+    public void upsertItem(GorseItemInput item) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("ItemId", String.valueOf(postId));
-        body.put("Timestamp", publishedAt.toString());
-        body.put("Labels", List.of(String.valueOf(authorId)));
-        restTemplate.exchange(properties.getEndpoint() + "/api/item", HttpMethod.POST, jsonEntity(body), Void.class);
+        body.put("Timestamp", item.publishedAt().toString());
+        body.put("Labels", Map.of(
+                "topics", item.topics(),
+                "author_id", String.valueOf(item.authorId())
+        ));
+        body.put("Categories", item.topics());
+        body.put("Comment", item.title());
+        body.put("IsHidden", false);
+        if (hasItem(item.postId())) {
+            restTemplate.exchange(
+                    properties.getEndpoint() + "/api/item/" + item.postId(),
+                    HttpMethod.PATCH,
+                    jsonEntity(body),
+                    Void.class
+            );
+            return;
+        }
+        body.put("ItemId", String.valueOf(item.postId()));
+        restTemplate.exchange(
+                properties.getEndpoint() + "/api/item",
+                HttpMethod.POST,
+                jsonEntity(body),
+                Void.class
+        );
     }
 
     public boolean hasItem(long postId) {
@@ -79,7 +141,13 @@ public class GorseClient {
         body.put("UserId", String.valueOf(userId));
         body.put("ItemId", itemId);
         body.put("Timestamp", Instant.now().toString());
-        restTemplate.exchange(properties.getEndpoint() + "/api/feedback", HttpMethod.PUT, jsonEntity(body), Void.class);
+        body.put("Value", 1);
+        restTemplate.exchange(
+                properties.getEndpoint() + "/api/feedback",
+                HttpMethod.PUT,
+                jsonEntity(List.of(body)),
+                Void.class
+        );
     }
 
     public void upsertUser(UserProfileUpdatedEvent event) {
@@ -108,7 +176,7 @@ public class GorseClient {
         return headers;
     }
 
-    private HttpEntity<Map<String, Object>> jsonEntity(Map<String, Object> body) {
+    private HttpEntity<Object> jsonEntity(Object body) {
         HttpHeaders headers = headers();
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new HttpEntity<>(body, headers);
