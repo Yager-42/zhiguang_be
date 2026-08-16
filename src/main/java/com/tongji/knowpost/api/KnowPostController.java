@@ -18,6 +18,7 @@ import com.tongji.knowpost.service.KnowPostService;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import com.tongji.recommendation.HomeFeedMixingService;
+import com.tongji.recommendation.RelatedPostRecommendationService;
 import com.tongji.recommendation.feed.FollowFeedService;
 import com.tongji.recommendation.feed.TimelineItem;
 import com.tongji.recommendation.feed.TimelinePage;
@@ -48,6 +49,7 @@ public class KnowPostController {
     private final PublishManager publishManager;
     private final HomeFeedMixingService homeFeedMixingService;
     private final FollowFeedService followFeedService;
+    private final RelatedPostRecommendationService relatedPostRecommendationService;
     private final boolean mixedHomeFeedEnabled;
 
     public KnowPostController(KnowPostService service,
@@ -56,6 +58,7 @@ public class KnowPostController {
                               PublishManager publishManager,
                               HomeFeedMixingService homeFeedMixingService,
                               FollowFeedService followFeedService,
+                              RelatedPostRecommendationService relatedPostRecommendationService,
                               @Value("${feed.home.mixed-enabled:false}") boolean mixedHomeFeedEnabled) {
         this.service = service;
         this.feedService = feedService;
@@ -63,6 +66,7 @@ public class KnowPostController {
         this.publishManager = publishManager;
         this.homeFeedMixingService = homeFeedMixingService;
         this.followFeedService = followFeedService;
+        this.relatedPostRecommendationService = relatedPostRecommendationService;
         this.mixedHomeFeedEnabled = mixedHomeFeedEnabled;
     }
 
@@ -293,5 +297,17 @@ public class KnowPostController {
                                          @AuthenticationPrincipal Jwt jwt) {
         Long userId = (jwt == null) ? null : jwtService.extractUserId(jwt);
         return service.getDetail(id, userId);
+    }
+
+    /**
+     * 相关推荐，仅返回当前用户可见的公开知文。
+     */
+    @GetMapping("/{id}/related")
+    public FeedPageResponse related(@PathVariable("id") long id,
+                                    @RequestParam(value = "size", defaultValue = "4") int size,
+                                    @AuthenticationPrincipal Jwt jwt) {
+        Long userId = (jwt == null) ? null : jwtService.extractUserId(jwt);
+        service.getDetail(id, userId);
+        return relatedPostRecommendationService.getRelated(id, size, userId);
     }
 }
