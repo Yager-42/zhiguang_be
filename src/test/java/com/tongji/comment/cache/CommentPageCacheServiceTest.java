@@ -44,7 +44,7 @@ class CommentPageCacheServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         service = new CommentPageCacheService(localCache, redisTemplate,
                 new ObjectMapper().findAndRegisterModules(), singleFlightService,
-                new CommentMetrics(new SimpleMeterRegistry()));
+                new CommentMetrics(new SimpleMeterRegistry()), true);
     }
 
     @Test
@@ -58,6 +58,22 @@ class CommentPageCacheServiceTest {
 
         verify(redisTemplate, never()).hasKey(anyString());
         verify(loader, never()).get();
+    }
+
+    @Test
+    void disabledHeadCacheAlwaysLoadsFreshPage() {
+        CommentPageCacheService uncachedService = new CommentPageCacheService(
+                localCache, redisTemplate, new ObjectMapper().findAndRegisterModules(),
+                singleFlightService, new CommentMetrics(new SimpleMeterRegistry()), false);
+        CommentBasePage stale = page("11");
+        CommentBasePage fresh = page("12");
+        localCache.put("head", stale);
+
+        CommentBasePage result = uncachedService.getHead("head", "reverse", () -> fresh);
+
+        assertThat(result).isSameAs(fresh);
+        verify(redisTemplate, never()).hasKey(anyString());
+        verify(singleFlightService, never()).execute(anyString(), anyString(), any(), any());
     }
 
     @Test
