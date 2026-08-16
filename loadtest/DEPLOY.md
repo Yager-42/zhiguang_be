@@ -18,12 +18,12 @@ docker compose（单命令，10 个服务）
 ├── cassandra:9042      feed_inbox / author_feed / 正文文本（首启自动灌 init.cql）
 ├── elasticsearch:9200  搜索索引（app 启动时自动建索引/回填）
 ├── minio:9000/9001     对象存储（控制台 9001，minioadmin/minioadmin）
-└── gorse:8088          推荐（profile 开关，默认不启动）
+└── gorse:8088          推荐（宿主机仅 127.0.0.1:8087，默认启动）
 ```
 
 关键事实（已核对源码/配置）：
 - 应用容器内通过**服务名**访问中间件（compose 的 `environment` 已覆盖 `application.yml` 的 localhost 默认值），无需改代码。
-- `docker-compose.yml` 的 `app` 服务 `depends_on` 全栈 healthy（含 cassandra-init/minio-init 完成），不会出现"应用先起、中间件没就绪"的竞态。
+- `app` 等待核心中间件 healthy（含 cassandra-init/minio-init 完成）；Gorse 独立等待 MySQL/Redis，应用侧保留超时降级。
 - Kafka 双 listener：容器内 app 连 `kafka:9092`；宿主机工具（`collect_metrics.sh` 等）仍走 `docker exec` 或 `localhost:9094`。
 
 ## 2. 前置检查
@@ -31,7 +31,7 @@ docker compose（单命令，10 个服务）
 | 项 | 要求 | 说明 |
 |---|---|---|
 | Docker Desktop（WSL2 后端）或 WSL 内 Docker Engine | 运行中 | `docker version` 验证；`docker compose version` 需 ≥ 2.17（支持 service_completed_successfully） |
-| 内存 | ≥ 8GB（推荐 16GB） | ES 512M + Cassandra 512M + MySQL/Kafka/Redis + app 2G |
+| 内存 | ≥ 8GB（推荐 12GB） | app 堆 768M/容器 1280M + Gorse 640M 上限 + ES/Cassandra 各 512M |
 | Git Bash / WSL | 有 | 压测脚本（run.sh）依赖 bash |
 | Node.js（可选） | ≥ 18 | 仅灌种子数据（`gen_seed_cassandra.mjs`）需要；压测本身不需要 |
 | 端口空闲 | 8080/3306/6379/9092/9094/9042/9200/9000 | `netstat -an \| findstr "8080"` 检查 |
@@ -51,7 +51,7 @@ docker compose up -d --build
 
 ```bash
 docker compose ps
-# 期望：10 个服务，mysql/redis/kafka/cassandra/elasticsearch/minio/app 全部 healthy
+# 期望：10 个服务，mysql/redis/kafka/cassandra/elasticsearch/minio/gorse/app 全部 healthy
 #       cassandra-init / minio-init 显示 Exited (0)（一次性初始化，属正常）
 docker compose logs -f app | tail -20   # 应用日志出现 "Started ZhiGuangApplication" 即完成
 ```
@@ -65,13 +65,16 @@ curl http://localhost:8080/actuator/health          # {"status":"UP"}
 # 2) 匿名 Feed（permitAll）
 curl "http://localhost:8080/api/v1/knowposts/feed?page=1&size=5"   # 200（灌数前 items 为空也正常）
 
-# 3) MySQL 初始化
+# 3) Gorse 就绪（仅绑定本机）
+curl http://127.0.0.1:8087/api/health/ready
+
+# 4) MySQL 初始化
 docker exec -i zhiguang-mysql mysql -uzhiguang -pzhiguang123456 zhiguang -e "SHOW TABLES;" | wc -l   # ~20 张表
 
-# 4) Cassandra 初始化
+# 5) Cassandra 初始化
 docker exec -i zhiguang-cassandra cqlsh -e "DESCRIBE TABLES IN zhiguang;"   # post_text/comment_text/feed_inbox/feed_author_feed
 
-# 5) 认证链路（需先灌种子，见第 5 节）
+# 6) 认证链路（需先灌种子，见第 5 节）
 curl -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' \
   -d '{"identifierType":"PHONE","identifier":"13900000001","password":"Loadtest@123"}'
 ```
@@ -100,7 +103,8 @@ K6_DOCKER=1 ./run.sh mixed
 | 变量 | 默认 | 用法 |
 |---|---|---|
 | `PROMOTION_BPRIME_ENABLED` | false | 竞价 B' 全链路：`PROMOTION_BPRIME_ENABLED=true docker compose up -d` |
-| `GORSE_ENABLED` | false | 推荐混排：先 `docker compose --profile recommendation up -d gorse`，再开 GORSE_ENABLED 重启 app |
+| `GORSE_ENABLED` | true | Docker 部署默认启用无模型训练推荐；临时关闭可设为 false，接口自动退化到最新公开知文 |
+| `FEED_HOME_MIXED_ENABLED` | true | 登录用户首页启用“推广 → 关注 → Gorse → 最新”混排 |
 | `SINGLEFLIGHT_MODE` | distributed | 单飞协调模式（本地默认即可） |
 
 ## 7. 宿主机直跑（备选，不用 Docker 跑应用时）
@@ -108,7 +112,7 @@ K6_DOCKER=1 ./run.sh mixed
 ```bash
 docker compose up -d                              # 只起中间件（app 服务可加 --scale app=0 跳过）
 mvn clean package -DskipTests                     # 需 JDK21 + Maven
-java -Xmx2g -XX:+UseG1GC -jar target/zhiguang-1.0-SNAPSHOT.jar
+java -Xms256m -Xmx768m -XX:+UseG1GC -jar target/zhiguang-1.0-SNAPSHOT.jar
 ```
 
 注意：宿主直跑时应用连 `localhost`（application.yml 默认值）——Kafka 用 `localhost:9094`（EXTERNAL listener）或用 `docker exec` 工具；其余端口不变。

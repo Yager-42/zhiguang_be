@@ -1,0 +1,62 @@
+[database]
+cache_store = "mysql://zhiguang:zhiguang123456@tcp(mysql:3306)/zhiguang?parseTime=true"
+data_store = "mysql://zhiguang:zhiguang123456@tcp(mysql:3306)/zhiguang?parseTime=true"
+table_prefix = "gorse_"
+
+[database.mysql]
+max_open_conns = 8
+max_idle_conns = 2
+conn_max_lifetime = "5m"
+
+[master]
+port = 8086
+host = "0.0.0.0"
+http_port = 8088
+http_host = "0.0.0.0"
+n_jobs = 1
+
+[server]
+default_n = 20
+auto_insert_user = true
+auto_insert_item = false
+cache_expire = "30s"
+
+[recommend]
+cache_size = 100
+cache_expire = "24h"
+context_size = 50
+active_user_ttl = 0
+
+[recommend.data_source]
+positive_feedback_types = ["like", "fav", "comment"]
+read_feedback_types = []
+positive_feedback_ttl = 0
+item_ttl = 0
+
+[[recommend.non-personalized]]
+name = "trending"
+score = "count(feedback, .FeedbackType == 'like') * 3 + count(feedback, .FeedbackType == 'fav') * 5 + count(feedback, .FeedbackType == 'comment')"
+
+[[recommend.item-to-item]]
+name = "similar_topics"
+type = "tags"
+column = "item.Labels.topics"
+
+[recommend.collaborative]
+type = "none"
+
+[recommend.replacement]
+enable_replacement = false
+
+[recommend.ranker]
+type = "none"
+recommenders = ["item-to-item/similar_topics"]
+
+[recommend.fallback]
+recommenders = ["non-personalized/trending", "latest"]
+
+[tracing]
+enable_tracing = false
+
+[blob]
+uri = "/var/lib/gorse/blob"
