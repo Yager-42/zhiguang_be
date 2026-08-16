@@ -71,6 +71,7 @@ spring:
 
 comment:
   cache:
+    head-enabled: ${COMMENT_HEAD_CACHE_ENABLED:false}
     invalidation-window-ms: ${COMMENT_CACHE_INVALIDATION_WINDOW_MS:100}
   executor:
     read:
@@ -122,6 +123,8 @@ auth:
   jwt:
     private-key: classpath:keys/private.pem
     public-key: classpath:keys/public.pem
+  verification:
+    demo-code-enabled: ${AUTH_VERIFICATION_DEMO_CODE_ENABLED:true}
 
 wallet:
   platform-user-id: ${WALLET_PLATFORM_USER_ID:0}
@@ -200,15 +203,16 @@ storage:
   public-domain: ${MINIO_PUBLIC_DOMAIN:}
 
 canal:
-  enabled: false
-  host: localhost
-  port: 11111
-  destination: example
-  username: ""
-  password: ""
-  filter: zhiguang.outbox
-  batchSize: 100
-  intervalMs: 1000
+  enabled: ${CANAL_ENABLED:false}
+  host: ${CANAL_HOST:localhost}
+  port: ${CANAL_PORT:11111}
+  destination: ${CANAL_DESTINATION:example}
+  username: ${CANAL_USERNAME:}
+  password: ${CANAL_PASSWORD:}
+  filter: ${CANAL_FILTER:zhiguang.outbox}
+  batchSize: ${CANAL_BATCH_SIZE:100}
+  intervalMs: ${CANAL_INTERVAL_MS:1000}
+  reconnectDelayMs: ${CANAL_RECONNECT_DELAY_MS:5000}
 
 counter:
   rebuild:
@@ -270,6 +274,7 @@ recommendation:
     api-key: ${GORSE_API_KEY:}
     timeout-ms: ${GORSE_TIMEOUT_MS:300}
     enabled: ${GORSE_ENABLED:false}
+    item-to-item-name: ${GORSE_ITEM_TO_ITEM_NAME:similar_topics}
 
 moderation:
   llm:
@@ -283,7 +288,7 @@ moderation:
 
 feed:
   home:
-    mixed-enabled: false
+    mixed-enabled: ${FEED_HOME_MIXED_ENABLED:false}
   fanout:
     push-pull-threshold: 10000
   inbox:
