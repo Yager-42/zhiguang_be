@@ -8,7 +8,10 @@ import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
 import com.tongji.reconciliation.service.ReconciliationService;
 import com.tongji.recommendation.gorse.GorseClient;
+import com.tongji.recommendation.gorse.GorseItemInputFactory;
 import com.tongji.recommendation.gorse.GorseProperties;
+import com.tongji.knowpost.mapper.KnowPostMapper;
+import com.tongji.knowpost.model.KnowPost;
 import com.tongji.outbox.OutboxTopics;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
@@ -28,17 +31,23 @@ public class ContentPublishedRecommendationConsumer {
     private final GorseProperties properties;
     private final TaskExecutor taskExecutor;
     private final ReconciliationService reconciliationService;
+    private final KnowPostMapper knowPostMapper;
+    private final GorseItemInputFactory itemInputFactory;
 
     public ContentPublishedRecommendationConsumer(ObjectMapper objectMapper,
                                                   GorseClient gorseClient,
                                                   GorseProperties properties,
                                                   @Qualifier("taskExecutor") TaskExecutor taskExecutor,
-                                                  ReconciliationService reconciliationService) {
+                                                  ReconciliationService reconciliationService,
+                                                  KnowPostMapper knowPostMapper,
+                                                  GorseItemInputFactory itemInputFactory) {
         this.objectMapper = objectMapper;
         this.gorseClient = gorseClient;
         this.properties = properties;
         this.taskExecutor = taskExecutor;
         this.reconciliationService = reconciliationService;
+        this.knowPostMapper = knowPostMapper;
+        this.itemInputFactory = itemInputFactory;
     }
 
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX, groupId = "recommendation-content-published-consumer")
@@ -55,7 +64,8 @@ public class ContentPublishedRecommendationConsumer {
         taskExecutor.execute(() -> {
             for (PublishedItem item : items) {
                 try {
-                    gorseClient.upsertItem(item.postId(), item.authorId(), item.publishedAt());
+                    KnowPost post = knowPostMapper.findById(item.postId());
+                    gorseClient.upsertItem(itemInputFactory.from(post));
                 } catch (RuntimeException ignored) {
                     reconciliationService.createTaskIfAbsent(
                             ReconciliationTaskType.GORSE_ITEM_UPSERT,

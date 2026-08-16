@@ -5,9 +5,12 @@ import com.tongji.comment.mapper.CommentMapper;
 import com.tongji.counter.service.CounterService;
 import com.tongji.counter.service.UserCounterService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
+import com.tongji.knowpost.model.KnowPost;
 import com.tongji.knowpost.model.KnowPostDetailRow;
 import com.tongji.recommendation.feed.TimelineExecutor;
 import com.tongji.recommendation.gorse.GorseClient;
+import com.tongji.recommendation.gorse.GorseItemInput;
+import com.tongji.recommendation.gorse.GorseItemInputFactory;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
@@ -77,16 +80,29 @@ class ReconcilerTest {
     @Test
     void gorseItemUpsertReconcilerUpsertsPublishedPost() {
         ReconciliationTask task = task(ReconciliationTaskType.GORSE_ITEM_UPSERT, ReconciliationTargetType.POST, 107L);
-        KnowPostDetailRow row = new KnowPostDetailRow();
-        row.setId(107L);
-        row.setCreatorId(7L);
-        row.setStatus("published");
-        row.setPublishTime(java.time.Instant.parse("2026-06-18T10:15:30Z"));
-        when(knowPostMapper.findDetailById(107L)).thenReturn(row);
+        KnowPost post = KnowPost.builder()
+                .id(107L)
+                .creatorId(7L)
+                .status("published")
+                .title("测试知文")
+                .tags("[\"Java\"]")
+                .publishTime(java.time.Instant.parse("2026-06-18T10:15:30Z"))
+                .build();
+        when(knowPostMapper.findById(107L)).thenReturn(post);
 
-        new GorseItemUpsertReconciler(knowPostMapper, gorseClient).reconcile(task);
+        new GorseItemUpsertReconciler(
+                knowPostMapper,
+                gorseClient,
+                new GorseItemInputFactory(new ObjectMapper())
+        ).reconcile(task);
 
-        verify(gorseClient).upsertItem(107L, 7L, java.time.Instant.parse("2026-06-18T10:15:30Z"));
+        verify(gorseClient).upsertItem(new GorseItemInput(
+                107L,
+                7L,
+                java.time.Instant.parse("2026-06-18T10:15:30Z"),
+                "测试知文",
+                List.of("Java")
+        ));
     }
 
     @Test

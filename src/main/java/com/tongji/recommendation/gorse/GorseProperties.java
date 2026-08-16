@@ -13,4 +13,5 @@ public class GorseProperties {
     private String apiKey = "";
     private int timeoutMs = 300;
     private boolean enabled = false;
+    private String itemToItemName = "similar_topics";
 }
