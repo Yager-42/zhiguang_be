@@ -36,6 +36,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/knowposts/feed").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/knowposts/detail/*")
                         .permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/knowposts/*/related")
+                        .permitAll()
                         .requestMatchers(
                                 "/api/v1/auth/send-code",
                                 "/api/v1/auth/register",
@@ -43,6 +45,10 @@ public class SecurityConfig {
                                 "/api/v1/auth/token/refresh",
                                 "/api/v1/auth/logout",
                                 "/api/v1/auth/password/reset"
+                        ).permitAll()
+                        .requestMatchers(
+                                "/ws/promotion-auction",
+                                "/ws/promotion-auction-native"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
