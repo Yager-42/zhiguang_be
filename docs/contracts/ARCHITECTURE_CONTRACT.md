@@ -2,12 +2,12 @@
 
 | 字段 | 值 |
 |------|-----|
-| **contract_version** | `0.9.0` |
+| **contract_version** | `0.9.2` |
 | **status** | **active**（本文档首次建立；后续架构/契约变更必须同步修改本文并升版本） |
-| **updated** | 2026-08-13 |
-| **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，390 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
+| **updated** | 2026-08-15 |
+| **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，446 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
 | **roadmap** | OpenSpec 变更与执行顺序见 [`openspec/changes/execution-order.md`](../../openspec/changes/execution-order.md)；本仓为单体演进、微服务拆分仅作约束（见该文件阶段 0） |
-| **out of scope for this doc** | 前端 `zhiguang_fe/`（当前为空占位目录）、`loadtest/` 压测方案细节、各业务请求/响应 JSON 逐字段表（以代码 DTO 为准） |
+| **out of scope for this doc** | 前端 `zhiguang_fe/`（独立工程）、`loadtest/` 压测方案细节、各业务请求/响应 JSON 逐字段表（以代码 DTO 为准） |
 
 ---
 
@@ -158,10 +158,11 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 - JWT claims（`auth/token/JwtService.java`）：`iss=zhiguang`、`sub=userId`、`jti`、`token_type∈{access,refresh}`、`uid`、`nickname`（仅 access）。access TTL 15m、refresh 7d（`AuthProperties`）。
 - Controller 取用户：`@AuthenticationPrincipal Jwt` + `JwtService.extractUserId`；`/me` 等端点由 JWT 决定身份，**不做可信任的用户参数**（防越权）。
 - 刷新令牌：Redis 白名单 `auth:rt:{userId}:{tokenId}`（TTL 7d）+ 轮换（旧 jti 即失效）+ `revokeAll` 全端下线（`RedisRefreshTokenStore.java`）。
+- 演示验证码：`auth.verification.demo-code-enabled=true` 时，`send-code` 在 `REGISTER` 与 `LOGIN` 场景返回可选字段 `demoCode`，`RESET_PASSWORD` 场景始终不返回验证码。生产接入真实发送服务后必须关闭此配置。
 
 ### 4.3 permitAll 白名单（`SecurityConfig.java`）
 
-`/actuator/health`、`/actuator/info`、`/api/v1/knowposts/feed`、`GET /api/v1/knowposts/detail/*`、`/api/v1/auth/send-code|register|login|token/refresh|logout|password/reset`；**其余全部需 JWT**（含搜索、计数读取、钱包查询——控制器无匿名注解）。
+`/actuator/health`、`/actuator/info`、`/api/v1/knowposts/feed`、`GET /api/v1/knowposts/detail/*`、`GET /api/v1/knowposts/*/related`、`/api/v1/auth/send-code|register|login|token/refresh|logout|password/reset`；**其余全部需 JWT**（含搜索、计数读取、钱包查询——控制器无匿名注解）。
 
 ### 4.4 CORS
 
@@ -262,7 +263,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 | 主题 | 生产者 | 消费组 | 载荷要点 |
 |------|--------|--------|----------|
-| `canal-outbox` | `CanalKafkaBridge` | `relation-outbox-consumer`、`moderation-review-consumer`、`notification-follow-consumer`、`feed-timeline-consumer`、`recommendation-content-published-consumer`、`recommendation-relation-feedback-consumer`、`recommendation-user-profile-consumer`、`search-index-consumer` | 上节事件注册表 |
+| `canal-outbox` | `CanalKafkaBridge` | `relation-outbox-consumer`、`moderation-review-consumer`、`notification-follow-consumer`、`feed-timeline-consumer`、`recommendation-content-published-consumer`、`recommendation-user-profile-consumer`、`search-index-consumer` | 上节事件注册表 |
 | `comment-write`（`comment.kafka.write-topic`，8 分区） | `CommentOutboxDispatcher` 从 `comment_outbox` 有界批量异步发送，key=`aggregateId`；成功/失败子集分别更新 | `comment-write-consumer`（初始并发 4；`@RetryableTopic` → `comment-write-dlt`） | `CommentOutboxEvent(eventId,eventType,commentId,postId,rootId,parentId,creatorId,clientRequestId,body,occurredAt)` |
 | `comment-events`（`comment.kafka.event-topic`） | `CommentOutboxDispatcher`，key=`aggregateId` | `comment-counter-effects`、`comment-reward-effects`、`comment-feedback-effects` 三个独立组 | `CommentOutboxEvent`，类型为 `COMMENT_CREATED/COMMENT_DELETED/COMMENT_MODERATED` |
 | `comment-feedback`（`comment.kafka.feedback-topic`） | `CommentFeedbackProducer`（best-effort）+ Controller 内联 | `notification-comment-consumer`、`recommendation-comment-feedback-consumer` | `CommentFeedbackEvent(...,action∈{comment,delete,like,unlike})` |
@@ -312,7 +313,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 ### 7.2 knowpost（知文）
 
-**API**（`/api/v1/knowposts`，13 端点）：`POST drafts`、`POST {id}/content/confirm`（objectKey+etag+size+sha256）、`PATCH {id}`、`POST {id}/publish`（202+attemptId）、`GET {id}/publish/status`、`POST {id}/publish/{attemptId}/retry`（202）、`PATCH {id}/top`、`PATCH {id}/visibility`（public/followers/school/private/unlisted）、`DELETE {id}`（软删）、`GET feed`（登录+`feed.home.mixed-enabled` 走混排）、`GET feed/follow`（cursor `{ts}:{contentId}`）、`GET mine`、`GET detail/{id}`（匿名可读；非 public 仅作者）。
+**API**（`/api/v1/knowposts`，14 端点）：`POST drafts`、`POST {id}/content/confirm`（objectKey+etag+size+sha256）、`PATCH {id}`、`POST {id}/publish`（202+attemptId）、`GET {id}/publish/status`、`POST {id}/publish/{attemptId}/retry`（202）、`PATCH {id}/top`、`PATCH {id}/visibility`（public/followers/school/private/unlisted）、`DELETE {id}`（软删）、`GET feed`（登录+`feed.home.mixed-enabled` 走混排）、`GET feed/follow`（cursor `{ts}:{contentId}`）、`GET mine`、`GET detail/{id}`（匿名可读；非 public 仅作者）、`GET {id}/related`（标签相似，Gorse 关闭或异常时 latest public 兜底）。
 
 **发布流水线**（`PublishManagerImpl.runPublish`，`publishExecutor`）：
 1. `storePostText`：MinIO 拉正文 → 落 Cassandra `post_text_by_post_id`（带 sha256）；
@@ -406,13 +407,13 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 ### 7.9 recommendation + feed
 
-**推荐**：`RecommendationEngine.recommend(userId,count)` → `GorseRecommendationAdapter`（gorse `/api/recommend` 召回；`recommendation.gorse.enabled=false` 或 `RestClientException` → hot 兜底 `listFeedPublicIds`；organicScore 递减保序；`X-API-Key` 头；timeout 300ms）。Gorse 出站：`/api/item`(POST/GET)、`/api/feedback`(PUT)、`/api/user`(POST)。
+**推荐**：`RecommendationEngine.recommend(userId,count)` → `GorseRecommendationAdapter`（gorse `/api/recommend` 召回；`recommendation.gorse.enabled=false` 或 `RestClientException` → hot 兜底 `listFeedPublicIds`；organicScore 递减保序；`X-API-Key` 头；timeout 300ms）。`RelatedPostRecommendationService` 调 `/api/item-to-item/{name}/{postId}` 召回标签相似知文，过滤非法 ID 并以 latest public 补位。Gorse 仅启用 tags item-to-item、非个性化热度与 latest，`collaborative.type=none`、`ranker.type=none`，不训练协同过滤或排序模型。Gorse 出站：`/api/item`(POST/GET/PATCH)、`/api/item-to-item`(GET)、`/api/feedback`(PUT 数组)、`/api/user`(POST)。
 
 **首页混排**（`HomeFeedMixingService`，`feed.home.mixed-enabled=true` 时）：TARGET_SIZE=20 硬编码；推广≤1 → 关注流 → 推荐候选 40 → hot 补位；LinkedHashSet 去重；商业推广不参与排序。
 
 **关注流**（`follow feed`）：写侧 `TimelineDispatcher`（消费 `canal-outbox` content_published；`countFollowerActive ≥ push-pull-threshold(10000)` → 大 V 拉模式只写 `feed_author_feed`；普通作者分页 256 写全部粉丝 `feed_inbox`，异步 5s 超时；失败建 FOLLOW_INBOX 对账）。读侧 `FollowFeedServiceImpl`：inbox+大 V author_feed 头多路归并（`(publish_ts, content_id)` 降序游标）、Redis 两级缓存（`feed:timeline:*` 300s 仅默认页、`feed:author:*:head` 120s + singleflight `feed-author-head`）、可见性过滤（published 且 visible∈public/followers）。
 
-**Gorse 反馈消费者**（5 个，enabled 门控 + 手动 ack + 失败对账）：content_published→item；comment-feedback(comment)→feedback "comment"；counter-events(like/fav delta>0)→feedback；canal-outbox FollowCreated/FollowCanceled→follow/unfollow；user_profile_updated→upsertUser（失败不 ack 无对账）。
+**Gorse 同步消费者**（4 个，enabled 门控 + 手动 ack + 失败对账）：content_published→带 title/topics 的 item；comment-feedback(comment)→feedback "comment"；counter-events(like/fav delta>0)→feedback；user_profile_updated→upsertUser（失败不 ack 无对账）。关注事件不写 Gorse item，关注内容由首页 follow feed 混排。
 
 ### 7.10 search + storage
 
@@ -487,7 +488,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `spring.data.cassandra` | `zhiguang` keyspace，schema-action none | — |
 | `spring.elasticsearch` | uris localhost:9200 | `EsProperties` |
 | `spring.ai.dashscope` | api-key 占位、model qwen-plus | — |
-| `auth.*` | jwt ttl 15m/7d、issuer、kid、PEM；verification 6 位/5m/5 次/60s/10 次；password min 8/bcrypt 12 | `AuthProperties` |
+| `auth.*` | jwt ttl 15m/7d、issuer、kid、PEM；verification 6 位/5m/5 次/60s/10 次、演示注册验证码回传默认开启；password min 8/bcrypt 12 | `AuthProperties` |
 | `id.snowflake` | worker/datacenter 1 | `SnowflakeProperties` |
 | `id.segment` | wait-timeout 500ms、preload-threads 2 | `SegmentIdProperties` |
 | `singleflight.*` | enabled/mode/defaults(13 项)/stages(7)；knowpost public feed 为 distributed 3s result，detail 固定 local | `SingleFlightProperties` |
@@ -500,7 +501,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `canal.*` | enabled false、host/port/destination/filter=`zhiguang.outbox`/batchSize 100/interval 1000ms/Kafka send timeout 10000ms | @Value |
 | `counter.rebuild` | enabled false | — |
 | `moderation.*` | llm enabled false、provider dashscope（可选 opencode）、0.8/4000 字/3 次；platform-actor 0 | `ModerationProperties` |
-| `recommendation.gorse.*` | enabled false、endpoint、timeout 300ms、api-key | `GorseProperties` |
+| `recommendation.gorse.*` | enabled false、endpoint、timeout 300ms、api-key、item-to-item-name=similar_topics | `GorseProperties` |
 | `feed.*` | home.mixed-enabled false、fanout 阈值 10000、cache TTL、inbox.ttl-days 30 | @Value |
 | `cache.*` | L1 TTL/容量 + 热键阈值 | `CacheProperties` |
 | `management` | health,info 暴露 | — |
