@@ -88,6 +88,16 @@ public class FollowFeedServiceImpl implements FollowFeedService {
         return page;
     }
 
+    @Override
+    public void invalidateTimelineCache(long userId) {
+        redisTemplate.delete("feed:timeline:" + userId);
+    }
+
+    @Override
+    public void invalidateAuthorHeadCache(long authorId) {
+        redisTemplate.delete("feed:author:" + authorId + ":head");
+    }
+
     private TimelinePage readTimelineCache(long userId) {
         String cached = redisTemplate.opsForValue().get("feed:timeline:" + userId);
         if (cached == null || cached.isBlank()) {

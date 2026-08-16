@@ -4,13 +4,12 @@ import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
-import com.datastax.oss.driver.api.core.cql.Row;
-import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import com.tongji.knowpost.mapper.KnowPostMapper;
+import com.tongji.knowpost.model.KnowPost;
 import com.tongji.relation.mapper.RelationMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -18,10 +17,11 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -34,6 +34,8 @@ class TimelineExecutorFollowFeedTest {
     private CqlSession cqlSession;
     @Mock
     private RelationMapper relationMapper;
+    @Mock
+    private KnowPostMapper knowPostMapper;
     @Mock
     private PreparedStatement inboxInsert;
     @Mock
@@ -55,13 +57,13 @@ class TimelineExecutorFollowFeedTest {
                 .thenReturn(inboxInsert);
         when(cqlSession.prepare("INSERT INTO zhiguang.feed_author_feed (author_id, publish_ts, content_id) VALUES (?, ?, ?)"))
                 .thenReturn(authorFeedInsert);
-        when(cqlSession.executeAsync(any(BoundStatement.class)))
+        lenient().when(cqlSession.executeAsync(any(BoundStatement.class)))
                 .thenReturn(CompletableFuture.completedFuture(asyncResultSet));
-        executor = new TimelineExecutor(cqlSession, relationMapper);
+        executor = new TimelineExecutor(cqlSession, relationMapper, knowPostMapper);
     }
 
     @Test
-    void normalAuthorWritesInboxOnly() {
+    void normalAuthorWritesInboxAndAuthorFeed() {
         when(relationMapper.listFollowersForFanout(7L, null, null, 256))
                 .thenReturn(List.of(
                         new FanoutFollowerRow(11L, Timestamp.from(Instant.parse("2026-06-18T10:15:32Z"))),
@@ -70,11 +72,13 @@ class TimelineExecutorFollowFeedTest {
                 .thenReturn(List.of());
         when(inboxInsert.bind(11L, Instant.parse("2026-06-18T10:15:30Z"), 101L, 7L)).thenReturn(inboxBound1);
         when(inboxInsert.bind(12L, Instant.parse("2026-06-18T10:15:30Z"), 101L, 7L)).thenReturn(inboxBound2);
+        when(authorFeedInsert.bind(7L, Instant.parse("2026-06-18T10:15:30Z"), 101L)).thenReturn(authorBound);
 
         executor.fanout(new TimelineDispatch(101L, 7L, Instant.parse("2026-06-18T10:15:30Z"), false));
 
-        verify(cqlSession, times(2)).executeAsync(any(BoundStatement.class));
-        verify(authorFeedInsert, never()).bind(any(), any(), any());
+        // 普通作者也要统一写入作者时间线：关注流头部读取（pull 半边）依赖它
+        verify(authorFeedInsert).bind(7L, Instant.parse("2026-06-18T10:15:30Z"), 101L);
+        verify(cqlSession, times(3)).executeAsync(any(BoundStatement.class));
         verify(relationMapper, times(2)).listFollowersForFanout(any(), any(), any(), any(Integer.class));
     }
 
@@ -101,10 +105,39 @@ class TimelineExecutorFollowFeedTest {
                 256
         )).thenReturn(List.of());
         when(inboxInsert.bind(11L, Instant.parse("2026-06-18T10:15:30Z"), 101L, 7L)).thenReturn(inboxBound1);
+        when(authorFeedInsert.bind(7L, Instant.parse("2026-06-18T10:15:30Z"), 101L)).thenReturn(authorBound);
 
         executor.fanout(new TimelineDispatch(101L, 7L, Instant.parse("2026-06-18T10:15:30Z"), false));
         executor.fanout(new TimelineDispatch(101L, 7L, Instant.parse("2026-06-18T10:15:30Z"), false));
 
         verify(inboxInsert, times(2)).bind(11L, Instant.parse("2026-06-18T10:15:30Z"), 101L, 7L);
+        verify(authorFeedInsert, times(2)).bind(7L, Instant.parse("2026-06-18T10:15:30Z"), 101L);
+    }
+
+    @Test
+    void backfillAuthorTimelineInsertsRecentPublishedPosts() {
+        Instant ts1 = Instant.parse("2026-06-18T10:15:30Z");
+        Instant ts2 = Instant.parse("2026-06-18T09:00:00Z");
+        when(knowPostMapper.listRecentPublishedByCreator(7L, 100)).thenReturn(List.of(
+                KnowPost.builder().id(101L).publishTime(ts1).build(),
+                KnowPost.builder().id(102L).publishTime(ts2).build(),
+                KnowPost.builder().id(103L).publishTime(null).build() // 无发布时间则跳过
+        ));
+        when(authorFeedInsert.bind(eq(7L), any(Instant.class), anyLong())).thenReturn(authorBound);
+
+        executor.backfillAuthorTimeline(7L, 100);
+
+        verify(authorFeedInsert).bind(7L, ts1, 101L);
+        verify(authorFeedInsert).bind(7L, ts2, 102L);
+        verify(cqlSession, times(2)).executeAsync(authorBound);
+    }
+
+    @Test
+    void backfillAuthorTimelineWithNoPostsDoesNothing() {
+        when(knowPostMapper.listRecentPublishedByCreator(7L, 100)).thenReturn(List.of());
+
+        executor.backfillAuthorTimeline(7L, 100);
+
+        verify(cqlSession, never()).executeAsync(any(BoundStatement.class));
     }
 }

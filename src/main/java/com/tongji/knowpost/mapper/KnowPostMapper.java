@@ -67,9 +67,16 @@ public interface KnowPostMapper {
 
     List<Long> listMyPublishedIds(@Param("creatorId") long creatorId);
 
+    /**
+     * 按发布时间倒序列出作者最近已发布的知文（用于关注后时间线回填）。
+     */
+    List<KnowPost> listRecentPublishedByCreator(@Param("creatorId") long creatorId,
+                                                @Param("limit") int limit);
+
     List<Long> listPublishedPostIdsCursor(@Param("cursorPostId") Long cursorPostId,
                                           @Param("limit") int limit);
 
     List<Long> listPublicPublishedPostIdsCursor(@Param("cursorPostId") Long cursorPostId,
                                                 @Param("limit") int limit);
+
 }
