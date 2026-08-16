@@ -130,7 +130,7 @@ public class PromotionNativeBidWebSocketHandler extends TextWebSocketHandler {
         if (message == null) {
             return 0;
         }
-        Room room = rooms.get(event.auctionWindowId());
+        Room room = rooms.get(Long.parseLong(event.auctionWindowId()));
         if (room == null) {
             return 0;
         }

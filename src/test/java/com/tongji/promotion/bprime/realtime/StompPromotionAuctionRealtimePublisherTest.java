@@ -18,7 +18,7 @@ class StompPromotionAuctionRealtimePublisherTest {
         StompPromotionAuctionRealtimePublisher publisher =
                 new StompPromotionAuctionRealtimePublisher(template, nativeHandler);
         PromotionAuctionRealtimeEvent event = new PromotionAuctionRealtimeEvent(
-                "event-1", PromotionAuctionRealtimeEvent.RANKING_DELTA, 301L, "d-1",
+                "event-1", PromotionAuctionRealtimeEvent.RANKING_DELTA, "301", "d-1",
                 2L, 2L, "OPEN", List.of(), Instant.parse("2026-06-20T10:05:00Z"));
 
         publisher.publishPublic(event);
