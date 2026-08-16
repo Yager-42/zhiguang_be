@@ -32,6 +32,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
     private final String filter;
     private final int batchSize;
     private final long intervalMs;
+    private final long reconnectDelayMs;
 
     private volatile boolean running;
     private volatile CanalConnector connector;
@@ -46,7 +47,8 @@ public class CanalKafkaBridge implements SmartLifecycle {
                             @Value("${canal.password}") String password,
                             @Value("${canal.filter}") String filter,
                             @Value("${canal.batchSize}") int batchSize,
-                            @Value("${canal.intervalMs}") long intervalMs) {
+                            @Value("${canal.intervalMs}") long intervalMs,
+                            @Value("${canal.reconnectDelayMs:5000}") long reconnectDelayMs) {
         this.batchPublisher = batchPublisher;
         this.taskExecutor = taskExecutor;
         this.enabled = enabled;
@@ -58,6 +60,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
         this.filter = filter;
         this.batchSize = batchSize;
         this.intervalMs = intervalMs;
+        this.reconnectDelayMs = reconnectDelayMs;
     }
 
     @Override
@@ -71,24 +74,40 @@ public class CanalKafkaBridge implements SmartLifecycle {
 
     void runLoop() {
         try {
-            connector = createConnector();
-            connector.connect();
-            connector.subscribe(filter);
-            connector.rollback();
             while (running) {
-                Message message = connector.getWithoutAck(batchSize);
-                long batchId = message.getId();
-                if (batchId == -1 || message.getEntries() == null || message.getEntries().isEmpty()) {
-                    sleep();
-                    continue;
+                try {
+                    connector = createConnector();
+                    connector.connect();
+                    connector.subscribe(filter);
+                    connector.rollback();
+                    log.info("Canal bridge connected: destination={} filter={}", destination, filter);
+                    consume();
+                } catch (Exception exception) {
+                    if (running) {
+                        log.error("Canal bridge error, reconnecting in {} ms", reconnectDelayMs, exception);
+                    }
+                } finally {
+                    disconnect();
+                    connector = null;
                 }
-                processBatch(connector, message);
+                if (running) {
+                    sleep(reconnectDelayMs);
+                }
             }
-        } catch (Exception exception) {
-            log.error("Canal bridge error", exception);
         } finally {
-            disconnect();
             running = false;
+        }
+    }
+
+    private void consume() throws Exception {
+        while (running) {
+            Message message = connector.getWithoutAck(batchSize);
+            long batchId = message.getId();
+            if (batchId == -1 || message.getEntries() == null || message.getEntries().isEmpty()) {
+                sleep(intervalMs);
+                continue;
+            }
+            processBatch(connector, message);
         }
     }
 
@@ -112,9 +131,9 @@ public class CanalKafkaBridge implements SmartLifecycle {
         );
     }
 
-    private void sleep() {
+    private void sleep(long delayMs) {
         try {
-            Thread.sleep(intervalMs);
+            Thread.sleep(delayMs);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             running = false;
