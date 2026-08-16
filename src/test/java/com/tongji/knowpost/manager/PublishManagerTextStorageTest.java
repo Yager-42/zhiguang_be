@@ -234,11 +234,7 @@ class PublishManagerTextStorageTest {
 
     private static final class NoOpUserCounterService implements UserCounterService {
         @Override
-        public void incrementFollowings(long userId, int delta) {
-        }
-
-        @Override
-        public void incrementFollowers(long userId, int delta) {
+        public void rebuildFollowCounters(long fromUserId, long toUserId) {
         }
 
         @Override

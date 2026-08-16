@@ -50,22 +50,26 @@ public class CanalOutboxConsumer {
      */
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX, groupId = "relation-outbox-consumer")
     public void onMessage(String message, Acknowledgment ack) {
-        List<RelationEvent> events = messageReader.read(message).stream()
-                .map(event -> event.payloadAs(objectMapper, RelationEvent.class))
-                .flatMap(java.util.Optional::stream)
+        List<EnvelopeEvent> envelopeEvents = messageReader.read(message).stream()
+                .map(envelope -> {
+                    RelationEvent event = envelope.payloadAs(objectMapper, RelationEvent.class).orElse(null);
+                    return event == null ? null : new EnvelopeEvent(envelope.id(), event);
+                })
+                .filter(java.util.Objects::nonNull)
                 .toList();
-        if (events.isEmpty()) {
+        if (envelopeEvents.isEmpty()) {
             ack.acknowledge();
             return;
         }
 
-        CountDownLatch completionLatch = new CountDownLatch(events.size());
+        CountDownLatch completionLatch = new CountDownLatch(envelopeEvents.size());
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        for (RelationEvent event : events) {
+        for (EnvelopeEvent envelopeEvent : envelopeEvents) {
                 try {
                     taskExecutor.execute(() -> {
                         try {
-                            processor.process(event);
+                            // 携带 outbox 行 ID 做精确去重；效果幂等，失败重投安全
+                            processor.process(envelopeEvent.event(), envelopeEvent.outboxId());
                         } catch (Throwable throwable) {
                             failure.compareAndSet(null, throwable);
                         } finally {
@@ -90,5 +94,8 @@ public class CanalOutboxConsumer {
         if (failure.get() == null) {
             ack.acknowledge();
         }
+    }
+
+    private record EnvelopeEvent(Long outboxId, RelationEvent event) {
     }
 }
