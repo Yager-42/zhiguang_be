@@ -272,6 +272,15 @@
         SELECT id FROM know_posts WHERE creator_id = #{creatorId} AND status = 'published'
     </select>
 
+    <!-- 关注后时间线回填：作者最近已发布知文（仅需要 id 与 publish_time） -->
+    <select id="listRecentPublishedByCreator" resultMap="KnowPostResultMap">
+        SELECT id, publish_time
+        FROM know_posts
+        WHERE creator_id = #{creatorId} AND status = 'published'
+        ORDER BY publish_time DESC
+        LIMIT #{limit}
+    </select>
+
     <select id="listPublishedPostIdsCursor" resultType="long">
         SELECT id
         FROM know_posts
