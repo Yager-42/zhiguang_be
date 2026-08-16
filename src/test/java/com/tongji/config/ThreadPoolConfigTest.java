@@ -132,19 +132,22 @@ class ThreadPoolConfigTest {
         NoOpRelationEventProcessor() {
             super(null, null, null);
         }
+
+        @Override
+        public void process(RelationEvent evt, Long outboxEventId) {
+            // no-op
+        }
     }
 
     static class BlockingRelationEventProcessor extends RelationEventProcessor {
         private final CountDownLatch started = new CountDownLatch(1);
         private final CountDownLatch allowCompletion = new CountDownLatch(1);
         private final CountDownLatch completed = new CountDownLatch(1);
-
         BlockingRelationEventProcessor() {
             super(null, null, null);
         }
-
         @Override
-        public void process(RelationEvent evt) {
+        public void process(RelationEvent evt, Long outboxEventId) {
             started.countDown();
             try {
                 allowCompletion.await();
