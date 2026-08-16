@@ -27,7 +27,7 @@ COPY --from=build /build/target/zhiguang-1.0-SNAPSHOT.jar /app/app.jar
 USER app
 
 ENV TZ=Asia/Shanghai \
-    JAVA_TOOL_OPTIONS="-Xmx2g -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError"
+    JAVA_TOOL_OPTIONS="-Xms256m -Xmx768m -XX:MaxMetaspaceSize=256m -Xss512k -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError"
 
 EXPOSE 8080
 

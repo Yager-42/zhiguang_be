@@ -68,7 +68,7 @@ curl http://localhost:8080/actuator/health    # {"status":"UP"}
 
 ```bash
 docker compose up -d            # 只起中间件
-MAVEN_OPTS="-Xmx2g -XX:+UseG1GC" mvn spring-boot:run   # JDK21 + Maven；或 IDE 直跑
+JAVA_TOOL_OPTIONS="-Xms256m -Xmx768m -XX:+UseG1GC" mvn spring-boot:run   # JDK21 + Maven；或 IDE 直跑
 ```
 
 注意：宿主直跑时应用连 `localhost`（application.yml 默认值），Kafka 用 `localhost:9094`。
@@ -78,7 +78,7 @@ MAVEN_OPTS="-Xmx2g -XX:+UseG1GC" mvn spring-boot:run   # JDK21 + Maven；或 IDE
 | 场景 | 需要开启 |
 |---|---|
 | 竞价 WebSocket 链路（scripts/promotion-ws-fast-reject.js / promotion-ws-capacity.js / promotion-ws-realistic.js / promotion-ws-user-feedback.js） | `PROMOTION_BPRIME_ENABLED=true docker compose up -d`（容器）或启动参数（宿主直跑）；Redis 必须启用 AOF everysec |
-| 推荐混排（Gorse） | `docker compose --profile recommendation up -d gorse` + `GORSE_ENABLED=true` 重启 app（可选，默认关） |
+| 推荐混排（Gorse） | Docker 部署默认开启；设 `GORSE_ENABLED=false` 可验证 latest public 降级 |
 | fanout 全链路 | 需 Canal 开启的测试环境（本地 `canal.enabled=false`，只能压到写入 outbox 为止） |
 
 ## 3. 灌数据（每轮压测前）

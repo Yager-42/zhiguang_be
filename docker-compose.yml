@@ -18,6 +18,7 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/canal-user.sql:/docker-entrypoint-initdb.d/02-canal-user.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot123456 --silent"]
       interval: 10s
@@ -64,6 +65,41 @@ services:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
+      retries: 20
+
+  canal:
+    image: canal/canal-server:v1.1.8
+    container_name: zhiguang-canal
+    restart: unless-stopped
+    cpus: ${CANAL_CPUS:-0.35}
+    mem_limit: ${CANAL_MEMORY_LIMIT:-512m}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_OPTS: -Xms128m -Xmx256m -Xmn64m -XX:MaxMetaspaceSize=128m
+      canal.auto.scan: "false"
+      canal.destinations: example
+      canal.instance.master.address: mysql:3306
+      canal.instance.mysql.slaveId: "1001"
+      canal.instance.dbUsername: canal
+      canal.instance.dbPassword: ${CANAL_DB_PASSWORD:-canal123456}
+      canal.instance.connectionCharset: UTF-8
+      canal.instance.gtidon: "false"
+      canal.instance.tsdb.enable: "false"
+      canal.instance.parser.parallel: "false"
+      canal.instance.memory.buffer.size: "1024"
+      canal.instance.transaction.size: "256"
+      canal.instance.filter.regex: 'zhiguang\.outbox'
+    volumes:
+      - canal-data:/home/admin/canal-server/conf/example
+      - canal-logs:/home/admin/canal-server/logs
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z -w 2 127.0.0.1 11111"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
       retries: 20
 
   cassandra:
@@ -159,15 +195,33 @@ services:
       "
 
   gorse:
-    image: zhenghaoz/gorse-in-one:latest
+    image: zhenghaoz/gorse-in-one:0.5.8
     container_name: zhiguang-gorse
     restart: unless-stopped
-    profiles: ["recommendation"]
-    command: ["--playground"]
+    cpus: ${GORSE_CPUS:-0.75}
+    mem_limit: ${GORSE_MEMORY_LIMIT:-640m}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - --log-path
+      - /var/log/gorse/gorse.log
+      - --log-max-size
+      - "32"
+      - --log-max-backups
+      - "2"
+      - --cache-path
+      - /var/lib/gorse/master
     ports:
-      - "8087:8088"
+      - "127.0.0.1:8087:8088"
+    volumes:
+      - ./config/gorse.toml:/etc/gorse/config.toml:ro
+      - gorse-data:/var/lib/gorse
+      - gorse-logs:/var/log/gorse
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8088/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "grep -q ':1F98 .* 0A ' /proc/net/tcp /proc/net/tcp6"]
       interval: 15s
       timeout: 10s
       retries: 20
@@ -180,13 +234,16 @@ services:
     image: zhiguang-app:latest
     container_name: zhiguang-app
     restart: unless-stopped
-    cpus: ${APP_CPUS:-4.0}
+    cpus: ${APP_CPUS:-1.5}
+    mem_limit: ${APP_MEMORY_LIMIT:-1280m}
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      canal:
         condition: service_healthy
       cassandra:
         condition: service_healthy
@@ -204,22 +261,29 @@ services:
       SPRING_DATASOURCE_USERNAME: zhiguang
       SPRING_DATASOURCE_PASSWORD: zhiguang123456
       SPRING_DATA_REDIS_HOST: redis
-      REDISSON_CONNECTION_POOL_SIZE: ${REDISSON_CONNECTION_POOL_SIZE:-128}
-      REDISSON_CONNECTION_MINIMUM_IDLE_SIZE: ${REDISSON_CONNECTION_MINIMUM_IDLE_SIZE:-32}
+      REDISSON_CONNECTION_POOL_SIZE: ${REDISSON_CONNECTION_POOL_SIZE:-16}
+      REDISSON_CONNECTION_MINIMUM_IDLE_SIZE: ${REDISSON_CONNECTION_MINIMUM_IDLE_SIZE:-2}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CANAL_ENABLED: ${CANAL_ENABLED:-true}
+      CANAL_HOST: canal
+      CANAL_PORT: 11111
+      CANAL_DESTINATION: example
+      CANAL_FILTER: zhiguang.outbox
       SPRING_CASSANDRA_CONTACT_POINTS: cassandra
       SPRING_CASSANDRA_LOCAL_DATACENTER: datacenter1
       SPRING_CASSANDRA_KEYSPACE_NAME: zhiguang
       SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
       STORAGE_ENDPOINT: http://minio:9000
-      RECOMMENDATION_GORSE_ENDPOINT: http://gorse:8088
+      GORSE_ENDPOINT: http://gorse:8088
       # 场景开关（可用 .env 或 export 覆盖）
       PROMOTION_BPRIME_ENABLED: ${PROMOTION_BPRIME_ENABLED:-false}
       PROMOTION_BPRIME_STREAM_SWEEP_INTERVAL_MS: ${PROMOTION_BPRIME_STREAM_SWEEP_INTERVAL_MS:-2000}
       PROMOTION_BPRIME_STREAM_READ_BATCH_SIZE: ${PROMOTION_BPRIME_STREAM_READ_BATCH_SIZE:-1000}
       PROMOTION_BPRIME_STREAM_RETAIN_EVENTS: ${PROMOTION_BPRIME_STREAM_RETAIN_EVENTS:-100000}
       PROMOTION_BPRIME_FAST_REJECT_ENABLED: ${PROMOTION_BPRIME_FAST_REJECT_ENABLED:-true}
-      GORSE_ENABLED: ${GORSE_ENABLED:-false}
+      GORSE_ENABLED: ${GORSE_ENABLED:-true}
+      GORSE_ITEM_TO_ITEM_NAME: ${GORSE_ITEM_TO_ITEM_NAME:-similar_topics}
+      FEED_HOME_MIXED_ENABLED: ${FEED_HOME_MIXED_ENABLED:-true}
       SINGLEFLIGHT_MODE: ${SINGLEFLIGHT_MODE:-distributed}
       COMMENT_WRITE_CONCURRENCY: ${COMMENT_WRITE_CONCURRENCY:-4}
       COMMENT_OUTBOX_CLEAN_INTERVAL_MS: ${COMMENT_OUTBOX_CLEAN_INTERVAL_MS:-86400000}
@@ -236,6 +300,10 @@ services:
 volumes:
   mysql-data:
   redis-data:
+  canal-data:
+  canal-logs:
   cassandra-data:
   elasticsearch-data:
   minio-data:
+  gorse-data:
+  gorse-logs:

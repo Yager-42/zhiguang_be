@@ -1,0 +1,98 @@
+services:
+  mysql:
+    ports: !reset []
+    mem_limit: 768m
+
+  redis:
+    ports: !reset []
+    mem_limit: 192m
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+
+  kafka:
+    ports: !reset []
+    mem_limit: 768m
+    environment:
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+
+  canal:
+    cpus: 0.35
+    mem_limit: 512m
+
+  cassandra:
+    ports: !reset []
+    mem_limit: 896m
+
+  elasticsearch:
+    ports: !reset []
+    mem_limit: 1024m
+    environment:
+      ES_JAVA_OPTS: -Xms384m -Xmx384m -XX:MaxDirectMemorySize=134217728
+      xpack.ml.enabled: "false"
+      ingest.geoip.downloader.enabled: "false"
+
+  minio:
+    ports: !reset []
+    mem_limit: 256m
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_API_CORS_ALLOW_ORIGIN: http://101.96.237.129
+
+  minio-init:
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+
+  gorse:
+    ports: !reset []
+    cpus: 0.5
+    mem_limit: 512m
+
+  app:
+    ports: !reset []
+    cpus: 1.25
+    mem_limit: 1024m
+    environment:
+      AUTH_VERIFICATION_DEMO_CODE_ENABLED: "true"
+      MODERATION_LLM_ENABLED: "false"
+      SINGLEFLIGHT_MODERATION_LLM_ENABLED: "false"
+      DB_POOL_MAX_SIZE: 8
+      DB_POOL_MIN_IDLE: 2
+      REDISSON_CONNECTION_POOL_SIZE: 8
+      REDISSON_CONNECTION_MINIMUM_IDLE_SIZE: 1
+      SPRING_KAFKA_CONSUMER_MAX_POLL_RECORDS: 50
+      COMMENT_WRITE_CONCURRENCY: 1
+      PROMOTION_BPRIME_ENABLED: "true"
+      PROMOTION_BPRIME_BID_DRAINER_THREADS: 1
+      PROMOTION_BPRIME_WS_OUTBOUND_THREADS: 2
+      PROMOTION_BPRIME_PUBLIC_UPDATE_SCHEDULER_THREADS: 1
+      GORSE_ENABLED: "true"
+      FEED_HOME_MIXED_ENABLED: "true"
+      STORAGE_ENDPOINT: http://101.96.237.129
+      MINIO_PUBLIC_ENDPOINT: http://101.96.237.129
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+
+  web:
+    build:
+      context: ../zhiguang_fe
+      dockerfile: Dockerfile
+    image: zhiguang-web:latest
+    container_name: zhiguang-web
+    restart: unless-stopped
+    cpus: 0.25
+    mem_limit: 64m
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"

@@ -1,0 +1,20 @@
+FROM eclipse-temurin:21-jre-jammy
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1001 app
+WORKDIR /app
+COPY app.jar /app/app.jar
+USER app
+
+ENV TZ=Asia/Shanghai \
+    JAVA_TOOL_OPTIONS="-Xms256m -Xmx768m -XX:MaxMetaspaceSize=256m -Xss512k -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError"
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=10 \
+    CMD curl -fsS http://localhost:8080/actuator/health || exit 1
+
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
