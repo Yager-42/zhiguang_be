@@ -14,6 +14,7 @@ import com.tongji.knowpost.manager.PublishManager;
 import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.knowpost.service.KnowPostService;
 import com.tongji.recommendation.HomeFeedMixingService;
+import com.tongji.recommendation.RelatedPostRecommendationService;
 import com.tongji.recommendation.RecommendationEngine;
 import com.tongji.recommendation.feed.FollowFeedService;
 import com.tongji.recommendation.feed.TimelinePage;
@@ -58,6 +59,7 @@ class KnowPostControllerPublishTest {
     private KnowPostFeedService knowPostFeedService;
     private HomeFeedMixingService homeFeedMixingService;
     private FollowFeedService followFeedService;
+    private RelatedPostRecommendationService relatedPostRecommendationService;
     private RecommendationEngine recommendationEngine;
     private KnowPostMapper knowPostMapper;
     private JwtService jwtService;
@@ -69,6 +71,7 @@ class KnowPostControllerPublishTest {
         knowPostFeedService = Mockito.mock(KnowPostFeedService.class);
         publishManager = Mockito.mock(PublishManager.class);
         followFeedService = Mockito.mock(FollowFeedService.class);
+        relatedPostRecommendationService = Mockito.mock(RelatedPostRecommendationService.class);
         recommendationEngine = Mockito.mock(RecommendationEngine.class);
         knowPostMapper = Mockito.mock(KnowPostMapper.class);
         homeFeedMixingService = new HomeFeedMixingService(
@@ -176,6 +179,22 @@ class KnowPostControllerPublishTest {
                 .andExpect(jsonPath("$.nextCursor").doesNotExist());
 
         verify(knowPostFeedService).getPublicFeed(3, 7, USER_ID);
+    }
+
+    @Test
+    void relatedValidatesDetailAndReturnsRecommendationPage() throws Exception {
+        MockMvc mockMvc = createMockMvc(false);
+        FeedPageResponse response = new FeedPageResponse(List.of(feedItem("3001")), 1, 4, false);
+        when(relatedPostRecommendationService.getRelated(POST_ID, 4, USER_ID)).thenReturn(response);
+
+        mockMvc.perform(get("/api/v1/knowposts/{id}/related", POST_ID).queryParam("size", "4"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value("3001"))
+                .andExpect(jsonPath("$.size").value(4))
+                .andExpect(jsonPath("$.hasMore").value(false));
+
+        verify(knowPostService).getDetail(POST_ID, USER_ID);
+        verify(relatedPostRecommendationService).getRelated(POST_ID, 4, USER_ID);
     }
 
     @Test
@@ -460,6 +479,7 @@ class KnowPostControllerPublishTest {
                 publishManager,
                 homeFeedMixingService,
                 followFeedService,
+                relatedPostRecommendationService,
                 mixedFeedEnabled
         );
 
