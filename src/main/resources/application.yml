@@ -1,6 +1,9 @@
 ﻿server:
   port: 8080
-
+  tomcat:
+    threads:
+      max: ${TOMCAT_THREADS_MAX:400}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:600}
 spring:
   application:
     name: zhiguang
@@ -41,6 +44,11 @@ spring:
       ack-mode: manual
     admin:
       auto-create: true
+  relation:
+    kafka:
+      command-group: relation-follow-command-consumer
+      partitions: ${RELATION_COMMAND_PARTITIONS:16}
+      consumer-concurrency: ${RELATION_COMMAND_CONCURRENCY:8}
   cassandra:
     contact-points: localhost
     port: 9042

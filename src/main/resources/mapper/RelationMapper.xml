@@ -13,15 +13,6 @@
         WHERE from_user_id=#{fromUserId} AND to_user_id=#{toUserId} AND rel_status=1
     </update>
 
-    <insert id="insertFollower">
-        INSERT INTO follower (id, to_user_id, from_user_id, rel_status, created_at, updated_at)
-        VALUES (#{id}, #{toUserId}, #{fromUserId}, #{relStatus}, NOW(3), NOW(3))
-        ON DUPLICATE KEY UPDATE rel_status=VALUES(rel_status), updated_at=VALUES(updated_at)
-    </insert>
-    <update id="cancelFollower">
-        UPDATE follower SET rel_status=0, updated_at=NOW(3)
-        WHERE to_user_id=#{toUserId} AND from_user_id=#{fromUserId}
-    </update>
 
     <select id="existsFollowing" resultType="int">
         SELECT COUNT(1) FROM following WHERE from_user_id=#{fromUserId} AND to_user_id=#{toUserId} AND rel_status=1
@@ -34,15 +25,6 @@
         LIMIT 1
     </select>
 
-    <select id="listFollowing" resultType="long">
-        SELECT to_user_id FROM following WHERE from_user_id=#{fromUserId} AND rel_status=1
-        ORDER BY created_at DESC LIMIT #{limit} OFFSET #{offset}
-    </select>
-
-    <select id="listFollowers" resultType="long">
-        SELECT from_user_id FROM follower WHERE to_user_id=#{toUserId} AND rel_status=1
-        ORDER BY created_at DESC LIMIT #{limit} OFFSET #{offset}
-    </select>
 
     <select id="listFollowingRows" resultType="map">
         SELECT to_user_id AS toUserId, created_at AS createdAt
@@ -53,9 +35,37 @@
 
     <select id="listFollowerRows" resultType="map">
         SELECT from_user_id AS fromUserId, created_at AS createdAt
-        FROM follower
+        FROM following
         WHERE to_user_id=#{toUserId} AND rel_status=1
         ORDER BY created_at DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="listFollowingRowsCursor" resultType="map">
+        SELECT to_user_id AS toUserId, created_at AS createdAt
+        FROM following
+        WHERE from_user_id=#{fromUserId}
+          AND rel_status=1
+          AND (
+                #{cursorCreatedAt} IS NULL
+                OR created_at &lt; #{cursorCreatedAt}
+                OR (created_at = #{cursorCreatedAt} AND to_user_id &lt; #{cursorToUserId})
+              )
+        ORDER BY created_at DESC, to_user_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="listFollowerRowsCursor" resultType="map">
+        SELECT from_user_id AS fromUserId, created_at AS createdAt
+        FROM following
+        WHERE to_user_id=#{toUserId}
+          AND rel_status=1
+          AND (
+                #{cursorCreatedAt} IS NULL
+                OR created_at &lt; #{cursorCreatedAt}
+                OR (created_at = #{cursorCreatedAt} AND from_user_id &lt; #{cursorFromUserId})
+              )
+        ORDER BY created_at DESC, from_user_id DESC
+        LIMIT #{limit}
     </select>
 
     <select id="countFollowingActive" resultType="int">
@@ -63,12 +73,12 @@
     </select>
 
     <select id="countFollowerActive" resultType="int">
-        SELECT COUNT(1) FROM follower WHERE to_user_id=#{toUserId} AND rel_status=1
+        SELECT COUNT(1) FROM following WHERE to_user_id=#{toUserId} AND rel_status=1
     </select>
 
     <select id="listFollowersForFanout" resultType="com.tongji.recommendation.feed.FanoutFollowerRow">
         SELECT from_user_id AS fromUserId, created_at AS createdAt
-        FROM follower
+        FROM following
         WHERE to_user_id=#{toUserId}
           AND rel_status=1
           AND (
@@ -103,49 +113,4 @@
         LIMIT 1
     </select>
 
-    <select id="listFollowingIdsCursor" resultType="long">
-        SELECT id
-        FROM following
-        <where>
-            rel_status = 1
-            <if test="cursorRelationId != null">
-                AND id &gt; #{cursorRelationId}
-            </if>
-        </where>
-        ORDER BY id ASC
-        LIMIT #{limit}
-    </select>
-
-    <select id="listActiveFollowingRowsByUser" resultType="com.tongji.relation.mapper.RelationMapper$RelationRepairRow">
-        SELECT id AS id,
-               from_user_id AS fromUserId,
-               to_user_id AS toUserId,
-               created_at AS createdAt
-        FROM following
-        WHERE from_user_id = #{fromUserId}
-          AND rel_status = 1
-        ORDER BY created_at DESC, to_user_id DESC
-    </select>
-
-    <select id="listActiveFollowerRowsBySourceUser" resultType="com.tongji.relation.mapper.RelationMapper$RelationRepairRow">
-        SELECT id AS id,
-               from_user_id AS fromUserId,
-               to_user_id AS toUserId,
-               created_at AS createdAt
-        FROM follower
-        WHERE from_user_id = #{fromUserId}
-          AND rel_status = 1
-        ORDER BY created_at DESC, to_user_id DESC
-    </select>
-
-    <select id="listActiveFollowerRowsByUser" resultType="com.tongji.relation.mapper.RelationMapper$RelationRepairRow">
-        SELECT id AS id,
-               from_user_id AS fromUserId,
-               to_user_id AS toUserId,
-               created_at AS createdAt
-        FROM follower
-        WHERE to_user_id = #{toUserId}
-          AND rel_status = 1
-        ORDER BY created_at DESC, from_user_id DESC
-    </select>
 </mapper>

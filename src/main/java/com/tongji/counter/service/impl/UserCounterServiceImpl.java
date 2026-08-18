@@ -47,13 +47,18 @@ public class UserCounterServiceImpl implements UserCounterService {
         this.incrScript.setScriptText(INCR_FIELD_LUA);
     }
 
-    /** 基于事实重建关注数与粉丝数（幂等，覆盖写入，保留发文/获赞/获收藏字段） */
+    /** 增量更新关注数 */
     @Override
-    public void rebuildFollowCounters(long fromUserId, long toUserId) {
-        long followings = relationMapper.countFollowingActive(fromUserId);
-        long followers = relationMapper.countFollowerActive(toUserId);
-        patchSdsField(UserCounterKeys.sdsKey(fromUserId), 0, followings);
-        patchSdsField(UserCounterKeys.sdsKey(toUserId), 1, followers);
+    public void incrementFollowings(long userId, int delta) {
+        String key = UserCounterKeys.sdsKey(userId);
+        redis.execute(incrScript, List.of(key), "5", "4", "1", String.valueOf(delta));
+    }
+
+    /** 增量更新粉丝数 */
+    @Override
+    public void incrementFollowers(long userId, int delta) {
+        String key = UserCounterKeys.sdsKey(userId);
+        redis.execute(incrScript, List.of(key), "5", "4", "2", String.valueOf(delta));
     }
 
     /** 读取 SDS 快照（缺失或长度不符时以全零填充），供字段级覆盖写入。 */
@@ -68,15 +73,6 @@ public class UserCounterServiceImpl implements UserCounterService {
         return buf;
     }
 
-    /** 按字段下标（0 基，4 字节）覆盖写入 SDS，保留其余字段。 */
-    private void patchSdsField(String key, int fieldIndex, long value) {
-        byte[] buf = readSdsBuffer(key);
-        write32be(buf, fieldIndex * 4, value);
-        redis.execute((RedisCallback<Void>) c -> {
-            c.stringCommands().set(key.getBytes(StandardCharsets.UTF_8), buf);
-            return null;
-        });
-    }
 
     /** 增量更新发文数 */
     @Override

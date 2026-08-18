@@ -7,6 +7,7 @@ import com.tongji.common.web.GlobalExceptionHandler;
 import com.tongji.counter.service.UserCounterReader;
 import com.tongji.counter.service.UserCounters;
 import com.tongji.profile.api.dto.ProfileResponse;
+import com.tongji.relation.command.RelationCommandService;
 import com.tongji.relation.manager.RelationManager;
 import com.tongji.relation.manager.RelationWriteResult;
 import com.tongji.relation.service.RelationService;
@@ -40,6 +41,7 @@ class RelationManagerControllerTest {
     private static final long USER_ID = 501L;
     private static final long OTHER_USER_ID = 777L;
 
+    private RelationCommandService relationCommandService;
     private RelationManager relationManager;
     private RelationService relationService;
     private UserCounterReader userCounterReader;
@@ -48,12 +50,14 @@ class RelationManagerControllerTest {
 
     @BeforeEach
     void setUp() {
+        relationCommandService = Mockito.mock(RelationCommandService.class);
         relationManager = Mockito.mock(RelationManager.class);
         relationService = Mockito.mock(RelationService.class);
         userCounterReader = Mockito.mock(UserCounterReader.class);
         JwtService jwtService = buildJwtService();
 
         RelationController controller = new RelationController(
+                relationCommandService,
                 relationManager,
                 relationService,
                 jwtService,
@@ -90,8 +94,8 @@ class RelationManagerControllerTest {
     }
 
     @Test
-    void followDelegatesToManager() throws Exception {
-        when(relationManager.follow(USER_ID, OTHER_USER_ID))
+    void followDelegatesToCommandService() throws Exception {
+        when(relationCommandService.follow(USER_ID, OTHER_USER_ID))
                 .thenReturn(RelationWriteResult.changed(true));
 
         mockMvc.perform(post("/api/v1/relation/follow")
@@ -99,21 +103,21 @@ class RelationManagerControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").value(true));
 
-        verify(relationManager).follow(USER_ID, OTHER_USER_ID);
+        verify(relationCommandService).follow(USER_ID, OTHER_USER_ID);
         verifyNoInteractions(relationService);
     }
 
     @Test
-    void unfollowDelegatesToManager() throws Exception {
-        when(relationManager.unfollow(USER_ID, OTHER_USER_ID))
-                .thenReturn(RelationWriteResult.changed(false));
+    void unfollowDelegatesToCommandService() throws Exception {
+        when(relationCommandService.unfollow(USER_ID, OTHER_USER_ID))
+                .thenReturn(RelationWriteResult.changed(true));
 
         mockMvc.perform(post("/api/v1/relation/unfollow")
                         .queryParam("toUserId", String.valueOf(OTHER_USER_ID)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").value(true));
 
-        verify(relationManager).unfollow(USER_ID, OTHER_USER_ID);
+        verify(relationCommandService).unfollow(USER_ID, OTHER_USER_ID);
         verifyNoInteractions(relationService);
     }
 

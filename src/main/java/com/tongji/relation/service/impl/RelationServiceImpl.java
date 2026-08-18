@@ -1,57 +1,50 @@
 package com.tongji.relation.service.impl;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.tongji.counter.service.UserCounterReader;
+import com.tongji.profile.api.dto.ProfileResponse;
 import com.tongji.recommendation.feed.FollowedAuthorRow;
 import com.tongji.relation.mapper.RelationMapper;
 import com.tongji.relation.service.RelationService;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Service;
-import com.tongji.user.mapper.UserMapper;
 import com.tongji.user.domain.User;
-import com.tongji.profile.api.dto.ProfileResponse;
+import com.tongji.user.mapper.UserMapper;
+import org.springframework.stereotype.Service;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.sql.Timestamp;
-import java.util.Date;
-import java.util.function.IntFunction;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 关系服务实现。
  * 设计要点：
- * - 读路径：优先读取 Redis ZSet（关注/粉丝）并按需回填，支持偏移与游标两种分页；大V用户启用本地 Top 缓存；
- * - 计数：用户维度计数事实由 counter 模块提供；“大V”阈值仍属于关系读策略；
- * - 并发与一致性：回填后设置短 TTL，降低陈旧风险。
+ * - 关注/粉丝列表直查 MySQL（`following` 为唯一关系事实），按创建时间倒序分页；大V用户启用本地 Top 500 缓存；
+ * - 计数：用户维度计数事实由 counter 模块提供；“大V”阈值仍属于关系读策略。
  */
 @Service
 public class RelationServiceImpl implements RelationService {
     private final RelationMapper mapper;
-    private final StringRedisTemplate redis;
     private final Cache<Long, List<Long>> flwsTopCache;
     private final Cache<Long, List<Long>> fansTopCache;
     private final UserMapper userMapper;
     private final UserCounterReader userCounterReader;
-    
+
+    private static final int TOP_CACHE_SIZE = 500;
 
     /**
      * 关系服务实现构造函数。
      * @param mapper 关系表数据访问
-     * @param redis Redis 客户端
      * @param userMapper 用户数据访问
+     * @param userCounterReader 计数读取
      */
     public RelationServiceImpl(RelationMapper mapper,
-                               StringRedisTemplate redis,
                                UserMapper userMapper,
                                UserCounterReader userCounterReader) {
         this.mapper = mapper;
-        this.redis = redis;
         this.flwsTopCache = Caffeine.newBuilder().maximumSize(1000).expireAfterWrite(Duration.ofMinutes(10)).build();
         this.fansTopCache = Caffeine.newBuilder().maximumSize(1000).expireAfterWrite(Duration.ofMinutes(10)).build();
         this.userMapper = userMapper;
@@ -59,87 +52,55 @@ public class RelationServiceImpl implements RelationService {
     }
 
     /**
-     * 获取关注列表（偏移分页），优先读取 Redis ZSet，未命中时回填并设置 TTL。
-     * @param userId 用户ID
-     * @param limit 返回数量上限
-     * @param offset 偏移量
-     * @return 关注的用户ID列表
+     * 获取关注列表（偏移分页），直查 DB 并截取；大V用户可命中本地 Top 缓存。
      */
     @Override
     public List<Long> following(long userId, int limit, int offset) {
-        String key = "uf:flws:" + userId;
-        return getListWithOffset(
-                key,
-                offset,
-                limit,
-                need -> mapper.listFollowingRows(userId, need, 0),
-                "toUserId",
-                "createdAt",
-                flwsTopCache,
-                userId
-        );
+        List<Long> top = flwsTopCache.getIfPresent(userId);
+        if (top != null && !top.isEmpty() && offset < top.size()) {
+            return new ArrayList<>(top.subList(offset, Math.min(offset + limit, top.size())));
+        }
+        int need = Math.max(1, Math.min(limit + offset, 1000));
+        return sliceAndCache("toUserId", userId, limit, offset, mapper.listFollowingRows(userId, need, 0), flwsTopCache);
     }
 
     /**
-     * 获取粉丝列表（偏移分页），ZSet 优先，DB 回填并设置 TTL。
-     * @param userId 用户ID
-     * @param limit 返回数量上限
-     * @param offset 偏移量
-     * @return 粉丝用户ID列表
+     * 获取粉丝列表（偏移分页），直查 DB 并截取；大V用户可命中本地 Top 缓存。
      */
     @Override
     public List<Long> followers(long userId, int limit, int offset) {
-        String key = "uf:fans:" + userId;
-        return getListWithOffset(
-                key,
-                offset,
-                limit,
-                need -> mapper.listFollowerRows(userId, need, 0),
-                "fromUserId",
-                "createdAt",
-                fansTopCache,
-                userId
-        );
+        List<Long> top = fansTopCache.getIfPresent(userId);
+        if (top != null && !top.isEmpty() && offset < top.size()) {
+            return new ArrayList<>(top.subList(offset, Math.min(offset + limit, top.size())));
+        }
+        int need = Math.max(1, Math.min(limit + offset, 1000));
+        return sliceAndCache("fromUserId", userId, limit, offset, mapper.listFollowerRows(userId, need, 0), fansTopCache);
     }
 
     /**
-     * 游标分页获取关注列表，按创建时间倒序基于 ZSet 分数。
-     * @param userId 用户ID
-     * @param limit 返回数量上限
-     * @param cursor 上一页末条的分数（毫秒时间戳），为空代表第一页
-     * @return 关注的用户ID列表
+     * 游标分页获取关注列表，按创建时间倒序；cursor 为上一页末条的毫秒时间戳（严格小于）。
      */
     @Override
     public List<Long> followingCursor(long userId, int limit, Long cursor) {
-        String key = "uf:flws:" + userId;
-        return getListWithCursor(
-                key,
-                limit,
-                cursor,
-                need -> mapper.listFollowingRows(userId, need, 0),
-                "toUserId",
-                "createdAt"
-        );
+        if (cursor == null) {
+            return following(userId, limit, 0);
+        }
+        List<Map<String, Object>> rows = mapper.listFollowingRowsCursor(
+                userId, new Timestamp(cursor), null, Math.max(1, limit));
+        return extractIds(rows, "toUserId");
     }
 
     /**
-     * 游标分页获取粉丝列表。
-     * @param userId 用户ID
-     * @param limit 返回数量上限
-     * @param cursor 上一页末条的分数（毫秒时间戳），为空代表第一页
-     * @return 粉丝用户ID列表
+     * 游标分页获取粉丝列表，按创建时间倒序；cursor 为上一页末条的毫秒时间戳（严格小于）。
      */
     @Override
     public List<Long> followersCursor(long userId, int limit, Long cursor) {
-        String key = "uf:fans:" + userId;
-        return getListWithCursor(
-                key,
-                limit,
-                cursor,
-                need -> mapper.listFollowerRows(userId, need, 0),
-                "fromUserId",
-                "createdAt"
-        );
+        if (cursor == null) {
+            return followers(userId, limit, 0);
+        }
+        List<Map<String, Object>> rows = mapper.listFollowerRowsCursor(
+                userId, new Timestamp(cursor), null, Math.max(1, limit));
+        return extractIds(rows, "fromUserId");
     }
 
     @Override
@@ -214,131 +175,40 @@ public class RelationServiceImpl implements RelationService {
     }
 
     /**
-     * 偏移分页读取：优先命中 ZSet，未命中时从 DB 回填并设置 TTL；大V用户维护本地 Top 缓存以降低冷启动开销。
+     * 从 DB 行列表按偏移截取 ID，并维护大V用户本地 Top 缓存（仅首页取数时，保证缓存内容就是 Top N）。
      */
-    private List<Long> getListWithOffset(
-            String key,
-            int offset,
-            int limit,
-            IntFunction<Map<Long, Map<String, Object>>> rowsFetcher,
-            String idField,
-            String tsField,
-            Cache<Long, List<Long>> localCache,
-            long userId
-    ) {
-        // 1. 先查本地缓存 (L1)
-        List<Long> top = localCache != null ? localCache.getIfPresent(userId) : null;
-        if (top != null && !top.isEmpty()) {
-            // 本地缓存通常只存 Top N (例如前500)，如果 offset 在范围内则直接返回
-            if (offset < top.size()) {
-                int to = Math.min(offset + limit, top.size());
-                return new ArrayList<>(top.subList(offset, to));
-            }
-            // 如果请求的 offset 超过了本地缓存范围，继续查 Redis
+    private List<Long> sliceAndCache(String idKey,
+                                     long userId,
+                                     int limit,
+                                     int offset,
+                                     List<Map<String, Object>> rows,
+                                     Cache<Long, List<Long>> localCache) {
+        if (rows == null || rows.isEmpty()) {
+            return Collections.emptyList();
         }
-
-        // 2. 再查 Redis (L2)
-        Set<String> cached = redis.opsForZSet().reverseRange(key, offset, offset + limit - 1L);
-        if (cached != null && !cached.isEmpty()) {
-            return toLongList(cached);
+        List<Long> ids = extractIds(rows, idKey);
+        int from = Math.min(offset, ids.size());
+        int to = Math.min(offset + limit, ids.size());
+        if (offset == 0 && localCache != null && isBigV(userId)) {
+            localCache.put(userId, new ArrayList<>(ids.subList(0, Math.min(ids.size(), TOP_CACHE_SIZE))));
         }
-
-        // 3. 最后查 DB 回填
-        int need = Math.max(1, limit + offset);
-        Map<Long, Map<String, Object>> rows = rowsFetcher.apply(Math.min(need, 1000));
-        if (rows != null && !rows.isEmpty()) {
-            fillZSet(key, rows, idField, tsField, null);
-            redis.expire(key, Duration.ofHours(2));
-
-            // 回填后尝试更新本地缓存（仅针对大V）
-            if (localCache != null && isBigV(userId)) {
-                maybeUpdateTopCache(userId, key, localCache);
-            }
-
-            Set<String> filled = redis.opsForZSet().reverseRange(key, offset, offset + limit - 1L);
-            return filled == null ? Collections.emptyList() : toLongList(filled);
-        }
-        return Collections.emptyList();
+        return new ArrayList<>(ids.subList(from, to));
     }
 
     /**
-     * 游标分页读取：按分数（毫秒时间戳）倒序读取；未命中时回填满足所需范围的数据并继续读取。
+     * 按行顺序提取主 ID（toUserId/fromUserId 列）。
      */
-    private List<Long> getListWithCursor(String key,
-                                         int limit,
-                                         Long cursor,
-                                         IntFunction<Map<Long, Map<String, Object>>> rowsFetcher,
-                                         String idField,
-                                         String tsField) {
-
-        double max = cursor == null ? Double.POSITIVE_INFINITY : cursor.doubleValue();
-        Set<String> cached = redis.opsForZSet().reverseRangeByScore(key, Double.NEGATIVE_INFINITY, max, 0, limit);
-
-        if (cached != null && !cached.isEmpty()) {
-            return toLongList(cached);
+    private List<Long> extractIds(List<Map<String, Object>> rows, String idKey) {
+        if (rows == null || rows.isEmpty()) {
+            return Collections.emptyList();
         }
-
-        int need = Math.max(limit, 100);
-        Map<Long, Map<String, Object>> rows = rowsFetcher.apply(Math.min(need, 1000));
-
-        if (rows != null && !rows.isEmpty()) {
-            fillZSet(key, rows, idField, tsField, cursor);
-            redis.expire(key, Duration.ofHours(2));
-            Set<String> filled = redis.opsForZSet().reverseRangeByScore(key, Double.NEGATIVE_INFINITY, max, 0, limit);
-            return filled == null ? Collections.emptyList() : toLongList(filled);
-        }
-        return Collections.emptyList();
-    }
-
-    /**
-     * 将行数据填充至 ZSet：分值为创建时间戳；若提供游标则只填充不高于游标的记录。
-     */
-    private void fillZSet(String key,
-                          Map<Long, Map<String, Object>> rows,
-                          String idField,
-                          String tsField,
-                          Long cursor) {
-        for (Map<String, Object> r : rows.values()) {
-            Object idObj = r.get(idField);
-            Object tsObj = r.get(tsField);
-            if (idObj == null || tsObj == null) continue;
-            long score = tsScore(tsObj);
-            if (cursor == null || score <= cursor) {
-                redis.opsForZSet().add(key, String.valueOf(idObj), score);
+        List<Long> out = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Object id = row.get(idKey);
+            if (id instanceof Number n) {
+                out.add(n.longValue());
             }
         }
-    }
-
-    /**
-     * 将多类型时间对象统一转换为毫秒分值。
-     */
-    private long tsScore(Object tsObj) {
-        if (tsObj instanceof Timestamp ts) {
-            return ts.getTime();
-        }
-        if (tsObj instanceof Date d) {
-            return d.getTime();
-        }
-        return System.currentTimeMillis();
-    }
-
-    /**
-     * 将字符串集合按原顺序映射为长整型列表。
-     */
-    private List<Long> toLongList(Set<String> set) {
-        List<Long> out = new ArrayList<>(set.size());
-        for (String s : set) out.add(Long.valueOf(s));
         return out;
-    }
-
-    /**
-     * 更新本地 Top 缓存：大V 用户仅缓存前 500 名，减少频繁回源与排序成本。
-     */
-    private void maybeUpdateTopCache(long userId, String key, Cache<Long, List<Long>> cache) {
-        Set<String> allSet = redis.opsForZSet().reverseRange(key, 0, 499);
-        if (allSet == null || allSet.isEmpty()) return;
-        List<Long> all = new ArrayList<>(allSet.size());
-        for (String s : allSet) all.add(Long.valueOf(s));
-        cache.put(userId, all);
     }
 }
