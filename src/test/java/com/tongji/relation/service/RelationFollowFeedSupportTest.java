@@ -26,15 +26,13 @@ class RelationFollowFeedSupportTest {
     @Mock
     private RelationMapper relationMapper;
     @Mock
-    private StringRedisTemplate redisTemplate;
-    @Mock
     private UserMapper userMapper;
     @Mock
     private UserCounterReader userCounterReader;
 
     @Test
     void followedAuthorDiscoveryScansAllPagesAndDoesNotFilterByCurrentFollowerCount() {
-        RelationServiceImpl service = new RelationServiceImpl(relationMapper, redisTemplate, userMapper, userCounterReader);
+        RelationServiceImpl service = new RelationServiceImpl(relationMapper, userMapper, userCounterReader);
         Timestamp firstTs = Timestamp.from(Instant.parse("2026-06-18T10:15:32Z"));
 
         when(relationMapper.listFollowedAuthorsForFeed(42L, null, null, 100))
@@ -48,7 +46,7 @@ class RelationFollowFeedSupportTest {
 
     @Test
     void cursorCreatedAtLookupContinuesBeyondFirstFollowedAuthorWindow() {
-        RelationServiceImpl service = new RelationServiceImpl(relationMapper, redisTemplate, userMapper, userCounterReader);
+        RelationServiceImpl service = new RelationServiceImpl(relationMapper, userMapper, userCounterReader);
         Timestamp targetTs = Timestamp.from(Instant.parse("2026-06-18T08:00:00Z"));
 
         when(relationMapper.findFollowedAuthorCreatedAt(42L, 5_000L)).thenReturn(targetTs);

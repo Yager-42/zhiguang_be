@@ -6,58 +6,38 @@ import com.tongji.common.resilience.ResilienceGuard;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
 import com.tongji.relation.mapper.RelationMapper;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
+/**
+ * 关注/取关事实写（消费端与内部事务入口）。
+ *
+ * <p>请求线程不再直接调用本类：命令由 {@link com.tongji.relation.command.RelationCommandService}
+ * 投递 Kafka 后由消费端在这里执行事务（幂等门控 + AFTER_COMMIT 计数监听器）。</p>
+ */
 @Service
 public class RelationManagerImpl implements RelationManager {
 
-    private static final String TOKEN_BUCKET_LUA = """
-            
-            local key = KEYS[1]
-            local capacity = tonumber(ARGV[1])
-            local rate = tonumber(ARGV[2])
-            local now = redis.call('TIME')[1]
-            local last = redis.call('HGET', key, 'last')
-            local tokens = redis.call('HGET', key, 'tokens')
-            if not last then last = now; tokens = capacity end
-            local elapsed = tonumber(now) - tonumber(last)
-            local add = elapsed * rate
-            tokens = math.min(capacity, tonumber(tokens) + add)
-            if tokens < 1 then redis.call('HSET', key, 'last', now); redis.call('HSET', key, 'tokens', tokens); return 0 end
-            tokens = tokens - 1
-            redis.call('HSET', key, 'last', now)
-            redis.call('HSET', key, 'tokens', tokens)
-            redis.call('PEXPIRE', key, 60000)
-            return 1
-            """;
-
     private final RelationMapper relationMapper;
-    private final StringRedisTemplate redisTemplate;
     private final IdService idService;
     private final RelationPublisher relationPublisher;
     private final ResilienceGuard resilienceGuard;
-    private final DefaultRedisScript<Long> tokenScript;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public RelationManagerImpl(RelationMapper relationMapper,
-                               StringRedisTemplate redisTemplate,
                                IdService idService,
                                RelationPublisher relationPublisher,
-                               ResilienceGuard resilienceGuard) {
+                               ResilienceGuard resilienceGuard,
+                               ApplicationEventPublisher applicationEventPublisher) {
         this.relationMapper = relationMapper;
-        this.redisTemplate = redisTemplate;
         this.idService = idService;
         this.relationPublisher = relationPublisher;
         this.resilienceGuard = resilienceGuard;
-        this.tokenScript = new DefaultRedisScript<>();
-        this.tokenScript.setResultType(Long.class);
-        this.tokenScript.setScriptText(TOKEN_BUCKET_LUA);
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @Override
@@ -67,14 +47,9 @@ public class RelationManagerImpl implements RelationManager {
             return RelationWriteResult.unchanged(true);
         }
 
-        Long allowed = redisTemplate.execute(tokenScript, List.of("rl:follow:" + fromUserId), "100", "1");
-        if (!Long.valueOf(1L).equals(allowed)) {
-            return RelationWriteResult.failed();
-        }
-
         long relationId = idService.nextId(IdNamespace.RELATION);
         int changed = relationMapper.insertFollowing(relationId, fromUserId, toUserId, 1);
-        if (changed <= 0) {
+        if (changed != 1) {
             return RelationWriteResult.unchanged(true);
         }
 
@@ -82,6 +57,8 @@ public class RelationManagerImpl implements RelationManager {
         if (persistedRelationId == null) {
             throw new IllegalStateException("Active following row not found after follow write");
         }
+
+        applicationEventPublisher.publishEvent(new FollowCommittedEvent(fromUserId, toUserId, 1));
 
         GuardResult<Void> publishResult = resilienceGuard.execute(
                 "relation:outbox-publish",
@@ -108,6 +85,7 @@ public class RelationManagerImpl implements RelationManager {
             return RelationWriteResult.unchanged(false);
         }
 
+        applicationEventPublisher.publishEvent(new FollowCommittedEvent(fromUserId, toUserId, -1));
         GuardResult<Void> publishResult = resilienceGuard.execute(
                 "relation:outbox-publish",
                 () -> {
@@ -132,7 +110,8 @@ public class RelationManagerImpl implements RelationManager {
         return result;
     }
 
-    private boolean isFollowing(long fromUserId, long toUserId) {
+    @Override
+    public boolean isFollowing(long fromUserId, long toUserId) {
         return relationMapper.existsFollowing(fromUserId, toUserId) > 0;
     }
 

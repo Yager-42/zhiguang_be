@@ -4,7 +4,6 @@ import com.tongji.recommendation.feed.FanoutFollowerRow;
 import com.tongji.recommendation.feed.FollowedAuthorRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.MapKey;
 
 import java.sql.Timestamp;
 import java.util.List;
@@ -38,27 +37,6 @@ public interface RelationMapper {
     int cancelFollowing(@Param("fromUserId") Long fromUserId,
                         @Param("toUserId") Long toUserId);
 
-    /**
-     * 插入粉丝关系。
-     * @param id 主键ID
-     * @param toUserId 被关注者
-     * @param fromUserId 关注者
-     * @param relStatus 关系状态
-     * @return 影响行数
-     */
-    int insertFollower(@Param("id") Long id,
-                        @Param("toUserId") Long toUserId,
-                        @Param("fromUserId") Long fromUserId,
-                        @Param("relStatus") Integer relStatus);
-
-    /**
-     * 取消粉丝关系（逻辑更新）。
-     * @param toUserId 被关注者
-     * @param fromUserId 关注者
-     * @return 影响行数
-     */
-    int cancelFollower(@Param("toUserId") Long toUserId,
-                       @Param("fromUserId") Long fromUserId);
 
     /**
      * 判断是否存在关注关系。
@@ -78,51 +56,44 @@ public interface RelationMapper {
     Long findActiveFollowingId(@Param("fromUserId") Long fromUserId,
                                @Param("toUserId") Long toUserId);
 
+
     /**
-     * 列出关注用户ID（偏移分页）。
+     * 列出关注行（包含 createdAt，按 SQL 顺序返回，供分页截取）。
      * @param fromUserId 发起者
      * @param limit 上限
      * @param offset 偏移
-     * @return 关注用户ID列表
+     * @return 关注行列表（toUserId/createdAt 两列）
      */
-    List<Long> listFollowing(@Param("fromUserId") Long fromUserId,
-                                       @Param("limit") int limit,
-                                       @Param("offset") int offset);
+    List<Map<String, Object>> listFollowingRows(@Param("fromUserId") Long fromUserId,
+                                                @Param("limit") int limit,
+                                                @Param("offset") int offset);
 
     /**
-     * 列出粉丝用户ID（偏移分页）。
+     * 列出粉丝行（包含 createdAt，按 SQL 顺序返回，供分页截取）。
      * @param toUserId 被关注者
      * @param limit 上限
      * @param offset 偏移
-     * @return 粉丝用户ID列表
+     * @return 粉丝行列表（fromUserId/createdAt 两列）
      */
-    List<Long> listFollowers(@Param("toUserId") Long toUserId,
-                                       @Param("limit") int limit,
-                                       @Param("offset") int offset);
+    List<Map<String, Object>> listFollowerRows(@Param("toUserId") Long toUserId,
+                                               @Param("limit") int limit,
+                                               @Param("offset") int offset);
 
     /**
-     * 列出关注行用于缓存回填（包含 createdAt）。
-     * @param fromUserId 发起者
-     * @param limit 上限
-     * @param offset 偏移
-     * @return 以 toUserId 作为键的行映射
+     * 游标分页列出关注行（created_at DESC, to_user_id DESC）。
      */
-    @MapKey("toUserId")
-    Map<Long, Map<String, Object>> listFollowingRows(@Param("fromUserId") Long fromUserId,
-                                                     @Param("limit") int limit,
-                                                     @Param("offset") int offset);
+    List<Map<String, Object>> listFollowingRowsCursor(@Param("fromUserId") Long fromUserId,
+                                                      @Param("cursorCreatedAt") java.sql.Timestamp cursorCreatedAt,
+                                                      @Param("cursorToUserId") Long cursorToUserId,
+                                                      @Param("limit") int limit);
 
     /**
-     * 列出粉丝行用于缓存回填（包含 createdAt）。
-     * @param toUserId 被关注者
-     * @param limit 上限
-     * @param offset 偏移
-     * @return 以 fromUserId 作为键的行映射
+     * 游标分页列出粉丝行（created_at DESC, from_user_id DESC）。
      */
-    @MapKey("fromUserId")
-    Map<Long, Map<String, Object>> listFollowerRows(@Param("toUserId") Long toUserId,
-                                                    @Param("limit") int limit,
-                                                    @Param("offset") int offset);
+    List<Map<String, Object>> listFollowerRowsCursor(@Param("toUserId") Long toUserId,
+                                                     @Param("cursorCreatedAt") java.sql.Timestamp cursorCreatedAt,
+                                                     @Param("cursorFromUserId") Long cursorFromUserId,
+                                                     @Param("limit") int limit);
 
     /**
      * 统计关注数（有效关系）。
@@ -147,15 +118,4 @@ public interface RelationMapper {
     Timestamp findFollowedAuthorCreatedAt(@Param("fromUserId") Long fromUserId,
                                           @Param("toUserId") Long toUserId);
 
-    List<Long> listFollowingIdsCursor(@Param("cursorRelationId") Long cursorRelationId,
-                                      @Param("limit") int limit);
-
-    List<RelationRepairRow> listActiveFollowingRowsByUser(@Param("fromUserId") Long fromUserId);
-
-    List<RelationRepairRow> listActiveFollowerRowsBySourceUser(@Param("fromUserId") Long fromUserId);
-
-    List<RelationRepairRow> listActiveFollowerRowsByUser(@Param("toUserId") Long toUserId);
-
-    record RelationRepairRow(Long id, Long fromUserId, Long toUserId, Timestamp createdAt) {
-    }
 }

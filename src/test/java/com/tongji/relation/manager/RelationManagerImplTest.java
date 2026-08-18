@@ -11,8 +11,6 @@ import com.tongji.outbox.OutboxMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.RedisScript;
 
 import java.util.List;
 import java.util.function.Predicate;
@@ -37,27 +35,26 @@ class RelationManagerImplTest {
     private IdService idService;
     private RecordingResilienceGuard resilienceGuard;
     private RelationManager relationManager;
-    private TestStringRedisTemplate redisTemplate;
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @BeforeEach
     void setUp() {
         relationMapper = mock(RelationMapper.class);
         outboxMapper = mock(OutboxMapper.class);
-        redisTemplate = new TestStringRedisTemplate();
         idService = mock(IdService.class);
+        eventPublisher = mock(org.springframework.context.ApplicationEventPublisher.class);
         resilienceGuard = new RecordingResilienceGuard();
         relationManager = new RelationManagerImpl(
                 relationMapper,
-                redisTemplate,
                 idService,
                 new RelationPublisher(new ObjectMapper(), outboxMapper, idService),
-                resilienceGuard
+                resilienceGuard,
+                eventPublisher
         );
     }
 
     @Test
     void followSkipsDuplicateSideEffectsWhenAlreadyFollowing() {
-        allowRateLimit();
         when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(1);
 
         RelationWriteResult result = relationManager.follow(FROM_USER_ID, TO_USER_ID);
@@ -70,20 +67,6 @@ class RelationManagerImplTest {
         verify(outboxMapper, never()).insert(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     }
 
-    @Test
-    void duplicateFollowReturnsUnchangedSuccessEvenWhenRateLimited() {
-        redisTemplate.nextResult = 0L;
-        when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(1);
-
-        RelationWriteResult result = relationManager.follow(FROM_USER_ID, TO_USER_ID);
-
-        assertThat(result.success()).isTrue();
-        assertThat(result.stateChanged()).isFalse();
-        assertThat(result.following()).isTrue();
-        verify(relationMapper, never()).insertFollowing(eq(11L), eq(FROM_USER_ID), eq(TO_USER_ID), eq(1));
-        verify(idService, never()).nextId(IdNamespace.RELATION);
-        verify(outboxMapper, never()).insert(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
-    }
 
     @Test
     void unfollowSkipsDuplicateSideEffectsWhenAlreadyUnfollowed() {
@@ -101,7 +84,6 @@ class RelationManagerImplTest {
 
     @Test
     void followUsesRelationIdForRowAndOutboxIdForEvent() throws Exception {
-        allowRateLimit();
         when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(0);
         when(idService.nextId(IdNamespace.RELATION)).thenReturn(9001L);
         when(relationMapper.findActiveFollowingId(FROM_USER_ID, TO_USER_ID)).thenReturn(9001L);
@@ -126,7 +108,6 @@ class RelationManagerImplTest {
 
     @Test
     void refollowPublishesPersistedActiveRelationIdInsteadOfFreshAllocatedId() {
-        allowRateLimit();
         when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(0);
         when(idService.nextId(IdNamespace.RELATION)).thenReturn(9001L);
         when(relationMapper.insertFollowing(9001L, FROM_USER_ID, TO_USER_ID, 1)).thenReturn(1);
@@ -154,24 +135,9 @@ class RelationManagerImplTest {
         verify(outboxMapper).insert(eq(8002L), eq("following"), eq(null), eq("FollowCanceled"), org.mockito.ArgumentMatchers.contains("\"type\":\"FollowCanceled\""));
     }
 
-    @Test
-    void followReturnsFailureWhenRateLimited() {
-        redisTemplate.nextResult = 0L;
-        when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(0);
-
-        RelationWriteResult result = relationManager.follow(FROM_USER_ID, TO_USER_ID);
-
-        assertThat(result.success()).isFalse();
-        assertThat(result.stateChanged()).isFalse();
-        assertThat(result.following()).isFalse();
-        verify(relationMapper).existsFollowing(FROM_USER_ID, TO_USER_ID);
-        verify(relationMapper, never()).insertFollowing(eq(11L), eq(FROM_USER_ID), eq(TO_USER_ID), eq(1));
-        verify(outboxMapper, never()).insert(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
-    }
 
     @Test
     void followPropagatesOutboxFailure() {
-        allowRateLimit();
         when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(0);
         when(idService.nextId(IdNamespace.RELATION)).thenReturn(9001L);
         when(relationMapper.insertFollowing(9001L, FROM_USER_ID, TO_USER_ID, 1)).thenReturn(1);
@@ -188,7 +154,6 @@ class RelationManagerImplTest {
 
     @Test
     void followFailsWhenGuardFallsBackOnCriticalOutboxPublish() {
-        allowRateLimit();
         when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(0);
         when(idService.nextId(IdNamespace.RELATION)).thenReturn(9001L);
         when(relationMapper.insertFollowing(9001L, FROM_USER_ID, TO_USER_ID, 1)).thenReturn(1);
@@ -200,19 +165,57 @@ class RelationManagerImplTest {
                 .hasMessage("relation outbox publish degraded");
     }
 
-    private void allowRateLimit() {
-        redisTemplate.nextResult = 1L;
+    @Test
+    void followPublishesCounterEventOnRealInsert() {
+        when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(0);
+        when(idService.nextId(IdNamespace.RELATION)).thenReturn(9001L);
+        when(relationMapper.insertFollowing(9001L, FROM_USER_ID, TO_USER_ID, 1)).thenReturn(1);
+        when(relationMapper.findActiveFollowingId(FROM_USER_ID, TO_USER_ID)).thenReturn(9001L);
+
+        relationManager.follow(FROM_USER_ID, TO_USER_ID);
+
+        org.mockito.ArgumentCaptor<Object> captor = org.mockito.ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue())
+                .isEqualTo(new FollowCommittedEvent(FROM_USER_ID, TO_USER_ID, 1));
     }
 
-    private static final class TestStringRedisTemplate extends StringRedisTemplate {
-        private Long nextResult = 1L;
+    @Test
+    void duplicateFollowDoesNotPublishCounterEvent() {
+        when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(0);
+        when(idService.nextId(IdNamespace.RELATION)).thenReturn(9001L);
+        // affected==2：并发重复关注命中 uk_from_to 的 dup-update，不算真实插入
+        when(relationMapper.insertFollowing(9001L, FROM_USER_ID, TO_USER_ID, 1)).thenReturn(2);
 
-        @Override
-        @SuppressWarnings("unchecked")
-        public <T> T execute(RedisScript<T> script, List<String> keys, Object... args) {
-            return (T) nextResult;
-        }
+        RelationWriteResult result = relationManager.follow(FROM_USER_ID, TO_USER_ID);
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.stateChanged()).isFalse();
+        verify(eventPublisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
+        verify(outboxMapper, never()).insert(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     }
+
+    @Test
+    void unfollowPublishesCounterEventOnlyWhenCancelTookEffect() {
+        when(relationMapper.existsFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(1);
+        when(relationMapper.cancelFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(0);
+
+        relationManager.unfollow(FROM_USER_ID, TO_USER_ID);
+
+        verify(eventPublisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
+
+        when(relationMapper.cancelFollowing(FROM_USER_ID, TO_USER_ID)).thenReturn(1);
+        when(idService.nextId(IdNamespace.OUTBOX_EVENT)).thenReturn(8002L);
+
+        relationManager.unfollow(FROM_USER_ID, TO_USER_ID);
+
+        org.mockito.ArgumentCaptor<Object> captor = org.mockito.ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, org.mockito.Mockito.times(1)).publishEvent(captor.capture());
+        assertThat(captor.getValue())
+                .isEqualTo(new FollowCommittedEvent(FROM_USER_ID, TO_USER_ID, -1));
+    }
+
+
 
     private static final class RecordingResilienceGuard implements ResilienceGuard {
         private final List<String> resourceNames = new java.util.ArrayList<>();

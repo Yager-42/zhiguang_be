@@ -24,10 +24,6 @@ public class ThreadPoolConfig {
         return buildExecutor(8, 16, 100, 60, "publish-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
     }
 
-    @Bean(name = "relationEventExecutor")
-    public TaskExecutor relationEventExecutor() {
-        return buildExecutor(4, 8, 200, 60, "relation-event-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
-    }
 
     @Bean(name = "canalOutboxExecutor")
     public TaskExecutor canalOutboxExecutor() {

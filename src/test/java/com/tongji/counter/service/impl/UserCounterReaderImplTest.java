@@ -100,6 +100,30 @@ class UserCounterReaderImplTest {
         verify(writer, never()).rebuildAllCounters(42L);
     }
 
+    @Test
+    void findDegradesToDbCountsWhenRedisReadFails() {
+        when(redis.execute(any(RedisCallback.class)))
+                .thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("redis down"));
+        when(relationMapper.countFollowingActive(42L)).thenReturn(7);
+        when(relationMapper.countFollowerActive(42L)).thenReturn(13);
+
+        assertThat(reader.find(42L))
+                .contains(new UserCounters(7L, 13L, 0L, 0L, 0L));
+        verify(singleFlight, never()).execute(any(), any(), any(TypeReference.class), any());
+    }
+
+    @Test
+    void getVerifiedDegradesToDbCountsWhenRedisReadFails() {
+        when(redis.execute(any(RedisCallback.class)))
+                .thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("redis down"));
+        when(relationMapper.countFollowingActive(42L)).thenReturn(7);
+        when(relationMapper.countFollowerActive(42L)).thenReturn(13);
+
+        assertThat(reader.getVerified(42L))
+                .isEqualTo(new UserCounters(7L, 13L, 0L, 0L, 0L));
+        verify(writer, never()).rebuildAllCounters(42L);
+    }
+
     private static byte[] counters(long followings, long followers, long posts, long liked, long faved) {
         byte[] raw = new byte[20];
         write32be(raw, 0, followings);

@@ -14,16 +14,12 @@ import com.tongji.recommendation.gorse.GorseItemInputFactory;
 import com.tongji.reconciliation.model.ReconciliationTargetType;
 import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskType;
-import com.tongji.relation.mapper.RelationMapper;
-import com.tongji.relation.mapper.RelationMapper.RelationRepairRow;
 import com.tongji.search.index.SearchIndexService;
 import com.tongji.storage.text.TextStorageService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ZSetOperations;
 
 import java.sql.Timestamp;
 import java.util.List;
@@ -48,12 +44,6 @@ class ReconcilerTest {
     private CommentMapper commentMapper;
     @Mock
     private CounterService counterService;
-    @Mock
-    private RelationMapper relationMapper;
-    @Mock
-    private StringRedisTemplate redis;
-    @Mock
-    private ZSetOperations<String, String> zSetOperations;
     @Mock
     private UserCounterService userCounterService;
 
@@ -202,26 +192,12 @@ class ReconcilerTest {
         verify(commentMapper).updateReplyCount(302L, 3);
         verify(counterService).overwriteCount("comment", "302", "comment", 3);
     }
-
     @Test
-    void followGraphReconcilerRebuildsFollowerRowsCachesAndCounters() {
+    void followGraphReconcilerRebuildsAllCounters() {
         ReconciliationTask task = task(ReconciliationTaskType.FOLLOW_GRAPH, ReconciliationTargetType.USER, 7L);
-        when(redis.opsForZSet()).thenReturn(zSetOperations);
-        when(relationMapper.listActiveFollowingRowsByUser(7L)).thenReturn(List.of(
-                new RelationRepairRow(1001L, 7L, 9L, Timestamp.from(java.time.Instant.parse("2026-06-18T10:15:30Z")))
-        ));
-        when(relationMapper.listActiveFollowerRowsBySourceUser(7L)).thenReturn(List.of(
-                new RelationRepairRow(1001L, 7L, 9L, Timestamp.from(java.time.Instant.parse("2026-06-18T10:15:30Z"))),
-                new RelationRepairRow(1003L, 7L, 10L, Timestamp.from(java.time.Instant.parse("2026-06-18T12:15:30Z")))
-        ));
-        when(relationMapper.listActiveFollowerRowsByUser(7L)).thenReturn(List.of(
-                new RelationRepairRow(1002L, 8L, 7L, Timestamp.from(java.time.Instant.parse("2026-06-18T11:15:30Z")))
-        ));
 
-        new FollowGraphReconciler(relationMapper, redis, userCounterService).reconcile(task);
+        new FollowGraphReconciler(userCounterService).reconcile(task);
 
-        verify(relationMapper).cancelFollower(10L, 7L);
-        verify(relationMapper).insertFollower(1001L, 9L, 7L, 1);
         verify(userCounterService).rebuildAllCounters(7L);
     }
 

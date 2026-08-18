@@ -24,6 +24,7 @@ class RelationControllerCounterTest {
         when(reader.getVerified(42L)).thenReturn(expected);
 
         RelationController controller = new RelationController(
+                mock(com.tongji.relation.command.RelationCommandService.class),
                 relationManager,
                 relationService,
                 jwtService,

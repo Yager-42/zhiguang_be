@@ -2,9 +2,9 @@
 
 | 字段 | 值 |
 |------|-----|
-| **contract_version** | `0.9.2` |
+| **contract_version** | `0.11.0` |
 | **status** | **active**（本文档首次建立；后续架构/契约变更必须同步修改本文并升版本） |
-| **updated** | 2026-08-15 |
+| **updated** | 2026-08-18 |
 | **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，446 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
 | **roadmap** | OpenSpec 变更与执行顺序见 [`openspec/changes/execution-order.md`](../../openspec/changes/execution-order.md)；本仓为单体演进、微服务拆分仅作约束（见该文件阶段 0） |
 | **out of scope for this doc** | 前端 `zhiguang_fe/`（独立工程）、`loadtest/` 压测方案细节、各业务请求/响应 JSON 逐字段表（以代码 DTO 为准） |
@@ -30,7 +30,7 @@
 | D4 | ID 生成 | 统一 `IdService.nextId(IdNamespace)`（`common/id/`）：**Snowflake** 为默认（41+5+5+12 位，EPOCH 2024-01-01，时钟回拨抛 `ClockBackwardException`），推广历史 command 与保证金分别使用 `PROMOTION_COMMAND`、`PROMOTION_ESCROW`；**Segment**（`leaf_alloc` 表双缓冲，50% 阈值预加载）仅用于 `reconciliation_task/admin_operation/audit_log`；命名空间见 `IdNamespace.java` | 各模块自造随机/自增 ID |
 | D5 | 异步一致性 | **outbox 表 + Canal CDC + Kafka `canal-outbox` 主题** 为跨模块事件总线（`outbox/`）：业务事务内写 outbox；`CanalKafkaBridge` 转发完整 outbox 行并等待该批全部 Kafka send 成功后 ack，解析/发送失败 rollback；**at-least-once + 消费端幂等** | 业务事务内直发 Kafka；未等待 broker 确认即推进 Canal 位点 |
 | D6 | 存储分工 | **MySQL**：长期事实/账务（用户、帖子、评论、发布尝试、outbox、钱包总余额、推广保证金授权与投影、对账、通知、关系）；**Redis**：推广窗口运行期间的竞价状态、顺序、排名、已授权保证金占用与 Stream 决策日志实时权威，以及计数 SDS/位图事实、缓存、分布式协调（singleflight/锁）；推广 Stream 在 MySQL checkpoint 推进后安全裁剪并保留最近 100000 条；**Kafka**：非推广域异步事件总线；**Cassandra**：长文本正文与关注流时间线；**Elasticsearch**：搜索；**MinIO**：对象。见 §5 | 将 Redis 余额占用扩展为可超出 MySQL 预授权总额的账务事实；未投影事件被裁剪；正文大字段进 MySQL |
-| D7 | 计数模型 | 实体计数（like/fav）三层：**位图分片事实层**（`bm:*`，32768 位/分片）+ **Kafka 事件聚合桶**（`counter-events` → `agg:v1:*`，每秒折叠 SDS）+ **SDS 固定结构**（`cnt:v1:*`，5×uint32 大端）；用户计数 `ucnt:{userId}` 同 SDS 布局（`counter/schema/*.java`） | 计数直接 INCR 单一计数器键 |
+| D7 | 计数模型 | 实体计数（like/fav）三层：**位图分片事实层**（`bm:*`，32768 位/分片）+ **Kafka 事件聚合桶**（`counter-events` → `agg:v1:*`，每秒折叠 SDS）+ **SDS 固定结构**（`cnt:v1:*`，5×uint32 大端）；用户计数 `ucnt:{userId}` 同 SDS 布局（`counter/schema/*.java`），**关注/粉丝段由关系事务提交后的进程内监听器增量维护**（`FollowCounterListener`，失败容忍交由读侧 300s 采样校验与 `follow_graph` 对账收敛，见 §7.4/§7.5） | 计数直接 INCR 单一计数器键 |
 | D8 | 发布语义 | **202 Accepted 只表示 attempt 被受理**：`POST /knowposts/{id}/publish` 恒 202 + `publishAttemptId`；`know_posts.status` 状态机 `draft→publishing→published / publish_failed / rejected / deleted`，全部守卫 UPDATE（`KnowPostMapper.xml`）；`publish_attempt` 独立状态机 + 5 分钟卡死恢复（`PublishAttemptService.java`） | 同步发布返回 200 表示已发布；无守卫状态流转 |
 | D9 | 钱包 | 三态余额 `available/held/escrowed` + **只追加流水** + `(owner_user_id, business_ref)` 幂等 + `wallet_business_ref` 全局 claim 串行化；托管六态状态机不变。推广竞价新增唯一写边界 `POST /api/v1/promotions/campaigns/{id}/escrow`：只在出价前增加 MySQL `held` 与 `promotion_bid_escrow.authorized_amount`，不得进入单条竞价决策路径 | 余额绝对值覆盖写；删改流水；在有序竞价消费者逐条写钱包 |
 | D10 | 推广竞价 | 窗口式 slot 竞价按**英式升价拍卖**结算（GSP 已废除）：窗口共享当前价台阶，接受出价必须 ≥ `min(currentPrice+increment, cap)`，最终赢家按终态 `currentPriceCents` 第一价格结算；cap-hit 原子进入 `AUCTION_SOLD`，反狙击接受可原子延长实际 endAt。**Elia 热路径**保持不变：保证金预授权提交后同步投影 Redis；每实例按窗口有界 flat combine，批量 Redis Lua 是唯一热裁决权威，每批最多接受一个最高有效候选；拒绝不推进版本、不写 Stream，Redis 故障不降级 MySQL。生产终态只接受 Redis Stream `AUCTION_SOLD` / `AUCTION_NO_BID`，由 `promotion.settlement` 深模块在窗口行锁下统一推导并写入第一价格结算、钱包效果、bid/escrow 状态、allocation 与窗口终态；不存在第二条直接关窗结算路径。 | 网关或 Java 判定竞价接受；逐请求 FIFO executor 或逐请求 Lua；固定 batching 等待；一批接受多个中间价；GSP 多槽排名/第二价格结算；使用应用时钟裁决终场；绕过 Redis terminal decision 直接结算 |
@@ -56,7 +56,7 @@
 ### 2.1 是什么
 
 - **知光（ZhiGuang）内容社区后端单体**：注册登录（验证码/密码）、资料、知文（图文帖子）发布与 Feed、评论、点赞/收藏计数、关注关系、搜索、通知、内容审核（LLM 可选）、钱包（三态余额+托管+内容奖励）、推广位竞价（含 bprime 异步决策链路）、推荐（Gorse 可选 + 关注流）、对账补偿。
-- **事件驱动的一致性**：跨模块状态同步（follower 镜像、ES 索引、Gorse 反馈、关注流扇出、通知、审核推进）全部经 `outbox → Canal → canal-outbox → 各消费组` 或独立事件主题（§6）。
+- **事件驱动的一致性**：跨模块状态同步（ES 索引、Gorse 反馈、关注流扇出、关注通知、审核推进）全部经 `outbox → Canal → canal-outbox → 各消费组` 或独立事件主题（§6）；**关注/取关命令经 `relation-command` 主题异步受理**（事实写由消费端事务完成，见 §7.5）；**计数与关注/粉丝列表例外**：计数由事务提交监听器增量维护、列表直查 MySQL，两者不走扇出总线（§7.5）。
 - **可观测的补偿体系**：对账模块（§7.12）以任务/扫描/修复器保证派生数据最终一致。
 
 ### 2.2 不是什么
@@ -105,7 +105,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `knowpost` | 知文草稿/发布（attempt 状态机）/Feed/详情/置顶/可见性/软删 | `KnowPostController` |
 | `comment` | 异步评论管道：pending→outbox→comment-write→落库+Cassandra 正文+feedback | `CommentController` |
 | `counter` | 实体计数（like/fav/comment）与用户计数（SDS） | `ActionController`/`CounterController` |
-| `relation` | 关注/取关（following 同步 + follower 事件最终一致）+ 关注列表 | `RelationController` |
+| `relation` | 关注/取关（`following` 为唯一关系事实）+ 关注/粉丝列表（直查 MySQL，无镜像） | `RelationController` |
 | `moderation` | 举报→LLM 审核→处置/通知（可关） | `ModerationReportController` |
 | `notification` | 评论/关注/点赞通知（点赞窗口聚合） | `NotificationController` |
 | `promotion` | 推广活动/竞价窗口/出价命令/结算/位分配/快照（含 `bprime` 异步链路） | `PromotionController` |
@@ -184,7 +184,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 事件 | `outbox` | 总线表：`aggregate_type/aggregate_id/type/payload(JSON)`；Canal 订阅目标 |
 | 评论 | `comments` / `pending_comments` | 正文**不在此表**（Cassandra）；`status` 0 活跃/1 软删；`uk(creator_id, client_request_id)` |
 | 评论 outbox | `comment_outbox` | **统一事件表**：原子承载 `COMMENT_WRITE_REQUESTED/COMMENT_CREATED/COMMENT_DELETED/COMMENT_MODERATED`；DDL 同时由 `db/schema.sql` 与 `CommentOutboxSchemaInitializer` 保持一致；`state/claim_token/claim_until/next_attempt_at` 构成有界批量 dispatcher 状态机 |
-| 关系 | `following` / `follower` | 双向镜像；`rel_status` 1 有效/0 取消；`uk(from,to)`/`uk(to,from)` |
+| 关系 | `following` | 唯一关系事实；`rel_status` 1 有效/0 取消；`uk(from,to)`；`idx_to_status_created(to,rel_status,created_at,from)` 承载粉丝计数/粉丝列表/fanout 查询 |
 | 通知 | `notifications` | `uk_notification_event_key` 幂等；聚合窗口列 |
 | 审核 | `moderation_reports` | `uk(reporter, target_type, target_id)` 去重；LLM/重试/处置列 |
 | 钱包 | `wallet_account` / `wallet_ledger` / `wallet_escrow` / `wallet_business_ref` | 三态余额 CHECK 非负；ledger `uk(owner, business_ref)` + `amount>0`；escrow `uk(business_ref)`；ref claim 表 PK=business_ref |
@@ -222,8 +222,6 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 计数 | `bm:index:{metric}:{etype}:{eid}` | 分片索引（启动 SCAN 回填） | `CounterBitmapShardIndexInitializer` |
 | 计数 | `agg:v1:{etype}:{eid}` / `agg:v1:dirty` | hash 聚合桶 + dirty set（每秒折叠） | `CounterAggregationConsumer` |
 | 计数 | `ucnt:{userId}` / `ucnt:chk:{userId}` | 用户 SDS / 采样锁 300s | `UserCounterKeys`/`UserCounterReader` |
-| 关系 | `uf:flws:{userId}` / `uf:fans:{userId}` | zset（score=时间戳）/ 2h | `RelationEventProcessor`/`RelationServiceImpl` |
-| 关系 | `dedup:rel:{type}:{from}:{to}:{id}` | SET NX 幂等 / 10m | `RelationEventProcessor` |
 | 关系 | `rl:follow:{fromUserId}` | hash 令牌桶（容量100，速率1/s）Lua / 60s | `RelationManagerImpl` |
 | 缓存 | `knowpost:detail:{id}:v1` | JSON 或 `"NULL"` 防穿透 / 60s±rand（热点 +20/60/120s）；miss 经 local singleflight `knowpost-detail`，flight key 含 viewer，缓存命中仍校验公开/本人 | `KnowPostServiceImpl` |
 | 缓存 | `feed:public:ids:{size}:{hourSlot}:{page}` | list 片段 / 60–89s（`frTtl=60+rand(0..29)`）；miss 经 distributed singleflight `knowpost-public-feed`，只共享不含用户 liked/faved 的基础页，result 3s、禁用 local replay | `KnowPostFeedServiceImpl` |
@@ -263,11 +261,13 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 | 主题 | 生产者 | 消费组 | 载荷要点 |
 |------|--------|--------|----------|
-| `canal-outbox` | `CanalKafkaBridge` | `relation-outbox-consumer`、`moderation-review-consumer`、`notification-follow-consumer`、`feed-timeline-consumer`、`recommendation-content-published-consumer`、`recommendation-user-profile-consumer`、`search-index-consumer` | 上节事件注册表 |
+| `canal-outbox` | `CanalKafkaBridge` | `moderation-review-consumer`、`notification-follow-consumer`、`feed-timeline-consumer`、`recommendation-content-published-consumer`、`recommendation-user-profile-consumer`、`search-index-consumer` | 上节事件注册表 |
 | `comment-write`（`comment.kafka.write-topic`，8 分区） | `CommentOutboxDispatcher` 从 `comment_outbox` 有界批量异步发送，key=`aggregateId`；成功/失败子集分别更新 | `comment-write-consumer`（初始并发 4；`@RetryableTopic` → `comment-write-dlt`） | `CommentOutboxEvent(eventId,eventType,commentId,postId,rootId,parentId,creatorId,clientRequestId,body,occurredAt)` |
 | `comment-events`（`comment.kafka.event-topic`） | `CommentOutboxDispatcher`，key=`aggregateId` | `comment-counter-effects`、`comment-reward-effects`、`comment-feedback-effects` 三个独立组 | `CommentOutboxEvent`，类型为 `COMMENT_CREATED/COMMENT_DELETED/COMMENT_MODERATED` |
 | `comment-feedback`（`comment.kafka.feedback-topic`） | `CommentFeedbackProducer`（best-effort）+ Controller 内联 | `notification-comment-consumer`、`recommendation-comment-feedback-consumer` | `CommentFeedbackEvent(...,action∈{comment,delete,like,unlike})` |
 | `counter-events`（`CounterTopics.EVENTS`） | `CounterEventProducer`（无 key 异步；序列化失败静默） | `counter-agg`（每秒折叠 SDS）、`counter-rebuild`（earliest 回放，`counter.rebuild.enabled` 门控）、`notification-like-consumer`、`recommendation-counter-feedback-consumer` | `CounterEvent(eventId,occurredAt,entityType,entityId,metric,idx,userId,delta)` |
+| `relation-command`（`FollowCommandTopics.COMMAND`，默认 16 分区） | `RelationCommandService`（令牌桶限流 → 同步投递 acks=all，key=`fromUserId` 保序） | `relation-follow-command-consumer`（并发 8（默认，≤分区数），手动 ack；DefaultErrorHandler 重试 10 次后进 `relation-command-dlt`） | `FollowCommandEvent(fromUserId,toUserId,follow)` |
+| `relation-command-dlt`（`FollowCommandTopics.DLT`） | `RelationFollowCommandConsumer` 重试耗尽 | —（人工补偿） | `FollowCommandEvent` |
 
 全局：`auto-offset-reset=earliest`、`enable-auto-commit=false`、`ack-mode=manual`、String 序列化、`admin.auto-create=true`（`application.yml`）。
 
@@ -288,7 +288,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 推广竞价 | 确定性 commandId + `requestHash`；Redis Lua 在窗口 state 仅保存当前赢家 `winnerCommandId/winnerRequestHash/winnerAck`。当前赢家同 hash 精确重放，冲突 hash 稳定拒绝；被超过的历史接受与所有拒绝按当前状态重新裁决，不保存历史 command record。接受与 Stream append 在同一批量 Lua 原子完成。 |
 | 推广保证金 | `promotion_bid_escrow uk(window,campaign)` + 授权目标金额 businessRef + Redis `authorizedAmount` 仅接受单调增加 |
 | 决策投影 | checkpoint 版本严格连续校验 + 同版本同 decisionId 幂等跳过 |
-| 关系事件 | `dedup:rel:*` SET NX（10m）+ follower 表 upsert |
+| 关系写/计数 | `uk(from,to)` + ON DUPLICATE 幂等；`FollowCommittedEvent` 仅 affected==1/取消生效时发布，AFTER_COMMIT 监听器增量维护 Redis 计数（失败容忍，读侧 300s 采样校验 + `follow_graph` 对账兜底） |
 | 通知 | `uk_notification_event_key` + 吞 DuplicateKey；点赞另有 `notif:like:event:*` 去重 |
 | 钱包 | `uk(owner,business_ref)` + 整组判等 + `wallet_business_ref` claim |
 | 事件失败兜底 | 消费异常 → 不 ack 重投；或建对账任务：`ES_INDEX`（search）、`FOLLOW_INBOX`（feed）、`GORSE_ITEM_UPSERT/GORSE_FEEDBACK`（recommendation）；Gorse 用户资料失败仅不 ack |
@@ -354,19 +354,19 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 2. 事件层：`CounterEventProducer` → `counter-events`（无 key）→ `CounterAggregationConsumer`（`HINCRBY aggKey` + dirty set，手动 ack）→ 每秒 `@Scheduled(fixedDelay=1000)` 折叠 SDS（INCR_FIELD_LUA 大端 uint32 下限 0 → DECR_FIELD → HLEN==0 才 DEL 桶）；
 3. 读取层：`cnt:v1:*` SDS（5×4B，idx：like=1,fav=2,comment=3）；缺失 → singleflight（stage `counter-sds`，flight key=`{etype}:{eid}:{metrics}`）从位图重建；限流时返回零值。
 
-**用户计数**（`UserCounterServiceImpl` / `UserCounterReaderImpl`）：`ucnt:{userId}` 同布局（段1 关注/段2 粉丝/段3 发文/段4 获赞/段5 获藏）；增量走 Lua 折叠；读取以不可变 `UserCounters` 暴露事实，`find` 只读取现有 SDS，`getVerified` 执行 300s 采样校验并在缺失、结构异常或不一致时通过 singleflight `user-counter` 全量重建（聚合作者全部知文 like/fav；`counter.rebuild.enabled` 时另有 Kafka earliest 回放消费者 `CounterRebuildConsumer`）。SDS 编解码、采样与重建协调属于 counter 模块实现，relation 不读取原始字节；“大V”阈值属于 relation/feed 消费策略。
+**用户计数**（`UserCounterServiceImpl` / `UserCounterReaderImpl`）：`ucnt:{userId}` 同布局（段1 关注/段2 粉丝/段3 发文/段4 获赞/段5 获藏）；**关注/粉丝段是 Redis 计数事实，由关系事务提交后的进程内监听器 `FollowCounterListener` 增量维护**（`incrementFollowings/incrementFollowers`，一次 Lua 原子 INCRBY 两字段），其余段仍走各自管道；读取以不可变 `UserCounters` 暴露事实，`find` 只读取现有 SDS，`getVerified` 执行 300s 采样校验并在缺失、结构异常或不一致时通过 singleflight `user-counter` 全量重建（聚合作者全部知文 like/fav；`counter.rebuild.enabled` 时另有 Kafka earliest 回放消费者 `CounterRebuildConsumer`）；**Redis 读异常时降级直查 `following` COUNT 返回**（posts/liked/faved 置 0，故障恢复自愈）。SDS 编解码、采样与重建协调属于 counter 模块实现，relation 不读取原始字节；“大V”阈值属于 relation/feed 消费策略。
 
 **关键类**：`service/impl/CounterServiceImpl.java`、`service/impl/UserCounterServiceImpl.java`、`service/impl/UserCounterReaderImpl.java`、`service/UserCounters.java`、`schema/CounterSchema.java`、`schema/CounterKeys.java`、`schema/BitmapShard.java`、`event/CounterAggregationConsumer.java`、`service/CounterBitmapShardIndexInitializer.java`（启动 SCAN `bm:*` 回填分片索引）。
 
 ### 7.5 relation
 
-**API**（`/api/v1/relation`）：`POST follow/unfollow`（`toUserId` → boolean）、`GET status`（`{following,followedBy,mutual}` 实时双查）、`GET following/followers`（offset+cursor 双分页 → `ProfileResponse` 列表）、`GET counter`（`{followings,followers,posts,likedPosts,favedPosts}` + `ucnt:chk` 采样 300s 校验 + singleflight `user-counter` 重建）。
+**API**（`/api/v1/relation`）：`POST follow/unfollow`（`toUserId` → boolean，**异步受理**：返回即投递成功，事实落库有 Kafka 毫秒级延迟窗口）、`GET status`（`{following,followedBy,mutual}` 实时双查，最终一致窗口内可能显示旧态）、`GET following/followers`（offset+cursor 双分页 → `ProfileResponse` 列表）、`GET counter`（`{followings,followers,posts,likedPosts,favedPosts}` + `ucnt:chk` 采样 300s 校验 + singleflight `user-counter` 重建）。
 
-**写路径**（`RelationManagerImpl` @Transactional）：幂等检查 → 令牌桶限流（`rl:follow:*` Lua，容量 100/1rps）→ 写 `following`（ON DUPLICATE rel_status=1）→ 回读主键（null 即回滚）→ guard `relation:outbox-publish` 内写 outbox `FollowCreated/FollowCanceled`（guard 降级回滚）——**following 与 outbox 同事务**。
+**受理路径**（`RelationCommandService`，请求线程）：令牌桶限流（`rl:follow:*` Lua，容量 100/1rps；**Redis 故障 fail-open 放行**）→ guard `relation:command-delivery` 内同步投递 `relation-command`（key=`fromUserId` 保序，acks=all + 3s 等待；投递失败返回 500，绝不假成功）；请求线程不碰 MySQL，事实判断全部下放消费端。
 
-**消费路径**（`CanalOutboxConsumer` group `relation-outbox-consumer`）：手动 ack + `relationEventExecutor` 并发处理（全成功才 ack）；`RelationEventProcessor`：`dedup:rel:*` SET NX 幂等（10m）→ 写 `follower` 镜像（id 复用 following 行 id）→ 维护 `uf:flws/uf:fans` ZSet（2h）→ `UserCounterService` 增减。取消时 `follower` 表 `cancelFollower` 无 rel_status 条件（与 `cancelFollowing` 不同）。
+**事实写**（`RelationFollowCommandConsumer` 消费线程 → `RelationManagerImpl` @Transactional）：幂等检查 → 写 `following`（ON DUPLICATE rel_status=1）→ 回读主键（null 即回滚）→ 事务内发布 `FollowCommittedEvent`（**仅 affected==1 的真实插入与取关生效时**，防止并发重复关注双计数）→ guard `relation:outbox-publish` 内写 outbox `FollowCreated/FollowCanceled`（guard 降级回滚）——**following 与 outbox 同事务**；失败不 ack，DefaultErrorHandler 重试 10 次后进 `relation-command-dlt` 人工补偿。
 
-**读路径**（`RelationServiceImpl`）：ZSet 优先 → DB 回填（fillZSet）；大 V（粉丝段≥500,000）Top500 Caffeine 缓存（10m/1000）。
+**计数维护**（进程内，无总线）：`FollowCounterListener` `@TransactionalEventListener(AFTER_COMMIT)` 同步跑在**消费线程**，一次 Lua 对 `ucnt:{from}` 关注段与 `ucnt:{to}` 粉丝段 INCRBY ±1；Redis 故障只记日志不重抛不重试，自愈交由读侧 300s 采样校验与 `follow_graph` 对账重建（每 5 分钟扫描）。
 
 ### 7.6 moderation
 
@@ -450,7 +450,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 ### 7.13 common 基础设施
 
 - **ID**：见 D4；Snowflake 位布局 `1+41+5+5+12`，EPOCH `1704067200000`；时钟回拨 ≤5ms 睡等重试、>5ms 抛 `ClockBackwardException`；segment 双缓冲 50% 预加载、等待超时 500ms。
-- **Resilience**：`ResilienceGuard.execute(resourceName, op, fallback, classifier)` → `SentinelResilienceGuard`（SphU.entry；Block/异常→fallback；classifier 真时 `Tracer.trace`）；**代码内无 FlowRule 下发**（规则外部供给）；实际资源名：`publish:content-published`、`publish:user-counter`、`relation:outbox-publish`；消费方 `requireCriticalGuardSuccess` 拒绝降级。
+- **Resilience**：`ResilienceGuard.execute(resourceName, op, fallback, classifier)` → `SentinelResilienceGuard`（SphU.entry；Block/异常→fallback；classifier 真时 `Tracer.trace`）；**代码内无 FlowRule 下发**（规则外部供给）；实际资源名：`publish:content-published`、`publish:user-counter`、`relation:outbox-publish`、`relation:command-delivery`；消费方 `requireCriticalGuardSuccess` 拒绝降级。
 - **SingleFlight**（`common/singleflight/`，`singleflight.enabled`）：唯一单飞实现；分布式协调 Redis Lua 6 脚本 + Stream 通知（非 pub/sub）+ 可选 L1 回放缓存 + 心跳（1s，takeover 10s），本地模式由有界生命周期的 `LocalSingleFlightService` 承担，不允许业务模块自建 `ConcurrentHashMap+synchronized`。失败分类 TIMEOUT/OVERLOAD/PROVIDER/VALIDATION/UNEXPECTED；`MAX_ATTEMPTS=3`；mode DISABLED/LOCAL/DISTRIBUTED/HYBRID。实际 stage：`counter-sds`、`user-counter`、`feed-author-head`、`moderation-llm`、`comment-page-head`、`knowpost-public-feed`（distributed，result 3s，L1 replay 关闭）、`knowpost-detail`（local，flight key 含 viewer）。
 - **缓存/热键**：Caffeine L1 三 Bean（feedPublic 15s/1000、feedMine 10s/1000、detail 30s/5000）；`HotKeyDetector` 分段滑动窗口（6×10s；≥50 LOW/≥200 MEDIUM/≥500 HIGH）→ TTL 延长 +20/60/120s。
 - **全局异常**：见 D3/§4.1。
@@ -495,6 +495,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `comment.kafka.*` / `comment.outbox.*` | write/event/feedback topic；write 初始并发 4；dispatcher batch 500、claim 30s、in-flight 2、clean batch 1000、retention 24h | @Value |
 | `wallet.*` | platform-user-id 0、registration-grant-amount 100 | `WalletProperties` |
 | `content-reward.*` | enabled true、post 10、comment 2 | `ContentRewardProperties` |
+| `relation.kafka.*` | command-group `relation-follow-command-consumer`、partitions 16、consumer-concurrency 8（主题名见 `FollowCommandTopics`） | @Value |
 | `promotion.slot-auction.*` | 槽位/保留价/60min 窗口/缓存 300s/批 50/30s | `PromotionProperties` |
 | `promotion.bprime.*` | enabled false、热状态 24h、命令幂等 10m/分钟桶、active-streams sweep 2s、读取批次 1000、保留事件 100000、结算回看 7d、WebSocket 出站线程与有界队列、公共增量 100–250ms 自适应/调度线程/窗口上限、英式拍卖规则 `auction-rules.*`（per-resource：incrementCents/capPriceCents/extendWindowSec/extendSec/maxExtensions） | `PromotionBPrimeProperties` |
 | `storage.*` | MinIO endpoint/bucket/公开域名 | `StorageProperties` |
