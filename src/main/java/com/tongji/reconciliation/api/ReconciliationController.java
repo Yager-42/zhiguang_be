@@ -5,6 +5,7 @@ import com.tongji.common.exception.ErrorCode;
 import com.tongji.reconciliation.model.ReconciliationTask;
 import com.tongji.reconciliation.model.ReconciliationTaskQuery;
 import com.tongji.reconciliation.service.ReconciliationService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,6 +17,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/reconciliation")
+@PreAuthorize("@reconciliationAuthorization.isOperator(authentication)")
 public class ReconciliationController {
 
     private final ReconciliationService reconciliationService;

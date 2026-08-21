@@ -116,6 +116,30 @@ class CommentControllerTest {
     }
 
     @Test
+    void submitWithMalformedRelationIdsReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/posts/{postId}/comments", POST_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"clientRequestId":"client-1","body":"hello","rootId":"temporary-uuid","parentId":"temporary-uuid"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value("请求参数格式错误"));
+
+        verify(commentService, never()).submit(eq(USER_ID), eq(POST_ID), any(CommentSubmitRequest.class));
+    }
+
+    @Test
+    void likeWithMalformedCommentIdReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/comments/{commentId}/like", "temporary-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value("请求参数格式错误"));
+
+        verify(counterService, never()).like(eq("comment"), eq("temporary-uuid"), eq(USER_ID));
+    }
+
+    @Test
     void statusReturnsServiceResult() throws Exception {
         when(commentService.status(COMMENT_ID))
                 .thenReturn(new CommentStatusResponse(String.valueOf(COMMENT_ID), "client-1", "succeeded"));

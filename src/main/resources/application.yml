@@ -138,6 +138,9 @@ wallet:
   platform-user-id: ${WALLET_PLATFORM_USER_ID:0}
   registration-grant-amount: ${WALLET_REGISTRATION_GRANT_AMOUNT:100}
 
+reconciliation:
+  operator-user-ids: ${RECONCILIATION_OPERATOR_USER_IDS:}
+
 content-reward:
   enabled: ${CONTENT_REWARD_ENABLED:true}
   post-amount: ${CONTENT_REWARD_POST_AMOUNT:10}

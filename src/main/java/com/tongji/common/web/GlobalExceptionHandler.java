@@ -6,10 +6,13 @@ import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
@@ -78,6 +81,34 @@ public class GlobalExceptionHandler {
         body.put("code", "NOT_FOUND");
         body.put("message", "请求资源不存在");
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    /**
+     * 请求路径或 JSON 字段类型错误时返回 HTTP 400。
+     *
+     * @param ex 参数格式异常
+     * @return 响应体：code/message
+     */
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, HttpMessageNotReadableException.class})
+    public ResponseEntity<Map<String, Object>> handleRequestFormat(Exception ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("code", "BAD_REQUEST");
+        body.put("message", "请求参数格式错误");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    /**
+     * 已认证用户无业务权限时返回 HTTP 403。
+     *
+     * @param ex Spring Security 权限拒绝异常
+     * @return 响应体：code/message
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("code", "FORBIDDEN");
+        body.put("message", "无权访问该业务能力");
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
     }
 
     /**
