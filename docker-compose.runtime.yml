@@ -1,0 +1,14 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+    image: zhiguang-app:${ZHIGUANG_RELEASE_TAG:-runtime}
+    environment:
+      FAVORITE_BACKFILL_ENABLED: ${FAVORITE_BACKFILL_ENABLED:-false}
+
+  web:
+    build:
+      context: ../zhiguang_fe
+      dockerfile: Dockerfile.runtime
+    image: zhiguang-web:${ZHIGUANG_RELEASE_TAG:-runtime}
