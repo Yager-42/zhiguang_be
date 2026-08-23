@@ -98,22 +98,6 @@ public class CounterServiceImpl implements CounterService {
     }
 
     /**
-     * 收藏：位图原子置位，并产出增量事件（delta=+1）。
-     */
-    @Override
-    public boolean fav(String entityType, String entityId, long userId) {
-        return toggle(entityType, entityId, userId, "fav", CounterSchema.IDX_FAV, true);
-    }
-
-    /**
-     * 取消收藏：位图原子清零，并产出增量事件（delta=-1）。
-     */
-    @Override
-    public boolean unfav(String entityType, String entityId, long userId) {
-        return toggle(entityType, entityId, userId, "fav", CounterSchema.IDX_FAV, false);
-    }
-
-    /**
      * 位图状态切换：仅在状态变化时返回成功，并产出增量事件。
      * @param etype 实体类型
      * @param eid 实体 ID
@@ -123,6 +107,25 @@ public class CounterServiceImpl implements CounterService {
      * @param add 是否置位（true=添加，false=移除）
      */
     private boolean toggle(String etype, String eid, long uid, String metric, int idx, boolean add) {
+        boolean ok = applyBitmapState(etype, eid, uid, metric, add);
+        if (ok) {
+            int delta = add ? 1 : -1;
+            CounterEvent event = CounterEvent.of(etype, eid, metric, idx, uid, delta);
+            eventProducer.publish(event);
+            eventPublisher.publishEvent(event);
+        }
+        return ok;
+    }
+
+    /**
+     * 将 MySQL 收藏事实投影到位图；重复消息由位图原子状态判断幂等吸收。
+     */
+    @Override
+    public boolean applyFavoriteState(String entityType, String entityId, long userId, boolean faved) {
+        return applyBitmapState(entityType, entityId, userId, "fav", faved);
+    }
+
+    private boolean applyBitmapState(String etype, String eid, long uid, String metric, boolean add) {
         // 固定分片定位：按用户ID映射到 chunk 与分片内 bit 偏移，避免单键膨胀与热点
         long chunk = BitmapShard.chunkOf(uid);
         // 分片内位偏移
@@ -132,16 +135,7 @@ public class CounterServiceImpl implements CounterService {
         List<String> keys = List.of(bmKey, shardIndexKey);
         List<String> args = List.of(String.valueOf(bit), add ? "add" : "remove", String.valueOf(chunk));
         Long changed = redis.execute(toggleScript, keys, args.toArray());
-        boolean ok = changed == 1L;
-        if (ok) {
-            int delta = add ? 1 : -1;
-            // 产出计数事件（异步聚合），分区按实体维度保证同实体事件顺序
-            CounterEvent event = CounterEvent.of(etype, eid, metric, idx, uid, delta);
-            eventProducer.publish(event);
-            // 本地事件：触发缓存失效/旁路更新等快速路径
-            eventPublisher.publishEvent(event);
-        }
-        return ok;
+        return changed != null && changed == 1L;
     }
 
     /**

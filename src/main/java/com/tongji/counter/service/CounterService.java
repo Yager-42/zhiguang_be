@@ -17,16 +17,6 @@ public interface CounterService {
     boolean unlike(String entityType, String entityId, long userId);
 
     /**
-     * 收藏：仅在之前未收藏时置位并 +1。
-     */
-    boolean fav(String entityType, String entityId, long userId);
-
-    /**
-     * 取消收藏：仅在之前已收藏时清位并 -1。
-     */
-    boolean unfav(String entityType, String entityId, long userId);
-
-    /**
      * 获取指定指标的计数。
      */
     Map<String, Long> getCounts(String entityType, String entityId, List<String> metrics);
@@ -76,4 +66,15 @@ public interface CounterService {
     boolean isLiked(String entityType, String entityId, long userId);
     Map<String, Boolean> isLikedBatch(String entityType, List<String> entityIds, long userId);
     boolean isFaved(String entityType, String entityId, long userId);
+
+    /**
+     * 将 MySQL 收藏事实幂等投影到 Redis Bitmap，不产生新的计数事件。
+     *
+     * @param entityType 实体类型
+     * @param entityId 实体 ID
+     * @param userId 用户 ID
+     * @param faved 收藏事实状态
+     * @return Bitmap 是否发生变化
+     */
+    boolean applyFavoriteState(String entityType, String entityId, long userId, boolean faved);
 }
