@@ -8,6 +8,8 @@ public record CommentItemResponse(
         String rootId,
         String parentId,
         String creatorId,
+        String creatorNickname,
+        String creatorAvatar,
         String body,
         Integer status,
         boolean deleted,

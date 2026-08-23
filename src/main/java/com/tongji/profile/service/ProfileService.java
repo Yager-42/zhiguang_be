@@ -4,6 +4,7 @@ import com.tongji.profile.api.dto.ProfilePatchRequest;
 import com.tongji.profile.api.dto.ProfileResponse;
 import com.tongji.user.domain.User;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -12,6 +13,8 @@ import java.util.Optional;
 public interface ProfileService {
 
     Optional<User> getById(long userId);
+
+    List<User> listByIds(List<Long> userIds);
 
     ProfileResponse updateProfile(long userId, ProfilePatchRequest req);
 

@@ -17,10 +17,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CommentThroughputContractTest {
 
     @Test
-    void cacheKeysSeparatePostRootAndPageSize() {
-        assertThat(CommentCacheKeys.postHead(7L, 20)).isEqualTo("comment:idx:post:7:head:20");
+    void cacheKeysSeparatePostRootPageSizeAndSortOrder() {
+        assertThat(CommentCacheKeys.postHead(7L, 20)).isEqualTo("comment:idx:post:7:head:20:sort:latest");
         assertThat(CommentCacheKeys.rootHead(7L, 20)).isEqualTo("comment:idx:root:7:head:20");
         assertThat(CommentCacheKeys.postHead(7L, 100)).isNotEqualTo(CommentCacheKeys.postHead(7L, 20));
+        assertThat(CommentCacheKeys.postHead(7L, 20, "earliest"))
+                .isNotEqualTo(CommentCacheKeys.postHead(7L, 20, "latest"));
     }
 
     @Test

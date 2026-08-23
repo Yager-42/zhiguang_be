@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 
 import com.tongji.user.domain.User;
@@ -47,6 +48,18 @@ public class ProfileServiceImpl implements ProfileService {
     @Transactional(readOnly = true)
     public Optional<User> getById(long userId) {
         return Optional.ofNullable(userMapper.findById(userId));
+    }
+
+    /**
+     * 批量读取公开资料，供评论等模块一次补齐展示身份，避免逐条查询。
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<User> listByIds(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        return userMapper.listByIds(userIds.stream().distinct().toList());
     }
 
     /**

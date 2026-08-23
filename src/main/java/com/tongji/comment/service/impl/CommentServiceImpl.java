@@ -17,13 +17,16 @@ import com.tongji.comment.model.Comment;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.comment.metrics.CommentMetrics;
 import com.tongji.comment.service.CommentService;
+import com.tongji.comment.service.CommentSortOrder;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
 import com.tongji.counter.service.CounterService;
 import com.tongji.counter.service.CommentPageCounterState;
+import com.tongji.profile.service.ProfileService;
 import com.tongji.storage.text.TextStorageService;
+import com.tongji.user.domain.User;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -36,6 +39,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -58,6 +63,7 @@ public class CommentServiceImpl implements CommentService {
     private final CommentMutationService mutationService;
     private final CommentEventWriter eventWriter;
     private final CommentMetrics metrics;
+    private final ProfileService profileService;
 
     public CommentServiceImpl(CommentMapper commentMapper,
                               PendingCommentMapper pendingCommentMapper,
@@ -68,7 +74,8 @@ public class CommentServiceImpl implements CommentService {
                               @Qualifier("commentReadExecutor") Executor commentReadExecutor,
                               CommentMutationService mutationService,
                               CommentEventWriter eventWriter,
-                              CommentMetrics metrics) {
+                              CommentMetrics metrics,
+                              ProfileService profileService) {
         this.commentMapper = commentMapper;
         this.pendingCommentMapper = pendingCommentMapper;
         this.textStorageService = textStorageService;
@@ -79,6 +86,7 @@ public class CommentServiceImpl implements CommentService {
         this.mutationService = mutationService;
         this.eventWriter = eventWriter;
         this.metrics = metrics;
+        this.profileService = profileService;
     }
 
     @Override
@@ -144,16 +152,24 @@ public class CommentServiceImpl implements CommentService {
     }
 
     @Override
-    public CommentPageResponse pageComments(long postId, LocalDateTime cursorCreateTime, Long cursorCommentId, int limit, long currentUserId) {
+    public CommentPageResponse pageComments(long postId,
+                                            LocalDateTime cursorCreateTime,
+                                            Long cursorCommentId,
+                                            int limit,
+                                            CommentSortOrder sortOrder,
+                                            long currentUserId) {
         requirePositiveLimit(limit);
+        boolean ascending = sortOrder == CommentSortOrder.EARLIEST;
         CommentBasePage basePage;
         if (cursorCreateTime == null && cursorCommentId == null) {
-            String key = CommentCacheKeys.postHead(postId, limit);
+            String key = CommentCacheKeys.postHead(postId, limit, sortOrder.wireValue());
             basePage = pageCacheService.getHead(key, CommentCacheKeys.postHeadIndex(postId),
-                    () -> loadBasePage(() -> commentMapper.listTopLevelByPost(postId, null, null, limit + 1), limit));
+                    () -> loadBasePage(
+                            () -> commentMapper.listTopLevelByPost(postId, null, null, ascending, limit + 1), limit));
         } else {
             basePage = loadBasePage(
-                    () -> commentMapper.listTopLevelByPost(postId, cursorCreateTime, cursorCommentId, limit + 1), limit);
+                    () -> commentMapper.listTopLevelByPost(
+                            postId, cursorCreateTime, cursorCommentId, ascending, limit + 1), limit);
         }
         return overlay(basePage, currentUserId);
     }
@@ -252,11 +268,21 @@ public class CommentServiceImpl implements CommentService {
     private CommentPageResponse overlay(CommentBasePage page, long currentUserId) {
         List<String> ids = page.items().stream().map(CommentBaseItem::commentId).toList();
         Map<String, CommentPageCounterState> states = getPageState(ids, currentUserId);
+        Map<String, User> creators = profileService.listByIds(page.items().stream()
+                        .map(CommentBaseItem::creatorId)
+                        .map(Long::valueOf)
+                        .distinct()
+                        .toList())
+                .stream()
+                .collect(Collectors.toMap(user -> String.valueOf(user.getId()), Function.identity()));
         List<CommentItemResponse> items = page.items().stream().map(item -> {
             CommentPageCounterState state = states.getOrDefault(item.commentId(),
                     new CommentPageCounterState(Map.of(), false));
+            User creator = creators.get(item.creatorId());
             return new CommentItemResponse(item.commentId(), item.postId(), item.rootId(), item.parentId(),
-                    item.creatorId(), item.deleted() ? DELETED_BODY : item.body(), item.status(), item.deleted(),
+                    item.creatorId(), creator == null ? null : creator.getNickname(),
+                    creator == null ? null : creator.getAvatar(),
+                    item.deleted() ? DELETED_BODY : item.body(), item.status(), item.deleted(),
                     clamp(state.counts().getOrDefault("like", (long) item.likeCount())),
                     clamp(state.counts().getOrDefault("comment", (long) item.replyCount())),
                     item.createTime(), item.updateTime(), currentUserId > 0 && state.liked());

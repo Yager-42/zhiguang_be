@@ -18,6 +18,7 @@ public interface CommentMapper {
     List<Comment> listTopLevelByPost(@Param("postId") Long postId,
                                       @Param("cursorCreateTime") LocalDateTime cursorCreateTime,
                                       @Param("cursorCommentId") Long cursorCommentId,
+                                      @Param("ascending") boolean ascending,
                                       @Param("limit") int limit);
 
     List<Comment> listRepliesByRoot(@Param("rootId") Long rootId,

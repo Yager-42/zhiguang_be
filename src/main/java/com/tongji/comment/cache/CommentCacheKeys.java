@@ -10,8 +10,18 @@ public final class CommentCacheKeys {
     private CommentCacheKeys() {
     }
 
+    /**
+     * 构造默认按最新排序的评论首页缓存键。
+     */
     public static String postHead(long postId, int limit) {
-        return head(POST, postId, limit);
+        return postHead(postId, limit, "latest");
+    }
+
+    /**
+     * 构造指定排序方式的评论首页缓存键。
+     */
+    public static String postHead(long postId, int limit, String sortOrder) {
+        return head(POST, postId, limit) + ":sort:" + sortOrder;
     }
 
     public static String rootHead(long rootId, int limit) {
