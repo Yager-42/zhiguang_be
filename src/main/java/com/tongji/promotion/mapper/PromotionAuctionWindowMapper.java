@@ -22,6 +22,14 @@ public interface PromotionAuctionWindowMapper {
 
     PromotionAuctionWindow findByIdForUpdate(@Param("id") long id);
 
+    /**
+     * 按窗口 ID 批量读取窗口状态。
+     *
+     * @param ids 已限制为单页上限内的窗口 ID，不允许为空
+     * @return 窗口列表，不返回 {@code null}
+     */
+    List<PromotionAuctionWindow> listByIds(@Param("ids") List<Long> ids);
+
     /** 当前处于 OPEN 且时间覆盖 now 的窗口（收单窗口）。 */
     PromotionAuctionWindow findOpenWindow(@Param("resourceType") PromotionResourceType resourceType,
                                           @Param("now") Instant now);

@@ -39,19 +39,24 @@ public class PromotionSnapshotService {
             return new PromotionAuctionSnapshot(windowIdStr, status, allocationRanking(auctionWindowId),
                     Instant.now(), hotSnapshot.decisionVersion(), windowEndAt,
                     hotSnapshot.currentPriceCents(), hotSnapshot.winnerCampaignId(),
-                    hotSnapshot.bidCount(), hotSnapshot.rules());
+                    hotSnapshot.bidCount(), hotSnapshot.rules(), window.getWindowStartAt(),
+                    window.getResourceType() != null ? window.getResourceType().placement() : null);
         }
         List<PromotionRankingItem> hotRanking = hotSnapshot.ranking();
         if (!hotRanking.isEmpty()) {
             return new PromotionAuctionSnapshot(windowIdStr, status, hotRanking, Instant.now(),
                     hotSnapshot.decisionVersion(), windowEndAt,
                     hotSnapshot.currentPriceCents(), hotSnapshot.winnerCampaignId(),
-                    hotSnapshot.bidCount(), hotSnapshot.rules());
+                    hotSnapshot.bidCount(), hotSnapshot.rules(),
+                    window != null ? window.getWindowStartAt() : null,
+                    window != null && window.getResourceType() != null ? window.getResourceType().placement() : null);
         }
         return new PromotionAuctionSnapshot(windowIdStr, status, List.of(), Instant.now(),
                 hotSnapshot.decisionVersion(), windowEndAt,
                 hotSnapshot.currentPriceCents(), hotSnapshot.winnerCampaignId(),
-                hotSnapshot.bidCount(), hotSnapshot.rules());
+                hotSnapshot.bidCount(), hotSnapshot.rules(),
+                window != null ? window.getWindowStartAt() : null,
+                window != null && window.getResourceType() != null ? window.getResourceType().placement() : null);
     }
 
     private List<PromotionRankingItem> allocationRanking(long auctionWindowId) {

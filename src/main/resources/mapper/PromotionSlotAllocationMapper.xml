@@ -35,14 +35,27 @@
     </select>
 
     <select id="listByAuctionWindowId" resultMap="PromotionSlotAllocationResultMap">
-        SELECT *
+        SELECT id, auction_window_id, resource_type, slot_index, campaign_id, post_id, bidder_user_id,
+               clearing_price, allocation_start_at, allocation_end_at, created_at
         FROM promotion_slot_allocation
         WHERE auction_window_id = #{auctionWindowId}
         ORDER BY slot_index ASC
     </select>
 
+    <select id="listByCampaignIds" resultMap="PromotionSlotAllocationResultMap">
+        SELECT id, auction_window_id, resource_type, slot_index, campaign_id, post_id, bidder_user_id,
+               clearing_price, allocation_start_at, allocation_end_at, created_at
+        FROM promotion_slot_allocation
+        WHERE campaign_id IN
+        <foreach collection="campaignIds" item="campaignId" open="(" separator="," close=")">
+            #{campaignId}
+        </foreach>
+        ORDER BY allocation_start_at DESC, id DESC
+    </select>
+
     <select id="listActive" resultMap="PromotionSlotAllocationResultMap">
-        SELECT *
+        SELECT id, auction_window_id, resource_type, slot_index, campaign_id, post_id, bidder_user_id,
+               clearing_price, allocation_start_at, allocation_end_at, created_at
         FROM promotion_slot_allocation
         WHERE resource_type = #{resourceType}
           AND allocation_start_at &lt;= #{now}

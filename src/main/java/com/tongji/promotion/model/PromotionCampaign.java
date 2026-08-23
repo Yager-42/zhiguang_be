@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 /**
- * 推广活动：创作者为某帖子在某资源位发起的投放语义，承载资源类型与投放时间窗。
+ * 推广参赛记录：创作者以某篇知文报名系统生成的竞价场次。
  */
 @Data
 @Builder

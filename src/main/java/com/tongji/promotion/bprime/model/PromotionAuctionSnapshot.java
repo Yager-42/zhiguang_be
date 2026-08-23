@@ -18,11 +18,14 @@ public record PromotionAuctionSnapshot(
         long currentPriceCents,
         String winnerCampaignId,
         long bidCount,
-        PromotionAuctionHotSnapshot.AuctionRules rules
+        PromotionAuctionHotSnapshot.AuctionRules rules,
+        Instant windowStartAt,
+        String resourceType
 ) {
     public PromotionAuctionSnapshot(String auctionWindowId, String status, List<PromotionRankingItem> ranking,
                                     Instant serverTime, long decisionVersion) {
         this(auctionWindowId, status, ranking, serverTime, decisionVersion, null,
-                0L, "", 0L, new PromotionAuctionHotSnapshot.AuctionRules(0L, null, 0L, 0, 0L));
+                0L, "", 0L, new PromotionAuctionHotSnapshot.AuctionRules(0L, null, 0L, 0, 0L),
+                null, null);
     }
 }
