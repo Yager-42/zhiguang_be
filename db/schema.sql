@@ -372,7 +372,7 @@ CREATE TABLE IF NOT EXISTS wallet_business_ref (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===== 推广位竞价（slot auction promotions）=====
--- 推广活动：创作者为某帖子在某资源位发起的投放语义，承载资源类型与投放时间窗。
+-- 推广参赛记录：系统自动创建竞价场次，创作者以某篇知文报名，记录胜出后的资源位投放时段。
 CREATE TABLE IF NOT EXISTS promotion_campaign (
     id BIGINT UNSIGNED NOT NULL,
     creator_user_id BIGINT UNSIGNED NOT NULL,
@@ -384,7 +384,9 @@ CREATE TABLE IF NOT EXISTS promotion_campaign (
     created_at DATETIME(3) NOT NULL,
     updated_at DATETIME(3) NOT NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uk_promotion_campaign_participation (creator_user_id, post_id, resource_type, start_at, end_at),
     KEY idx_promotion_campaign_creator_status (creator_user_id, status),
+    KEY idx_promotion_campaign_creator_created (creator_user_id, created_at DESC, id DESC),
     KEY idx_promotion_campaign_post (post_id),
     KEY idx_promotion_campaign_resource_window (resource_type, start_at, end_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -422,6 +424,7 @@ CREATE TABLE IF NOT EXISTS promotion_bid_escrow (
     PRIMARY KEY (id),
     UNIQUE KEY uk_promotion_escrow_window_campaign (auction_window_id, campaign_id),
     KEY idx_promotion_escrow_window_status (auction_window_id, status, campaign_id),
+    KEY idx_promotion_escrow_campaign_created (campaign_id, created_at),
     KEY idx_promotion_escrow_bidder_status (bidder_user_id, status, expires_at),
     CONSTRAINT chk_promotion_escrow_amount CHECK (
         authorized_amount > 0 AND current_hold >= 0 AND current_hold <= authorized_amount
@@ -476,5 +479,6 @@ CREATE TABLE IF NOT EXISTS promotion_slot_allocation (
     created_at DATETIME(3) NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uk_promotion_slot_window_index (auction_window_id, slot_index),
+    KEY idx_promotion_slot_campaign_start (campaign_id, allocation_start_at),
     KEY idx_promotion_slot_resource_time (resource_type, allocation_start_at, allocation_end_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

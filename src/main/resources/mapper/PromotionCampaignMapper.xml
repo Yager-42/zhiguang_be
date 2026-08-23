@@ -24,6 +24,15 @@
         )
     </insert>
 
+    <insert id="insertParticipation" parameterType="com.tongji.promotion.model.PromotionCampaign">
+        INSERT INTO promotion_campaign (
+            id, creator_user_id, post_id, resource_type, status, start_at, end_at, created_at, updated_at
+        ) VALUES (
+            #{id}, #{creatorUserId}, #{postId}, #{resourceType}, #{status}, #{startAt}, #{endAt}, #{createdAt}, #{updatedAt}
+        )
+        ON DUPLICATE KEY UPDATE id = promotion_campaign.id
+    </insert>
+
     <select id="findById" parameterType="long" resultMap="PromotionCampaignResultMap">
         SELECT id, creator_user_id, post_id, resource_type, status, start_at, end_at, created_at, updated_at
         FROM promotion_campaign
@@ -37,5 +46,24 @@
         WHERE id = #{id}
         LIMIT 1
         FOR UPDATE
+    </select>
+
+    <select id="findExactParticipation" resultMap="PromotionCampaignResultMap">
+        SELECT id, creator_user_id, post_id, resource_type, status, start_at, end_at, created_at, updated_at
+        FROM promotion_campaign
+        WHERE creator_user_id = #{creatorUserId}
+          AND post_id = #{postId}
+          AND resource_type = #{resourceType}
+          AND start_at = #{startAt}
+          AND end_at = #{endAt}
+        LIMIT 1
+    </select>
+
+    <select id="listByCreatorUserId" resultMap="PromotionCampaignResultMap">
+        SELECT id, creator_user_id, post_id, resource_type, status, start_at, end_at, created_at, updated_at
+        FROM promotion_campaign
+        WHERE creator_user_id = #{creatorUserId}
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
     </select>
 </mapper>

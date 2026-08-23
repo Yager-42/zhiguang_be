@@ -69,6 +69,19 @@ class PromotionAuctionWindowServiceTest {
         verify(windowMapper).insert(any(PromotionAuctionWindow.class));
     }
 
+    @Test
+    void getCurrentOpenWindowReturnsExistingWindowWithoutCreating() {
+        Instant now = Instant.parse("2026-06-20T10:05:00Z");
+        PromotionAuctionWindow current = window(301L, PromotionResourceType.FEED_TOP_SLOT,
+                "2026-06-20T10:00:00Z", "2026-06-20T11:00:00Z");
+        when(windowMapper.findOpenWindow(PromotionResourceType.FEED_TOP_SLOT, now)).thenReturn(current);
+
+        PromotionAuctionWindow result = service.getCurrentOpenWindow(PromotionResourceType.FEED_TOP_SLOT);
+
+        assertThat(result).isSameAs(current);
+        verify(windowMapper, org.mockito.Mockito.never()).insert(any(PromotionAuctionWindow.class));
+    }
+
     private PromotionAuctionWindow window(long id, PromotionResourceType type, String start, String end) {
         return PromotionAuctionWindow.builder()
                 .id(id)

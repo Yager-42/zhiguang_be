@@ -20,6 +20,14 @@ public interface PromotionSlotAllocationMapper {
 
     List<PromotionSlotAllocation> listByAuctionWindowId(@Param("auctionWindowId") long auctionWindowId);
 
+    /**
+     * 批量读取参赛记录已生成的推荐位分配。
+     *
+     * @param campaignIds 已限制为单页上限内的参赛记录 ID，不允许为空
+     * @return 每个胜出参赛记录的实际分配，按开始时间倒序
+     */
+    List<PromotionSlotAllocation> listByCampaignIds(@Param("campaignIds") List<Long> campaignIds);
+
     /** 当前时间覆盖 [allocation_start_at, allocation_end_at) 的有效占位，按位号升序。 */
     List<PromotionSlotAllocation> listActive(@Param("resourceType") PromotionResourceType resourceType,
                                              @Param("now") Instant now);

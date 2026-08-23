@@ -2,6 +2,8 @@ package com.tongji.promotion.service;
 
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.common.exception.BusinessException;
+import com.tongji.common.exception.ErrorCode;
 import com.tongji.promotion.config.PromotionProperties;
 import com.tongji.promotion.bprime.service.PromotionAuctionWindowCreatedEvent;
 import com.tongji.promotion.mapper.PromotionAuctionWindowMapper;
@@ -71,6 +73,20 @@ public class PromotionAuctionWindowService {
         PromotionAuctionWindow created = createWindow(resourceType, alignWindowStart(now));
         ensureNextWindow(resourceType, created.getWindowEndAt());
         return created;
+    }
+
+    /**
+     * 查询当前正在收单的竞价窗口，不创建新窗口。
+     *
+     * @throws BusinessException 当前没有可用窗口时抛出
+     */
+    @Transactional(readOnly = true)
+    public PromotionAuctionWindow getCurrentOpenWindow(PromotionResourceType resourceType) {
+        PromotionAuctionWindow current = windowMapper.findOpenWindow(resourceType, clock.instant());
+        if (current == null) {
+            throw new BusinessException(ErrorCode.PROMOTION_BID_WINDOW_CLOSED);
+        }
+        return current;
     }
 
     private void ensureNextWindow(PromotionResourceType resourceType, Instant currentEndAt) {

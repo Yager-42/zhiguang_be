@@ -47,6 +47,15 @@
         FOR UPDATE
     </select>
 
+    <select id="listByIds" resultMap="PromotionAuctionWindowResultMap">
+        SELECT <include refid="WindowColumns"/>
+        FROM promotion_auction_window
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
     <select id="findOpenWindow" resultMap="PromotionAuctionWindowResultMap">
         SELECT <include refid="WindowColumns"/>
         FROM promotion_auction_window

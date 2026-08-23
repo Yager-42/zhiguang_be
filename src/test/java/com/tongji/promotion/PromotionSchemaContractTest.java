@@ -33,6 +33,7 @@ class PromotionSchemaContractTest {
         assertThat(checkpointMapper).contains("last_decision_version = VALUES(last_decision_version)");
         assertThat(checkpointMapper).contains("last_stream_id = VALUES(last_stream_id)");
         assertThat(schema).contains("CREATE TABLE IF NOT EXISTS promotion_slot_allocation");
+        assertThat(schema).contains("uk_promotion_campaign_participation");
         assertThat(schema).contains("uk_promotion_window_resource_time");
         assertThat(schema).contains("uk_promotion_bid_command");
         assertThat(schema).contains("idx_promotion_bid_window_status_amount");
