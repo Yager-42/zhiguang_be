@@ -10,6 +10,7 @@ import com.tongji.comment.api.dto.CommentSubmitResponse;
 import com.tongji.comment.event.CommentFeedbackEvent;
 import com.tongji.comment.event.CommentFeedbackProducer;
 import com.tongji.comment.service.CommentService;
+import com.tongji.comment.service.CommentSortOrder;
 import com.tongji.common.web.GlobalExceptionHandler;
 import com.tongji.counter.service.CounterService;
 import org.junit.jupiter.api.BeforeEach;
@@ -157,29 +158,38 @@ class CommentControllerTest {
     void topLevelPageReturnsServiceResult() throws Exception {
         LocalDateTime createTime = LocalDateTime.of(2026, 6, 17, 9, 30);
         CommentPageResponse response = new CommentPageResponse(
-                List.of(new CommentItemResponse(String.valueOf(COMMENT_ID), String.valueOf(POST_ID), null, null, String.valueOf(USER_ID), "hello", 0, false, 2, 1, createTime, createTime, false)),
+                List.of(new CommentItemResponse(String.valueOf(COMMENT_ID), String.valueOf(POST_ID), null, null,
+                        String.valueOf(USER_ID), "评论作者", "/avatar/comment-author.png", "hello", 0, false,
+                        2, 1, createTime, createTime, false)),
                 createTime,
                 String.valueOf(COMMENT_ID),
                 true
         );
-        when(commentService.pageComments(POST_ID, createTime, COMMENT_ID, 20, USER_ID)).thenReturn(response);
+        when(commentService.pageComments(
+                POST_ID, createTime, COMMENT_ID, 20, CommentSortOrder.EARLIEST, USER_ID)).thenReturn(response);
 
         mockMvc.perform(get("/api/v1/posts/{postId}/comments", POST_ID)
                         .queryParam("cursorCreateTime", createTime.toString())
                         .queryParam("cursorCommentId", String.valueOf(COMMENT_ID))
-                        .queryParam("limit", "20"))
+                        .queryParam("limit", "20")
+                        .queryParam("sort", "earliest"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].commentId").value(COMMENT_ID))
+                .andExpect(jsonPath("$.items[0].creatorNickname").value("评论作者"))
+                .andExpect(jsonPath("$.items[0].creatorAvatar").value("/avatar/comment-author.png"))
                 .andExpect(jsonPath("$.items[0].body").value("hello"))
                 .andExpect(jsonPath("$.hasMore").value(true));
 
-        verify(commentService).pageComments(POST_ID, createTime, COMMENT_ID, 20, USER_ID);
+        verify(commentService).pageComments(
+                POST_ID, createTime, COMMENT_ID, 20, CommentSortOrder.EARLIEST, USER_ID);
     }
 
     @Test
     void repliesPageReturnsServiceResult() throws Exception {
         CommentPageResponse response = new CommentPageResponse(
-                List.of(new CommentItemResponse(String.valueOf(REPLY_ID), String.valueOf(POST_ID), String.valueOf(COMMENT_ID), String.valueOf(COMMENT_ID), String.valueOf(USER_ID), "reply", 0, false, 0, 0, null, null, false)),
+                List.of(new CommentItemResponse(String.valueOf(REPLY_ID), String.valueOf(POST_ID),
+                        String.valueOf(COMMENT_ID), String.valueOf(COMMENT_ID), String.valueOf(USER_ID),
+                        "回复作者", "/avatar/reply-author.png", "reply", 0, false, 0, 0, null, null, false)),
                 null,
                 null,
                 false
@@ -191,6 +201,8 @@ class CommentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].commentId").value(REPLY_ID))
                 .andExpect(jsonPath("$.items[0].rootId").value(COMMENT_ID))
+                .andExpect(jsonPath("$.items[0].creatorNickname").value("回复作者"))
+                .andExpect(jsonPath("$.items[0].creatorAvatar").value("/avatar/reply-author.png"))
                 .andExpect(jsonPath("$.hasMore").value(false));
 
         verify(commentService).pageReplies(COMMENT_ID, null, null, 10);

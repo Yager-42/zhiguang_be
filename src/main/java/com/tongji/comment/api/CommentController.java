@@ -8,6 +8,7 @@ import com.tongji.comment.api.dto.CommentSubmitResponse;
 import com.tongji.comment.event.CommentFeedbackEvent;
 import com.tongji.comment.event.CommentFeedbackProducer;
 import com.tongji.comment.service.CommentService;
+import com.tongji.comment.service.CommentSortOrder;
 import com.tongji.counter.service.CounterService;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -65,9 +66,11 @@ public class CommentController {
                                         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime cursorCreateTime,
                                         @RequestParam(value = "cursorCommentId", required = false) Long cursorCommentId,
                                         @RequestParam(value = "limit", defaultValue = "20") int limit,
+                                        @RequestParam(value = "sort", defaultValue = "latest") String sort,
                                         @AuthenticationPrincipal Jwt jwt) {
         long userId = jwtService.extractUserId(jwt);
-        return commentService.pageComments(postId, cursorCreateTime, cursorCommentId, limit, userId);
+        return commentService.pageComments(postId, cursorCreateTime, cursorCommentId, limit,
+                CommentSortOrder.fromWireValue(sort), userId);
     }
 
     @GetMapping("/comments/{commentId}/replies")

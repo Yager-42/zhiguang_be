@@ -49,10 +49,21 @@
         WHERE post_id = #{postId}
           AND parent_id = 0
         <if test="cursorCreateTime != null and cursorCommentId != null">
-          AND (create_time &lt; #{cursorCreateTime}
-               OR (create_time = #{cursorCreateTime} AND comment_id &lt; #{cursorCommentId}))
+          <choose>
+            <when test="ascending">
+              AND (create_time &gt; #{cursorCreateTime}
+                   OR (create_time = #{cursorCreateTime} AND comment_id &gt; #{cursorCommentId}))
+            </when>
+            <otherwise>
+              AND (create_time &lt; #{cursorCreateTime}
+                   OR (create_time = #{cursorCreateTime} AND comment_id &lt; #{cursorCommentId}))
+            </otherwise>
+          </choose>
         </if>
-        ORDER BY create_time DESC, comment_id DESC
+        <choose>
+          <when test="ascending">ORDER BY create_time ASC, comment_id ASC</when>
+          <otherwise>ORDER BY create_time DESC, comment_id DESC</otherwise>
+        </choose>
         LIMIT #{limit}
     </select>
 

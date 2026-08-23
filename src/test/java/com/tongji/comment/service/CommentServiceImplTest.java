@@ -13,6 +13,7 @@ import com.tongji.comment.service.impl.CommentServiceImpl;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
 import com.tongji.counter.service.CounterService;
+import com.tongji.profile.service.ProfileService;
 import com.tongji.storage.text.TextStorageService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -40,7 +41,7 @@ class CommentServiceImplTest {
         when(idService.nextId(IdNamespace.COMMENT)).thenReturn(101L);
         CommentServiceImpl service = new CommentServiceImpl(commentMapper, pendingMapper, textStorageService,
                 idService, counterService, mock(CommentPageCacheService.class), Runnable::run,
-                mock(CommentMutationService.class), eventWriter, mock(CommentMetrics.class));
+                mock(CommentMutationService.class), eventWriter, mock(CommentMetrics.class), mock(ProfileService.class));
 
         var response = service.submit(7L, 9L,
                 new CommentSubmitRequest(9L, null, null, "client-1", "hello"));
