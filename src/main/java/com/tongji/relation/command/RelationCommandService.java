@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.common.resilience.GuardResult;
 import com.tongji.common.resilience.ResilienceGuard;
 import com.tongji.relation.manager.RelationWriteResult;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -51,16 +52,19 @@ public class RelationCommandService {
     private final ResilienceGuard resilienceGuard;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry meterRegistry;
     private final DefaultRedisScript<Long> tokenScript;
 
     public RelationCommandService(StringRedisTemplate redisTemplate,
                                   ResilienceGuard resilienceGuard,
                                   KafkaTemplate<String, String> kafkaTemplate,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  MeterRegistry meterRegistry) {
         this.redisTemplate = redisTemplate;
         this.resilienceGuard = resilienceGuard;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+        this.meterRegistry = meterRegistry;
         this.tokenScript = new DefaultRedisScript<>();
         this.tokenScript.setResultType(Long.class);
         this.tokenScript.setScriptText(TOKEN_BUCKET_LUA);
@@ -88,6 +92,7 @@ public class RelationCommandService {
     }
 
     private boolean rateLimit(long fromUserId) {
+        long startedAt = System.nanoTime();
         try {
             Long allowed = redisTemplate.execute(
                     tokenScript, List.of("rl:follow:" + fromUserId), "100", "1");
@@ -96,6 +101,8 @@ public class RelationCommandService {
             // 限流依赖 Redis 故障时 fail-open：关注写不可因限流系统故障而阻塞
             log.warn("follow rate-limit unavailable, fail-open for userId={}", fromUserId, ex);
             return true;
+        } finally {
+            recordStageDuration("redis-rate-limit", startedAt);
         }
     }
 
@@ -106,20 +113,30 @@ public class RelationCommandService {
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("cannot encode follow command", ex);
         }
-        GuardResult<Void> result = resilienceGuard.execute(
-                "relation:command-delivery",
-                () -> {
-                    // 10s 等待窗口覆盖单 broker 瞬时确认毛刺;超出说明 broker 真故障,走 fail-closed 500
-                    kafkaTemplate.send(FollowCommandTopics.COMMAND, String.valueOf(fromUserId), payload)
-                            .get(10, TimeUnit.SECONDS);
-                    return null;
-                },
-                () -> null,
-                this::isSystemFailure
-        );
-        if (result.fallbackApplied()) {
-            throw new IllegalStateException("relation command delivery degraded");
+        long startedAt = System.nanoTime();
+        try {
+            GuardResult<Void> result = resilienceGuard.execute(
+                    "relation:command-delivery",
+                    () -> {
+                        // 等待 broker 确认后才报告受理成功，避免返回成功但命令实际丢失。
+                        kafkaTemplate.send(FollowCommandTopics.COMMAND, String.valueOf(fromUserId), payload)
+                                .get(10, TimeUnit.SECONDS);
+                        return null;
+                    },
+                    () -> null,
+                    this::isSystemFailure
+            );
+            if (result.fallbackApplied()) {
+                throw new IllegalStateException("relation command delivery degraded");
+            }
+        } finally {
+            recordStageDuration("kafka-ack", startedAt);
         }
+    }
+
+    private void recordStageDuration(String stage, long startedAt) {
+        meterRegistry.timer("relation.command.stage", "stage", stage)
+                .record(System.nanoTime() - startedAt, TimeUnit.NANOSECONDS);
     }
 
     private boolean isSystemFailure(Throwable t) {

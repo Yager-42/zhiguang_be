@@ -47,6 +47,18 @@ class RelationFollowCommandConsumerTest {
     }
 
     @Test
+    void warmupEventOnlyAcksWithoutWritingRelation() throws Exception {
+        consumer.onMessage(
+                "{\"fromUserId\":0,\"toUserId\":0,\"follow\":false,\"warmup\":true}",
+                acknowledgment
+        );
+
+        verify(relationManager, never()).follow(0L, 0L);
+        verify(relationManager, never()).unfollow(0L, 0L);
+        verify(acknowledgment).acknowledge();
+    }
+
+    @Test
     void managerFailureSkipsAckAndRethrows() {
         doThrow(new RuntimeException("db down")).when(relationManager).follow(101L, 202L);
 

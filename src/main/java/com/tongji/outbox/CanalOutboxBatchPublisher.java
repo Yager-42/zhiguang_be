@@ -58,8 +58,27 @@ public class CanalOutboxBatchPublisher {
             envelope.put("type", eventType.name());
             envelope.set("data", data);
 
-            kafka.send(OutboxTopics.CANAL_OUTBOX, objectMapper.writeValueAsString(envelope))
-                    .get(sendTimeoutMs, TimeUnit.MILLISECONDS);
+            String payload = objectMapper.writeValueAsString(envelope);
+            String partitionKey = partitionKey(data);
+            if (partitionKey == null) {
+                kafka.send(OutboxTopics.CANAL_OUTBOX, payload).get(sendTimeoutMs, TimeUnit.MILLISECONDS);
+            } else {
+                kafka.send(OutboxTopics.CANAL_OUTBOX, partitionKey, payload)
+                        .get(sendTimeoutMs, TimeUnit.MILLISECONDS);
+            }
         }
+    }
+
+    private String partitionKey(ArrayNode data) {
+        if (data.size() != 1) {
+            return null;
+        }
+        ObjectNode row = (ObjectNode) data.get(0);
+        String aggregateType = row.path("aggregate_type").asText("");
+        String aggregateId = row.path("aggregate_id").asText("");
+        if (aggregateType.isBlank() || aggregateId.isBlank()) {
+            return null;
+        }
+        return aggregateType + ":" + aggregateId;
     }
 }
