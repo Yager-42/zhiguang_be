@@ -92,6 +92,39 @@ public class GorseClient {
     }
 
     /**
+     * 获取配置的非个性化热度榜，保留 Gorse 返回顺序。
+     *
+     * @param offset 从零开始的榜单偏移量，不允许为负数
+     * @param count 返回条数，必须为正数
+     * @return 热度榜知文 ID；Gorse 返回空响应时返回空集合
+     */
+    public List<String> trending(int offset, int count) {
+        if (offset < 0 || count <= 0) {
+            throw new IllegalArgumentException("offset must be non-negative and count must be positive");
+        }
+        String url = UriComponentsBuilder.fromUriString(properties.getEndpoint())
+                .pathSegment("api", "non-personalized", properties.getNonPersonalizedName())
+                .queryParam("offset", offset)
+                .queryParam("n", count)
+                .build()
+                .encode()
+                .toUriString();
+        GorseScoredItem[] response = restTemplate.exchange(
+                url,
+                HttpMethod.GET,
+                new HttpEntity<>(headers()),
+                GorseScoredItem[].class
+        ).getBody();
+        if (response == null || response.length == 0) {
+            return List.of();
+        }
+        return Arrays.stream(response)
+                .map(GorseScoredItem::id)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    /**
      * 插入或更新 Gorse 知文物料，标签用于无模型训练的相似度计算。
      */
     public void upsertItem(GorseItemInput item) {

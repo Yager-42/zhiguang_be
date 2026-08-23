@@ -16,6 +16,7 @@ import com.tongji.knowpost.service.KnowPostService;
 import com.tongji.recommendation.HomeFeedMixingService;
 import com.tongji.recommendation.RelatedPostRecommendationService;
 import com.tongji.recommendation.RecommendationEngine;
+import com.tongji.recommendation.TrendingPostRecommendationService;
 import com.tongji.recommendation.feed.FollowFeedService;
 import com.tongji.recommendation.feed.TimelinePage;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +61,7 @@ class KnowPostControllerPublishTest {
     private HomeFeedMixingService homeFeedMixingService;
     private FollowFeedService followFeedService;
     private RelatedPostRecommendationService relatedPostRecommendationService;
+    private TrendingPostRecommendationService trendingPostRecommendationService;
     private RecommendationEngine recommendationEngine;
     private KnowPostMapper knowPostMapper;
     private JwtService jwtService;
@@ -72,6 +74,7 @@ class KnowPostControllerPublishTest {
         publishManager = Mockito.mock(PublishManager.class);
         followFeedService = Mockito.mock(FollowFeedService.class);
         relatedPostRecommendationService = Mockito.mock(RelatedPostRecommendationService.class);
+        trendingPostRecommendationService = Mockito.mock(TrendingPostRecommendationService.class);
         recommendationEngine = Mockito.mock(RecommendationEngine.class);
         knowPostMapper = Mockito.mock(KnowPostMapper.class);
         homeFeedMixingService = new HomeFeedMixingService(
@@ -480,6 +483,7 @@ class KnowPostControllerPublishTest {
                 homeFeedMixingService,
                 followFeedService,
                 relatedPostRecommendationService,
+                trendingPostRecommendationService,
                 mixedFeedEnabled
         );
 

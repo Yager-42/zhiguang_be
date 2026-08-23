@@ -257,6 +257,15 @@ public class KnowPostServiceImpl implements KnowPostService {
     }
 
     /**
+     * 使用主键索引判断知文是否允许产生互动关系。
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isPublished(long id) {
+        return id > 0 && mapper.existsPublished(id) == 1;
+    }
+
+    /**
      * 获取知文详情（含作者信息、图片列表）。
      * <p>
      * 流程：

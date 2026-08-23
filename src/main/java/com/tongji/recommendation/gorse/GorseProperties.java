@@ -14,4 +14,5 @@ public class GorseProperties {
     private int timeoutMs = 300;
     private boolean enabled = false;
     private String itemToItemName = "similar_topics";
+    private String nonPersonalizedName = "trending";
 }

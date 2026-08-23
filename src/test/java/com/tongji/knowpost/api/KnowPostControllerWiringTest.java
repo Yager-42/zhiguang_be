@@ -10,6 +10,7 @@ import com.tongji.knowpost.service.KnowPostService;
 import com.tongji.recommendation.HomeFeedMixingService;
 import com.tongji.recommendation.RecommendationEngine;
 import com.tongji.recommendation.RelatedPostRecommendationService;
+import com.tongji.recommendation.TrendingPostRecommendationService;
 import com.tongji.recommendation.feed.FollowFeedService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -36,6 +37,8 @@ class KnowPostControllerWiringTest {
             .withBean(RecommendationEngine.class, () -> mock(RecommendationEngine.class))
             .withBean(RelatedPostRecommendationService.class,
                     () -> mock(RelatedPostRecommendationService.class))
+            .withBean(TrendingPostRecommendationService.class,
+                    () -> mock(TrendingPostRecommendationService.class))
             .withBean(KnowPostMapper.class, () -> mock(KnowPostMapper.class))
             .withBean(com.tongji.promotion.service.PromotionAllocationService.class,
                     () -> mock(com.tongji.promotion.service.PromotionAllocationService.class))
@@ -54,6 +57,7 @@ class KnowPostControllerWiringTest {
             assertThat(context).hasSingleBean(HomeFeedMixingService.class);
             assertThat(context).hasSingleBean(FollowFeedService.class);
             assertThat(context).hasSingleBean(RelatedPostRecommendationService.class);
+            assertThat(context).hasSingleBean(TrendingPostRecommendationService.class);
             assertThat(homeFeedMixingService).isNotNull();
             assertThat(context.getBean(HomeFeedMixingService.class)).isSameAs(homeFeedMixingService);
         });

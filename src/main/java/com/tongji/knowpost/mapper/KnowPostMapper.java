@@ -14,6 +14,8 @@ public interface KnowPostMapper {
 
     KnowPost findById(@Param("id") Long id);
 
+    int existsPublished(@Param("id") Long id);
+
     int updateContent(KnowPost post);
 
     int updateMetadata(KnowPost post);
