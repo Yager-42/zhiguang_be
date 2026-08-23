@@ -38,6 +38,10 @@ public class RelationFollowCommandConsumer {
     public void onMessage(String message, Acknowledgment acknowledgment) throws Exception {
         FollowCommandEvent event = objectMapper.readValue(message, FollowCommandEvent.class);
         try {
+            if (event.warmup()) {
+                acknowledgment.acknowledge();
+                return;
+            }
             if (event.follow()) {
                 relationManager.follow(event.fromUserId(), event.toUserId());
             } else {

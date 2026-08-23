@@ -10,6 +10,20 @@ package com.tongji.relation.command;
  * @param fromUserId 发起者
  * @param toUserId 目标者
  * @param follow true=关注，false=取关
+ * @param warmup true=启动预热标记，消费者只确认、不执行关系写入
  */
-public record FollowCommandEvent(long fromUserId, long toUserId, boolean follow) {
+public record FollowCommandEvent(long fromUserId, long toUserId, boolean follow, boolean warmup) {
+
+    public FollowCommandEvent(long fromUserId, long toUserId, boolean follow) {
+        this(fromUserId, toUserId, follow, false);
+    }
+
+    /**
+     * 创建不承载用户关系的启动预热标记。
+     *
+     * @return 仅用于 Kafka 分区预热的事件
+     */
+    public static FollowCommandEvent warmupMarker() {
+        return new FollowCommandEvent(0, 0, false, true);
+    }
 }

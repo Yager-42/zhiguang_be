@@ -27,7 +27,11 @@ class CanalOutboxBatchPublisherTest {
     void publishesCompleteOutboxRowAndWaitsForKafka() throws Exception {
         KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         CompletableFuture<SendResult<String, String>> future = CompletableFuture.completedFuture(mock(SendResult.class));
-        when(kafka.send(org.mockito.ArgumentMatchers.eq(OutboxTopics.CANAL_OUTBOX), org.mockito.ArgumentMatchers.anyString())).thenReturn(future);
+        when(kafka.send(
+                org.mockito.ArgumentMatchers.eq(OutboxTopics.CANAL_OUTBOX),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()
+        )).thenReturn(future);
         CanalOutboxBatchPublisher publisher = new CanalOutboxBatchPublisher(kafka, objectMapper, 1_000L);
 
         publisher.publish(message(column("id", "77"),
@@ -38,7 +42,11 @@ class CanalOutboxBatchPublisherTest {
                 column("created_at", "2026-06-18 10:15:30.000")));
 
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(kafka).send(org.mockito.ArgumentMatchers.eq(OutboxTopics.CANAL_OUTBOX), json.capture());
+        verify(kafka).send(
+                org.mockito.ArgumentMatchers.eq(OutboxTopics.CANAL_OUTBOX),
+                org.mockito.ArgumentMatchers.eq("following:9"),
+                json.capture()
+        );
         JsonNode row = objectMapper.readTree(json.getValue()).path("data").get(0);
         assertThat(row.path("id").asText()).isEqualTo("77");
         assertThat(row.path("aggregate_type").asText()).isEqualTo("following");

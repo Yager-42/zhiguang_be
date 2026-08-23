@@ -5,6 +5,7 @@ import com.tongji.common.resilience.GuardResult;
 import com.tongji.common.resilience.GuardedOperation;
 import com.tongji.common.resilience.ResilienceGuard;
 import com.tongji.relation.manager.RelationWriteResult;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,6 +43,7 @@ class RelationCommandServiceTest {
     private KafkaTemplate<String, String> kafkaTemplate;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private RelationCommandService service;
 
     @BeforeEach
@@ -59,7 +61,7 @@ class RelationCommandServiceTest {
                 }
             }
         };
-        service = new RelationCommandService(redisTemplate, resilienceGuard, kafkaTemplate, objectMapper);
+        service = new RelationCommandService(redisTemplate, resilienceGuard, kafkaTemplate, objectMapper, meterRegistry);
     }
 
 
@@ -83,6 +85,10 @@ class RelationCommandServiceTest {
 
         assertThat(result.success()).isTrue();
         assertThat(result.stateChanged()).isTrue();
+        assertThat(meterRegistry.get("relation.command.stage").tag("stage", "redis-rate-limit").timer().count())
+                .isEqualTo(1);
+        assertThat(meterRegistry.get("relation.command.stage").tag("stage", "kafka-ack").timer().count())
+                .isEqualTo(1);
         verify(kafkaTemplate).send(eq(FollowCommandTopics.COMMAND), eq(String.valueOf(FROM_USER_ID)),
                 contains("\"fromUserId\":" + FROM_USER_ID));
         verify(kafkaTemplate).send(eq(FollowCommandTopics.COMMAND), eq(String.valueOf(FROM_USER_ID)),
