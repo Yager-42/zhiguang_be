@@ -3,6 +3,8 @@ package com.tongji.counter.api;
 import com.tongji.counter.api.dto.ActionRequest;
 import com.tongji.counter.service.CounterService;
 import com.tongji.auth.token.JwtService;
+import com.tongji.favorite.service.FavoriteService;
+import com.tongji.favorite.service.FavoriteWriteResult;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,10 +24,12 @@ public class ActionController {
 
     private final CounterService counterService;
     private final JwtService jwtService;
+    private final FavoriteService favoriteService;
 
-    public ActionController(CounterService counterService, JwtService jwtService) {
+    public ActionController(CounterService counterService, JwtService jwtService, FavoriteService favoriteService) {
         this.counterService = counterService;
         this.jwtService = jwtService;
+        this.favoriteService = favoriteService;
     }
 
     /**
@@ -63,10 +67,10 @@ public class ActionController {
     public ResponseEntity<Map<String, Object>> fav(@Valid @RequestBody ActionRequest req,
                                                    @AuthenticationPrincipal Jwt jwt) {
         long uid = jwtService.extractUserId(jwt);
-        boolean changed = counterService.fav(req.getEntityType(), req.getEntityId(), uid);
+        FavoriteWriteResult result = favoriteService.favorite(uid, req.getEntityType(), req.getEntityId());
         return ResponseEntity.ok(Map.of(
-                "changed", changed, // 状态是否发生变化
-                "faved", counterService.isFaved(req.getEntityType(), req.getEntityId(), uid)
+                "changed", result.changed(),
+                "faved", result.faved()
         ));
     }
 
@@ -77,10 +81,10 @@ public class ActionController {
     public ResponseEntity<Map<String, Object>> unfav(@Valid @RequestBody ActionRequest req,
                                                      @AuthenticationPrincipal Jwt jwt) {
         long uid = jwtService.extractUserId(jwt);
-        boolean changed = counterService.unfav(req.getEntityType(), req.getEntityId(), uid);
+        FavoriteWriteResult result = favoriteService.unfavorite(uid, req.getEntityType(), req.getEntityId());
         return ResponseEntity.ok(Map.of(
-                "changed", changed, // 状态是否发生变化
-                "faved", counterService.isFaved(req.getEntityType(), req.getEntityId(), uid)
+                "changed", result.changed(),
+                "faved", result.faved()
         ));
     }
 }

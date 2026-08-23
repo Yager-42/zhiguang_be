@@ -110,6 +110,15 @@ CREATE TABLE IF NOT EXISTS outbox (
     KEY ix_outbox_ct (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 用户收藏关系是收藏业务的事实源；收藏总数仍由 Redis 计数体系维护。
+CREATE TABLE IF NOT EXISTS user_favorite (
+    user_id BIGINT UNSIGNED NOT NULL COMMENT '收藏用户 ID',
+    post_id BIGINT UNSIGNED NOT NULL COMMENT '被收藏知文 ID',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '最近一次收藏时间',
+    PRIMARY KEY (user_id, post_id),
+    KEY idx_user_favorite_page (user_id, created_at DESC, post_id DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS comments (
     comment_id BIGINT UNSIGNED NOT NULL,
     post_id BIGINT UNSIGNED NOT NULL,

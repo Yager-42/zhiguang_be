@@ -34,9 +34,19 @@ public class CounterEventProducer {
     }
 
     public void publishReliable(CounterEvent event) {
+        publishReliable(event, event.getEntityId());
+    }
+
+    /**
+     * 使用调用方指定的业务键可靠发布计数事件。
+     *
+     * @param event 计数事件
+     * @param partitionKey Kafka 分区键；同一业务关系必须保持稳定
+     */
+    public void publishReliable(CounterEvent event, String partitionKey) {
         try {
             String payload = objectMapper.writeValueAsString(event);
-            kafka.send(CounterTopics.EVENTS, event.getEntityId(), payload).join();
+            kafka.send(CounterTopics.EVENTS, partitionKey, payload).join();
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("counter event serialization failed", exception);
         } catch (RuntimeException exception) {
