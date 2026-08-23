@@ -119,10 +119,13 @@ services:
     volumes:
       - cassandra-data:/var/lib/cassandra
     healthcheck:
-      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
-      interval: 15s
+      # cqlsh can block indefinitely when Cassandra is saturated. Kill the child
+      # process explicitly so health probes cannot accumulate and starve the node.
+      test: ["CMD-SHELL", "timeout -k 1s 8s cqlsh --connect-timeout=3 --request-timeout=3 -e 'SELECT keyspace_name FROM system_schema.keyspaces LIMIT 1' >/dev/null 2>&1"]
+      interval: 30s
       timeout: 10s
-      retries: 30
+      retries: 10
+      start_period: 60s
 
   cassandra-init:
     image: cassandra:4.1

@@ -44,11 +44,6 @@ spring:
       ack-mode: manual
     admin:
       auto-create: true
-  relation:
-    kafka:
-      command-group: relation-follow-command-consumer
-      partitions: ${RELATION_COMMAND_PARTITIONS:16}
-      consumer-concurrency: ${RELATION_COMMAND_CONCURRENCY:8}
   cassandra:
     contact-points: localhost
     port: 9042
@@ -76,6 +71,13 @@ spring:
       chat:
         options:
           model: ${AI_DASHSCOPE_MODEL:qwen-plus}
+
+relation:
+  kafka:
+    command-group: relation-follow-command-consumer
+    partitions: ${RELATION_COMMAND_PARTITIONS:16}
+    consumer-concurrency: ${RELATION_COMMAND_CONCURRENCY:8}
+    metadata-warmup-enabled: ${RELATION_COMMAND_METADATA_WARMUP_ENABLED:true}
 
 comment:
   cache:
@@ -229,6 +231,10 @@ counter:
   rebuild:
     enabled: false
 
+favorite:
+  backfill:
+    enabled: ${FAVORITE_BACKFILL_ENABLED:false}
+
 singleflight:
   enabled: ${SINGLEFLIGHT_ENABLED:true}
   mode: ${SINGLEFLIGHT_MODE:distributed}
@@ -286,6 +292,7 @@ recommendation:
     timeout-ms: ${GORSE_TIMEOUT_MS:300}
     enabled: ${GORSE_ENABLED:false}
     item-to-item-name: ${GORSE_ITEM_TO_ITEM_NAME:similar_topics}
+    non-personalized-name: ${GORSE_NON_PERSONALIZED_NAME:trending}
 
 moderation:
   llm:
