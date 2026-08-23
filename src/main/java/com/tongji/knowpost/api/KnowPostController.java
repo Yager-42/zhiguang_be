@@ -19,10 +19,13 @@ import com.tongji.knowpost.service.KnowPostFeedService;
 import com.tongji.knowpost.api.dto.KnowPostDetailResponse;
 import com.tongji.recommendation.HomeFeedMixingService;
 import com.tongji.recommendation.RelatedPostRecommendationService;
+import com.tongji.recommendation.TrendingPostRecommendationService;
 import com.tongji.recommendation.feed.FollowFeedService;
 import com.tongji.recommendation.feed.TimelineItem;
 import com.tongji.recommendation.feed.TimelinePage;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -50,6 +53,7 @@ public class KnowPostController {
     private final HomeFeedMixingService homeFeedMixingService;
     private final FollowFeedService followFeedService;
     private final RelatedPostRecommendationService relatedPostRecommendationService;
+    private final TrendingPostRecommendationService trendingPostRecommendationService;
     private final boolean mixedHomeFeedEnabled;
 
     public KnowPostController(KnowPostService service,
@@ -59,6 +63,7 @@ public class KnowPostController {
                               HomeFeedMixingService homeFeedMixingService,
                               FollowFeedService followFeedService,
                               RelatedPostRecommendationService relatedPostRecommendationService,
+                              TrendingPostRecommendationService trendingPostRecommendationService,
                               @Value("${feed.home.mixed-enabled:false}") boolean mixedHomeFeedEnabled) {
         this.service = service;
         this.feedService = feedService;
@@ -67,6 +72,7 @@ public class KnowPostController {
         this.homeFeedMixingService = homeFeedMixingService;
         this.followFeedService = followFeedService;
         this.relatedPostRecommendationService = relatedPostRecommendationService;
+        this.trendingPostRecommendationService = trendingPostRecommendationService;
         this.mixedHomeFeedEnabled = mixedHomeFeedEnabled;
     }
 
@@ -180,6 +186,18 @@ public class KnowPostController {
             return homeFeedMixingService.getHomeFeed(userId);
         }
         return feedService.getPublicFeed(page, size, userId);
+    }
+
+    /**
+     * Gorse 非个性化热度榜；Gorse 不可用时回退公开知文顺序。
+     */
+    @GetMapping("/feed/hot")
+    public FeedPageResponse hotFeed(
+                                    @RequestParam(value = "page", defaultValue = "1") @Min(1) @Max(10000) int page,
+                                    @RequestParam(value = "size", defaultValue = "20") @Min(1) @Max(50) int size,
+                                    @AuthenticationPrincipal Jwt jwt) {
+        Long userId = (jwt == null) ? null : jwtService.extractUserId(jwt);
+        return trendingPostRecommendationService.getTrending(page, size, userId);
     }
 
     @GetMapping("/feed/follow")

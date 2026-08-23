@@ -46,6 +46,17 @@ class GorseClientTest {
     }
 
     @Test
+    void trendingReadsConfiguredNonPersonalizedRanking() {
+        server.expect(requestTo("http://localhost:8087/api/non-personalized/trending?offset=20&n=3"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-API-Key", "secret"))
+                .andRespond(withSuccess("[{\"Id\":\"202\",\"Score\":18.5}]", MediaType.APPLICATION_JSON));
+
+        assertThat(client.trending(20, 3)).containsExactly("202");
+        server.verify();
+    }
+
+    @Test
     void feedbackUsesArrayBodyRequiredByGorseApi() {
         server.expect(requestTo("http://localhost:8087/api/feedback"))
                 .andExpect(method(HttpMethod.PUT))

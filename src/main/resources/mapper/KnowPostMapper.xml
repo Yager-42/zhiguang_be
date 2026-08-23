@@ -38,6 +38,15 @@
         SELECT * FROM know_posts WHERE id = #{id}
     </select>
 
+    <select id="existsPublished" resultType="int">
+        SELECT EXISTS(
+            SELECT 1
+            FROM know_posts
+            WHERE id = #{id}
+              AND status = 'published'
+        )
+    </select>
+
     <update id="updateContent" parameterType="com.tongji.knowpost.model.KnowPost">
         UPDATE know_posts
         <set>

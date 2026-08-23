@@ -21,5 +21,13 @@ public interface KnowPostService {
 
     void delete(long creatorId, long id);
 
+    /**
+     * 判断知文是否处于可互动的已发布状态。
+     *
+     * @param id 知文 ID
+     * @return 已发布时返回 {@code true}
+     */
+    boolean isPublished(long id);
+
     KnowPostDetailResponse getDetail(long id, Long currentUserIdNullable);
 }
