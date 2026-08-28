@@ -3,15 +3,17 @@ package com.tongji.comment.cache;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.tongji.comment.event.CommentCanalEventReader;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
-import com.tongji.comment.event.CommentEventReader;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,8 +37,9 @@ class CommentCacheInvalidationListenerTest {
         when(sets.members(CommentCacheKeys.postHeadIndex(9L))).thenReturn(Set.of("post-head"));
         when(sets.members(CommentCacheKeys.rootHeadIndex(11L))).thenReturn(Set.of("root-head"));
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        CommentCanalEventReader canalEventReader = mock(CommentCanalEventReader.class);
         CommentCacheInvalidationListener listener = new CommentCacheInvalidationListener(
-                cache, redis, new CommentEventReader(objectMapper),
+                cache, redis, canalEventReader, new CommentEventReader(objectMapper),
                 mock(CommentCacheInvalidationScheduler.class), 100L);
         CommentMutationEvent deleted = new CommentMutationEvent(
                 201L, CommentEventType.COMMENT_DELETED, 12L, 9L, 11L, 11L);
@@ -45,10 +48,11 @@ class CommentCacheInvalidationListenerTest {
         CommentOutboxEvent duplicate = new CommentOutboxEvent(
                 201L, CommentEventType.COMMENT_DELETED, 12L, 9L, 11L, 11L, 7L,
                 "client-1", null, LocalDateTime.of(2026, 8, 7, 10, 0));
+        when(canalEventReader.readMutations("message")).thenReturn(List.of(duplicate));
 
         listener.afterCommit(deleted);
         listener.afterCommit(created);
-        listener.onMessage(objectMapper.writeValueAsString(duplicate));
+        listener.onMessage("message");
         listener.flushPendingInvalidations();
 
         assertThat(cache.getIfPresent("post-head")).isNull();
@@ -62,7 +66,7 @@ class CommentCacheInvalidationListenerTest {
                         && keys.contains(CommentCacheKeys.postHeadIndex(9L))
                         && keys.contains(CommentCacheKeys.rootHeadIndex(11L))));
 
-        listener.onMessage(objectMapper.writeValueAsString(duplicate));
+        listener.onMessage("message");
         listener.flushPendingInvalidations();
 
         verify(sets, times(1)).members(CommentCacheKeys.postHeadIndex(9L));

@@ -1,9 +1,8 @@
 package com.tongji.comment.consumer;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.comment.event.CommentCanalEventReader;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
-import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.metrics.CommentMetrics;
 import com.tongji.counter.event.CounterEvent;
 import com.tongji.counter.event.CounterEventProducer;
@@ -12,11 +11,13 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class CommentCounterConsumerTest {
 
@@ -24,11 +25,13 @@ class CommentCounterConsumerTest {
     void topLevelRoutesStableEventToPostCounter() throws Exception {
         CounterService counterService = mock(CounterService.class);
         CounterEventProducer producer = mock(CounterEventProducer.class);
+        CommentCanalEventReader eventReader = mock(CommentCanalEventReader.class);
+        CommentOutboxEvent event = event(CommentEventType.COMMENT_CREATED, 0L, 0L);
+        when(eventReader.readMutations("message")).thenReturn(List.of(event));
         CommentCounterConsumer consumer = new CommentCounterConsumer(
-                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
-                counterService, producer, mock(CommentMetrics.class));
+                eventReader, counterService, producer, mock(CommentMetrics.class));
 
-        consumer.onMessage(json(event(CommentEventType.COMMENT_CREATED, 0L, 0L)));
+        consumer.onMessage("message");
 
         verify(counterService).initializeCounts("comment", "101");
         ArgumentCaptor<CounterEvent> eventCaptor = ArgumentCaptor.forClass(CounterEvent.class);
@@ -41,11 +44,13 @@ class CommentCounterConsumerTest {
     @Test
     void replyRoutesStableEventToRootCounter() throws Exception {
         CounterEventProducer producer = mock(CounterEventProducer.class);
+        CommentCanalEventReader eventReader = mock(CommentCanalEventReader.class);
+        CommentOutboxEvent event = event(CommentEventType.COMMENT_CREATED, 51L, 51L);
+        when(eventReader.readMutations("message")).thenReturn(List.of(event));
         CommentCounterConsumer consumer = new CommentCounterConsumer(
-                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
-                mock(CounterService.class), producer, mock(CommentMetrics.class));
+                eventReader, mock(CounterService.class), producer, mock(CommentMetrics.class));
 
-        consumer.onMessage(json(event(CommentEventType.COMMENT_CREATED, 51L, 51L)));
+        consumer.onMessage("message");
 
         ArgumentCaptor<CounterEvent> eventCaptor = ArgumentCaptor.forClass(CounterEvent.class);
         verify(producer).publishReliable(eventCaptor.capture());
@@ -58,11 +63,13 @@ class CommentCounterConsumerTest {
     void nonCreatedEventIsSkipped() throws Exception {
         CounterService counterService = mock(CounterService.class);
         CounterEventProducer producer = mock(CounterEventProducer.class);
+        CommentCanalEventReader eventReader = mock(CommentCanalEventReader.class);
+        CommentOutboxEvent event = event(CommentEventType.COMMENT_DELETED, 0L, 0L);
+        when(eventReader.readMutations("message")).thenReturn(List.of(event));
         CommentCounterConsumer consumer = new CommentCounterConsumer(
-                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
-                counterService, producer, mock(CommentMetrics.class));
+                eventReader, counterService, producer, mock(CommentMetrics.class));
 
-        consumer.onMessage(json(event(CommentEventType.COMMENT_DELETED, 0L, 0L)));
+        consumer.onMessage("message");
 
         verify(counterService, never()).initializeCounts(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any());
@@ -74,7 +81,4 @@ class CommentCounterConsumerTest {
                 "client-1", null, LocalDateTime.of(2026, 8, 7, 10, 0));
     }
 
-    private String json(CommentOutboxEvent event) throws Exception {
-        return new ObjectMapper().findAndRegisterModules().writeValueAsString(event);
-    }
 }

@@ -2,8 +2,11 @@ package com.tongji.comment.cache;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.tongji.comment.event.CommentCanalEventReader;
 import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.event.CommentEventType;
+import com.tongji.comment.event.CommentOutboxEvent;
+import com.tongji.outbox.OutboxTopics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,6 +35,7 @@ public class CommentCacheInvalidationListener {
 
     private final Cache<String, CommentBasePage> localCache;
     private final StringRedisTemplate redisTemplate;
+    private final CommentCanalEventReader canalEventReader;
     private final CommentEventReader eventReader;
     private final CommentCacheInvalidationScheduler invalidationScheduler;
     private final long invalidationWindowMillis;
@@ -46,6 +50,7 @@ public class CommentCacheInvalidationListener {
     public CommentCacheInvalidationListener(
             @Qualifier("commentPageCache") Cache<String, CommentBasePage> localCache,
             StringRedisTemplate redisTemplate,
+            CommentCanalEventReader canalEventReader,
             CommentEventReader eventReader,
             CommentCacheInvalidationScheduler invalidationScheduler,
             @Value("${comment.cache.invalidation-window-ms:100}") long invalidationWindowMillis) {
@@ -54,6 +59,7 @@ public class CommentCacheInvalidationListener {
         }
         this.localCache = localCache;
         this.redisTemplate = redisTemplate;
+        this.canalEventReader = canalEventReader;
         this.eventReader = eventReader;
         this.invalidationScheduler = invalidationScheduler;
         this.invalidationWindowMillis = invalidationWindowMillis;
@@ -65,14 +71,16 @@ public class CommentCacheInvalidationListener {
     }
 
     @KafkaListener(
-            topics = "${comment.kafka.event-topic:comment-events}",
+            topics = OutboxTopics.CANAL_OUTBOX,
             groupId = "${comment.kafka.cache-group:comment-cache-consumer}",
             containerFactory = "commentEventKafkaListenerContainerFactory"
     )
     public void onMessage(String message) {
-        CommentMutationEvent event = eventReader.mutation(message);
-        if (event != null) {
-            enqueueInvalidation(event);
+        for (CommentOutboxEvent commentEvent : canalEventReader.readMutations(message)) {
+            CommentMutationEvent mutationEvent = eventReader.mutation(commentEvent);
+            if (mutationEvent != null) {
+                enqueueInvalidation(mutationEvent);
+            }
         }
     }
 
