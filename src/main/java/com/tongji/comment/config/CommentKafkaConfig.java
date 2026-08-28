@@ -13,7 +13,7 @@ public class CommentKafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> commentWriteKafkaListenerContainerFactory(
             ConsumerFactory<String, String> consumerFactory,
-            @Value("${comment.kafka.consumer-concurrency:8}") int concurrency) {
+            @Value("${comment.kafka.consumer-concurrency:4}") int concurrency) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);

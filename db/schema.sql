@@ -152,26 +152,6 @@ CREATE TABLE IF NOT EXISTS pending_comments (
     KEY idx_pending_comment_status_created (status, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS comment_outbox (
-    event_id BIGINT UNSIGNED NOT NULL,
-    event_type VARCHAR(40) NOT NULL,
-    aggregate_id BIGINT UNSIGNED NOT NULL,
-    payload JSON NOT NULL,
-    state TINYINT NOT NULL DEFAULT 0,
-    retry_count INT NOT NULL DEFAULT 0,
-    next_attempt_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    claim_token VARCHAR(64) NULL,
-    claimed_until DATETIME(3) NULL,
-    last_error VARCHAR(500) NULL,
-    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    published_at DATETIME(3) NULL,
-    PRIMARY KEY (event_id),
-    UNIQUE KEY uk_comment_event (event_type, aggregate_id),
-    KEY idx_comment_outbox_ready (state, next_attempt_at, event_id),
-    KEY idx_comment_outbox_claim (claim_token, state),
-    KEY idx_comment_outbox_published (state, published_at, event_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS reconciliation_task (
     id BIGINT UNSIGNED NOT NULL,
     task_type VARCHAR(64) NOT NULL,

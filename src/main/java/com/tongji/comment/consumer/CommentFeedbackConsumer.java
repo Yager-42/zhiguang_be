@@ -48,7 +48,7 @@ public class CommentFeedbackConsumer {
             exclude = IllegalArgumentException.class
     )
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX,
-            groupId = "${comment.kafka.feedback-group:comment-feedback-consumer}",
+            groupId = "${comment.kafka.feedback-group:comment-feedback-effects}",
             containerFactory = "commentEventKafkaListenerContainerFactory")
     public void onMessage(String message) {
         for (CommentOutboxEvent event : eventReader.readMutations(message)) {

@@ -36,7 +36,7 @@
 | D10 | 推广竞价 | 系统调度器每 30 秒检查并按 `promotion.slot-auction.window-minutes`（默认 60 分钟）自动补齐当前及下一竞价场次；用户只报名系统场次，不创建场次。窗口式 slot 竞价按**英式升价拍卖**结算（GSP 已废除）：窗口共享当前价台阶，接受出价必须 ≥ `min(currentPrice+increment, cap)`，最终赢家按终态 `currentPriceCents` 第一价格结算；cap-hit 原子进入 `AUCTION_SOLD`，反狙击接受可原子延长实际 endAt。**Elia 热路径**保持不变：保证金预授权提交后同步投影 Redis；每实例按窗口有界 flat combine，批量 Redis Lua 是唯一热裁决权威，每批最多接受一个最高有效候选；拒绝不推进版本、不写 Stream，Redis 故障不降级 MySQL。生产终态只接受 Redis Stream `AUCTION_SOLD` / `AUCTION_NO_BID`，由 `promotion.settlement` 深模块在窗口行锁下统一推导并写入第一价格结算、钱包效果、bid/escrow 状态、allocation 与窗口终态；不存在第二条直接关窗结算路径。 | 用户创建竞价场次；网关或 Java 判定竞价接受；逐请求 FIFO executor 或逐请求 Lua；固定 batching 等待；一批接受多个中间价；GSP 多槽排名/第二价格结算；使用应用时钟裁决终场；绕过 Redis terminal decision 直接结算 |
 | D11 | 对账补偿 | 独立对账模块拥有任务、checkpoint、扫描、比较与 repair/dead 编排；推广 settled-window 恢复只从 MySQL `promotion_bid`、`promotion_bid_escrow`、`promotion_auction_window` 推导与生产共享的 immutable settlement facts。allocation rebuild 仅可插入全缺失 allocation，不得调用钱包或改写 bid、escrow、window；缺失 active escrow、部分 allocation 或事实冲突直接 `dead`。 | 从 Redis/WebSocket 重建 settled facts；重放完整结算修 allocation；事件丢失不补；手工修数 |
 | D12 | 通知 | 幂等键 `notifications.event_key` 唯一 + 捕获 `DuplicateKeyException`；点赞通知 5 分钟 Redis 窗口聚合，以 `notif:like:bucket:due` ZSet 按窗口结束时间登记，30 秒定时限量读取到期成员并落库 | 同事件重复落多条；在共享 Redis 使用 `KEYS`/全库 `SCAN` 查找到期桶 |
-| D13 | 场景开关 | 外部系统默认关闭、显式开启：`canal.enabled=false`、`recommendation.gorse.enabled=false`、`promotion.bprime.enabled=false`、`moderation.llm.enabled=false`、`counter.rebuild.enabled=false`、`feed.home.mixed-enabled=false`（`application.yml`）；接受发布流量的部署必须启用并健康连接 Canal/Kafka；bprime 关闭时保证金事务在冻结资金前暂停，Redis Stream worker 与实时推送不得执行 | 在 Canal/Kafka 不健康时接受发布流量；生产依赖未开启的能力 |
+| D13 | 场景开关 | 外部系统默认关闭、显式开启：`canal.enabled=false`、`recommendation.gorse.enabled=false`、`promotion.bprime.enabled=false`、`moderation.llm.enabled=false`、`counter.rebuild.enabled=false`、`feed.home.mixed-enabled=false`（`application.yml`）；接受发布或评论写流量的部署必须健康连接 Canal/Kafka，且同一 Canal destination 只能有一个实例启用 Bridge；Compose 的唯一 `app` 显式设置 `CANAL_ENABLED=true`，额外业务实例必须为 false；bprime 关闭时保证金事务在冻结资金前暂停，Redis Stream worker 与实时推送不得执行 | 在 Canal/Kafka 不健康时接受发布或评论写流量；让多个业务实例同时启用 Canal Bridge；生产依赖未开启的能力 |
 | D14 | 大整数序列化 | 所有 Snowflake ID（>2^53）出参一律 **String 序列化** 防 JS 精度丢失（DTO 注释与实现：`NotificationItemResponse`、`KnowPostDraftCreateResponse`、`ModerationReportResponse`、`PromotionRankingItem` 等） | long 直出到 JSON |
 | D15 | 幂等三支柱 | ① 请求幂等：评论/发布使用唯一键；推广出价以 `(window,user,idempotencyKey)` 生成确定性 commandId。推广窗口 state 仅以 `winnerCommandId/winnerRequestHash/winnerAck` 保存**当前最高价**的强幂等槽：当前赢家相同 commandId+requestHash 精确重放 `ACCEPTED`，相同 commandId 不同 hash 返回 `IDEMPOTENCY_CONFLICT`；更高有效价接受后原子覆盖该槽，旧接受和所有拒绝均按当前权威状态重新裁决，不保存 command Hash 历史记录。保证金授权由 `promotion_bid_escrow uk(window,campaign)` 与钱包 businessRef 判等；② 事件幂等：消费端去重键/唯一键与推广 checkpoint；③ 对账兜底：事件失败建对账任务（§6.4） | 依赖 at-most-once 投递；为推广拒绝或历史接受保存逐命令 Redis 记录；被超过后重放失效的历史 `ACCEPTED` |
 | D16 | 技术栈绑定 | Spring Boot 3.5.10 / Java 21 / MyBatis 3.0.3 + MySQL 8.4 / Redis 7.4 AOF everysec + Redisson 3.52 / Kafka（spring-kafka，非推广域）/ Cassandra 4.1 / ES（客户端 8.12.2，容器 9.2.1+IK）/ MinIO / Spring AI 1.1.2（DashScope，审核）/ Sentinel core 1.8.10（规则外部下发）/ Caffeine 3.1.8 / Canal client 1.1.8 / WebSocket STOMP（推广实时） | 未 ADR 换主框架；推广重新接入 broker |
@@ -172,7 +172,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 ## 5. 存储契约
 
-### 5.1 MySQL（`db/schema.sql` 共 26 表；Docker 初始化挂载 `docker-compose.yml` mysql volume；MyBatis `classpath*:mapper/**/*.xml`，`map-underscore-to-camel-case`）
+### 5.1 MySQL（`db/schema.sql` 共 25 表；Docker 初始化挂载 `docker-compose.yml` mysql volume；MyBatis `classpath*:mapper/**/*.xml`，`map-underscore-to-camel-case`）
 
 | 域 | 表 | 关键约束/说明 |
 |----|----|----|
@@ -340,6 +340,8 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 **事件 module**：`CommentEventWriter` 是事件 ID、稳定 `CommentOutboxEvent` 序列化、共享 outbox 写入和本地变更事件发布的唯一 implementation；写请求用 `OutboxMapper.insertUnique` 且不触发缓存失效，created/deleted/moderated 同样用稳定 eventKey 幂等写并发布 `CommentMutationEvent`。`CommentCanalEventReader` 解析 Canal envelope 并严格校验目标评论事件；`CommentEventReader` 仅保留评论业务 payload 与本地缓存变更映射职责。事务调用方仍拥有状态变化；缓存 listener 以 `@TransactionalEventListener(AFTER_COMMIT)` 消费本地事件，Kafka 重投以相同 eventId 去重。
 
+**部署切换**：这是停写 clean cutover，不允许滚动重叠。先停止评论新流量并让旧版本 dispatcher 排空，确认 `SELECT COUNT(*) FROM comment_outbox WHERE state <> 2` 为 0；再停止全部旧版本实例并删除旧表，随后启动新版本，且只允许一个实例启用 `CANAL_ENABLED=true`。未满足任一步不得切换 Writer，也不得通过双写或按 Snowflake ID 回填绕过。
+
 **不变量**：回复必须 parent 为顶层（`parent.parentId==0`）、post_id 一致、status=0；`root_id=parent_id=parent.commentId`；已删评论 body 恒 `[deleted]` 且不查 Cassandra；计数服务故障降级为空 Map 不影响列表。
 
 **缓存失效**：事务提交事件与 Kafka 重投以 outbox eventId 去重，默认在 100ms 窗口内按 post/root scope 合并；一批反向索引只读取一次，Caffeine 批量失效，Redis index/item/scope key 使用单次 multi-key `UNLINK`。页面重建使用 pipeline 批量写 item fragment，index metadata 保持独立的短 `MULTI/EXEC`；缓存失效调度器不参与 Spring 全局 `@Scheduled` 任务调度。
@@ -495,14 +497,15 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `id.snowflake` | worker/datacenter 1 | `SnowflakeProperties` |
 | `id.segment` | wait-timeout 500ms、preload-threads 2 | `SegmentIdProperties` |
 | `singleflight.*` | enabled/mode/defaults(13 项)/stages(7)；knowpost public feed 为 distributed 3s result，detail 固定 local | `SingleFlightProperties` |
-| `comment.kafka.*` / `comment.outbox.*` | write/event/feedback topic；write 初始并发 4；dispatcher batch 500、claim 30s、in-flight 2、clean batch 1000、retention 24h | @Value |
+| `comment.kafka.*` | `comment-feedback` 主题；写/计数/奖励/反馈/缓存消费组；关键消费并发 4；write 与 effect Retry Topic 均为 10 次、1s×2、上限 10s | @Value |
 | `wallet.*` | platform-user-id 0、registration-grant-amount 100 | `WalletProperties` |
 | `content-reward.*` | enabled true、post 10、comment 2 | `ContentRewardProperties` |
 | `relation.kafka.*` | command-group `relation-follow-command-consumer`、partitions 16、consumer-concurrency 8（主题名见 `FollowCommandTopics`） | @Value |
 | `promotion.slot-auction.*` | 槽位/保留价/60min 窗口/缓存 300s/批 50/30s | `PromotionProperties` |
 | `promotion.bprime.*` | enabled false、热状态 24h、命令幂等 10m/分钟桶、active-streams sweep 2s、读取批次 1000、保留事件 100000、结算回看 7d、WebSocket 出站线程与有界队列、公共增量 100–250ms 自适应/调度线程/窗口上限、英式拍卖规则 `auction-rules.*`（per-resource：incrementCents/capPriceCents/extendWindowSec/extendSec/maxExtensions） | `PromotionBPrimeProperties` |
 | `storage.*` | MinIO endpoint/bucket/公开域名 | `StorageProperties` |
-| `canal.*` | enabled false、host/port/destination/filter=`zhiguang.outbox`/batchSize 100/interval 1000ms/Kafka send timeout 10000ms | @Value |
+| `canal.*` | enabled false、host/port/destination/filter=`zhiguang.outbox`、batchSize 100、interval 1000ms、rollback batch 退避 250–30000ms、Kafka send timeout 35000ms | @Value |
+| `outbox.cleanup.*` | enabled true、retention 720h、batch 1000、追平证据 300s、interval 1h；仅单活 Bridge 最近空轮询时执行 | @Value |
 | `counter.rebuild` | enabled false | — |
 | `favorite.backfill` | enabled false；仅收藏事实切换维护窗口一次性开启 | — |
 | `moderation.*` | llm enabled false、provider dashscope（可选 opencode）、0.8/4000 字/3 次；platform-actor 0 | `ModerationProperties` |
@@ -528,7 +531,6 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | G10 | 验证码 `EXPIRED` 状态枚举声明但**永不显式返回**（TTL 过期表现为键消失→NOT_FOUND 合并映射） | `VerificationCodeStatus.java`；`RedisVerificationCodeStore.verify` |
 | G11 | `VerificationScene`/`Expired` 相关：`PromotionBidResponse` DTO 当前**无 controller 使用**（预留/对账） | `PromotionBidResponse.java` |
 | G12 | `resolveExpiredEscrow` 无 scheduler 驱动（javadoc「本期不要求 scheduler」） | `WalletEscrowService.java` javadoc |
-| G13 | 评论迁移采用 clean cutover：旧 `comment_outbox` 与专属 dispatcher 仅允许在切换前排空，不允许继续生产写入或与共享 `outbox` 双写；表和旧 relay 代码在迁移完成后删除 | `CommentEventWriter.java`；`db/schema.sql`；§7.3 |
 | G14 | `KnowPostMapper.publish(id, creatorId)`（XML `<update id="publish">` 无 status 守卫、`status='published'` 直改）接口已声明但**全仓无调用方**（死代码，勿用于新发布路径；实际发布走 `startPublishing→completePublish` 守卫链） | `KnowPostMapper.java:21`；`KnowPostMapper.xml:70-74` |
 
 ---
@@ -539,4 +541,4 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 - 契约常量：`common/exception/ErrorCode.java`（27 码）、`common/id/IdNamespace.java`（11 命名空间）、`outbox/OutboxTopics.java`（`canal-outbox`）、`counter/event/CounterTopics.java`（`counter-events`）、`promotion/bprime/config/PromotionBPrimeProperties.java`（主题/组）
 - 状态机 SQL：`resources/mapper/KnowPostMapper.xml`、`PublishAttemptMapper.xml`、`ModerationReportMapper.xml`、`ReconciliationTaskMapper.xml`、`WalletEscrowMapper.xml`
 - 原子脚本：`resources/redis/lua/promotion-auction-decision-batch.lua`（推广批量决策）、`common/singleflight/RedisSingleFlightCoordinatorRepository.java`（6 Lua）、`counter/service/impl/CounterServiceImpl.java`（TOGGLE_LUA 等）
-- DDL：`db/schema.sql`（26 表）、`db/cassandra/init.cql`（4 表）
+- DDL：`db/schema.sql`（25 表）、`db/cassandra/init.cql`（4 表）

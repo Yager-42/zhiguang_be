@@ -47,7 +47,7 @@ public class CommentRewardConsumer {
             exclude = IllegalArgumentException.class
     )
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX,
-            groupId = "${comment.kafka.reward-group:comment-reward-consumer}",
+            groupId = "${comment.kafka.reward-group:comment-reward-effects}",
             containerFactory = "commentEventKafkaListenerContainerFactory")
     public void onMessage(String message) {
         for (CommentOutboxEvent event : eventReader.readMutations(message)) {

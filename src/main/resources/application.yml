@@ -92,31 +92,24 @@ comment:
       core-size: ${COMMENT_READ_CORE_SIZE:8}
       max-size: ${COMMENT_READ_MAX_SIZE:16}
       queue-capacity: ${COMMENT_READ_QUEUE_CAPACITY:200}
-    outbox:
-      core-size: ${COMMENT_OUTBOX_CORE_SIZE:2}
-      max-size: ${COMMENT_OUTBOX_MAX_SIZE:4}
-      queue-capacity: ${COMMENT_OUTBOX_QUEUE_CAPACITY:50}
   kafka:
-    write-topic: comment-write
-    event-topic: comment-events
     feedback-topic: comment-feedback
-    write-partitions: ${COMMENT_WRITE_PARTITIONS:8}
-    event-partitions: ${COMMENT_EVENT_PARTITIONS:8}
+    write-group: ${COMMENT_WRITE_GROUP:comment-write-consumer}
+    counter-group: ${COMMENT_COUNTER_GROUP:comment-counter-effects}
+    reward-group: ${COMMENT_REWARD_GROUP:comment-reward-effects}
+    feedback-group: ${COMMENT_FEEDBACK_GROUP:comment-feedback-effects}
+    cache-group: ${COMMENT_CACHE_GROUP:comment-cache-consumer}
     consumer-concurrency: ${COMMENT_WRITE_CONCURRENCY:4}
     write-retry-attempts: ${COMMENT_WRITE_RETRY_ATTEMPTS:10}
     write-retry-delay-ms: ${COMMENT_WRITE_RETRY_DELAY_MS:1000}
     write-retry-multiplier: ${COMMENT_WRITE_RETRY_MULTIPLIER:2}
     write-retry-max-delay-ms: ${COMMENT_WRITE_RETRY_MAX_DELAY_MS:10000}
-  outbox:
-    batch-size: ${COMMENT_OUTBOX_BATCH_SIZE:500}
-    claim-seconds: ${COMMENT_OUTBOX_CLAIM_SECONDS:30}
-    publish-interval-ms: ${COMMENT_OUTBOX_PUBLISH_INTERVAL_MS:50}
-    retention-hours: ${COMMENT_OUTBOX_RETENTION_HOURS:24}
-    clean-batch-size: ${COMMENT_OUTBOX_CLEAN_BATCH_SIZE:1000}
-    clean-interval-ms: ${COMMENT_OUTBOX_CLEAN_INTERVAL_MS:86400000}
+    effect-retry-attempts: ${COMMENT_EFFECT_RETRY_ATTEMPTS:10}
+    effect-retry-delay-ms: ${COMMENT_EFFECT_RETRY_DELAY_MS:1000}
+    effect-retry-multiplier: ${COMMENT_EFFECT_RETRY_MULTIPLIER:2}
+    effect-retry-max-delay-ms: ${COMMENT_EFFECT_RETRY_MAX_DELAY_MS:10000}
   metrics:
     sample-interval-ms: ${COMMENT_METRICS_SAMPLE_INTERVAL_MS:5000}
-
 
 publish:
   kafka:

@@ -55,7 +55,7 @@ public class CommentCounterConsumer {
             exclude = IllegalArgumentException.class
     )
     @KafkaListener(topics = OutboxTopics.CANAL_OUTBOX,
-            groupId = "${comment.kafka.counter-group:comment-counter-consumer}",
+            groupId = "${comment.kafka.counter-group:comment-counter-effects}",
             containerFactory = "commentEventKafkaListenerContainerFactory")
     public void onMessage(String message) {
         for (CommentOutboxEvent event : eventReader.readMutations(message)) {
