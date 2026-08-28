@@ -19,10 +19,6 @@ public class ThreadPoolConfig {
         return buildExecutor(10, 50, 200, 30, "task-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
     }
 
-    @Bean(name = "publishExecutor")
-    public TaskExecutor publishExecutor() {
-        return buildExecutor(8, 16, 100, 60, "publish-", new ThreadPoolExecutor.CallerRunsPolicy(), 60);
-    }
 
 
     @Bean(name = "canalOutboxExecutor")
