@@ -1,16 +1,20 @@
 package com.tongji.comment.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tongji.comment.event.CommentCanalEventReader;
+import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
-import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.mapper.PendingCommentMapper;
+import com.tongji.comment.metrics.CommentMetrics;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.comment.service.impl.CommentMaterializationService;
-import com.tongji.comment.metrics.CommentMetrics;
+import com.tongji.outbox.OutboxTopics;
 import com.tongji.storage.text.TextStorageService;
 import org.junit.jupiter.api.Test;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.kafka.retrytopic.DltStrategy;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -37,6 +41,12 @@ class CommentWriteConsumerTest {
         assertThat(retry.backoff().maxDelayExpression())
                 .isEqualTo("${comment.kafka.write-retry-max-delay-ms:10000}");
         assertThat(retry.exclude()).containsExactly(IllegalArgumentException.class);
+        assertThat(retry.retryTopicSuffix()).isEqualTo("-comment-write-retry");
+        assertThat(retry.dltTopicSuffix()).isEqualTo("-comment-write-dlt");
+        assertThat(retry.dltStrategy()).isEqualTo(DltStrategy.FAIL_ON_ERROR);
+        KafkaListener listener = CommentWriteConsumer.class.getMethod("onMessage", String.class)
+                .getAnnotation(KafkaListener.class);
+        assertThat(listener.topics()).containsExactly(OutboxTopics.CANAL_OUTBOX);
     }
 
     @Test
@@ -45,7 +55,7 @@ class CommentWriteConsumerTest {
         TextStorageService textStorageService = mock(TextStorageService.class);
         CommentMaterializationService finalizer = mock(CommentMaterializationService.class);
         CommentWriteConsumer consumer = new CommentWriteConsumer(
-                new CommentEventReader(new ObjectMapper().findAndRegisterModules()), pendingMapper, textStorageService, finalizer,
+                mock(CommentCanalEventReader.class), pendingMapper, textStorageService, finalizer,
                 mock(CommentMetrics.class));
         CommentOutboxEvent event = event();
         PendingComment pending = PendingComment.builder()
@@ -67,7 +77,7 @@ class CommentWriteConsumerTest {
         TextStorageService textStorageService = mock(TextStorageService.class);
         CommentMaterializationService finalizer = mock(CommentMaterializationService.class);
         CommentWriteConsumer consumer = new CommentWriteConsumer(
-                new CommentEventReader(new ObjectMapper().findAndRegisterModules()), pendingMapper, textStorageService, finalizer,
+                mock(CommentCanalEventReader.class), pendingMapper, textStorageService, finalizer,
                 mock(CommentMetrics.class));
         CommentOutboxEvent event = event();
         PendingComment pending = PendingComment.builder()
@@ -86,11 +96,11 @@ class CommentWriteConsumerTest {
         CommentMetrics metrics = mock(CommentMetrics.class);
         when(pendingMapper.updateStatusIfCurrent(101L, "failed", "pending")).thenReturn(1);
         CommentWriteConsumer consumer = new CommentWriteConsumer(
-                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
-                pendingMapper, mock(TextStorageService.class), mock(CommentMaterializationService.class), metrics);
+                reader(), pendingMapper, mock(TextStorageService.class),
+                mock(CommentMaterializationService.class), metrics);
 
         try {
-            consumer.onDlt(new ObjectMapper().findAndRegisterModules().writeValueAsString(event()));
+            consumer.onDlt(envelope(event()));
         } catch (Exception exception) {
             throw new AssertionError(exception);
         }
@@ -106,12 +116,31 @@ class CommentWriteConsumerTest {
         when(pendingMapper.findById(101L)).thenReturn(PendingComment.builder()
                 .pendingCommentId(101L).status("succeeded").build());
         CommentWriteConsumer consumer = new CommentWriteConsumer(
-                new CommentEventReader(new ObjectMapper().findAndRegisterModules()),
-                pendingMapper, mock(TextStorageService.class), mock(CommentMaterializationService.class), metrics);
-        String message = new ObjectMapper().findAndRegisterModules().writeValueAsString(event());
+                reader(), pendingMapper, mock(TextStorageService.class),
+                mock(CommentMaterializationService.class), metrics);
+        String message = envelope(event());
 
         assertThatThrownBy(() -> consumer.onDlt(message)).hasMessageContaining("could not transition");
         verify(metrics).dlt("update_failure");
+    }
+
+    private CommentCanalEventReader reader() {
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        return new CommentCanalEventReader(objectMapper, new CommentEventReader(objectMapper));
+    }
+
+    private String envelope(CommentOutboxEvent event) throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        var root = objectMapper.createObjectNode()
+                .put("table", "outbox")
+                .put("type", "INSERT");
+        root.putArray("data").add(objectMapper.createObjectNode()
+                .put("id", event.eventId())
+                .put("aggregate_type", "comment")
+                .put("aggregate_id", event.commentId())
+                .put("type", event.eventType().name())
+                .put("payload", objectMapper.writeValueAsString(event)));
+        return objectMapper.writeValueAsString(root);
     }
 
     private CommentOutboxEvent event() {

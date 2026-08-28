@@ -1,30 +1,39 @@
 package com.tongji.comment.consumer;
 
+import com.tongji.comment.event.CommentCanalEventReader;
 import com.tongji.comment.event.CommentEventType;
 import com.tongji.comment.event.CommentOutboxEvent;
-import com.tongji.comment.event.CommentEventReader;
 import com.tongji.comment.mapper.PendingCommentMapper;
+import com.tongji.comment.metrics.CommentMetrics;
 import com.tongji.comment.model.PendingComment;
 import com.tongji.comment.service.impl.CommentMaterializationService;
-import com.tongji.comment.metrics.CommentMetrics;
+import com.tongji.outbox.OutboxTopics;
 import com.tongji.storage.text.TextStorageService;
 import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.kafka.retrytopic.DltStrategy;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 
+/**
+ * 从共享 Canal Outbox 总线消费评论写请求，并在 Listener 线程直接完成关键物化。
+ *
+ * <p>临时故障进入评论专用 Retry Topic；畸形目标事件直接进入 DLT，DLT 只终止仍为 pending 的请求。</p>
+ *
+ * @since 2026-08-28
+ */
 @Component
 public class CommentWriteConsumer {
-    private final CommentEventReader eventReader;
+    private final CommentCanalEventReader eventReader;
     private final PendingCommentMapper pendingCommentMapper;
     private final TextStorageService textStorageService;
     private final CommentMaterializationService materializationService;
     private final CommentMetrics metrics;
 
-    public CommentWriteConsumer(CommentEventReader eventReader,
+    public CommentWriteConsumer(CommentCanalEventReader eventReader,
                                 PendingCommentMapper pendingCommentMapper,
                                 TextStorageService textStorageService,
                                 CommentMaterializationService materializationService,
@@ -43,15 +52,20 @@ public class CommentWriteConsumer {
                     multiplierExpression = "${comment.kafka.write-retry-multiplier:2}",
                     maxDelayExpression = "${comment.kafka.write-retry-max-delay-ms:10000}"
             ),
+            retryTopicSuffix = "-comment-write-retry",
+            dltTopicSuffix = "-comment-write-dlt",
+            dltStrategy = DltStrategy.FAIL_ON_ERROR,
             exclude = IllegalArgumentException.class
     )
     @KafkaListener(
-            topics = "${comment.kafka.write-topic:comment-write}",
+            topics = OutboxTopics.CANAL_OUTBOX,
             groupId = "${comment.kafka.write-group:comment-write-consumer}",
             containerFactory = "commentWriteKafkaListenerContainerFactory"
     )
     public void onMessage(String message) {
-        handle(eventReader.read(message));
+        for (CommentOutboxEvent event : eventReader.readRequested(message)) {
+            handle(event);
+        }
     }
 
     void handle(CommentOutboxEvent event) {
@@ -91,9 +105,19 @@ public class CommentWriteConsumer {
         }
     }
 
+    /**
+     * 将 DLT 中仍为 pending 的评论请求推进为 failed。
+     *
+     * @param message 原始 Canal Outbox envelope JSON
+     */
     @DltHandler
     public void onDlt(String message) {
-        CommentOutboxEvent event = eventReader.read(message);
+        for (CommentOutboxEvent event : eventReader.readRequested(message)) {
+            failPending(event);
+        }
+    }
+
+    private void failPending(CommentOutboxEvent event) {
         int updated = pendingCommentMapper.updateStatusIfCurrent(event.commentId(), "failed", "pending");
         if (updated == 1) {
             metrics.dlt("failed_pending");
