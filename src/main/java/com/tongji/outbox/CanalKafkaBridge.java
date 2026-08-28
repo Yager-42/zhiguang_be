@@ -42,6 +42,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
 
     private volatile boolean running;
     private volatile CanalConnector connector;
+    private volatile long lastCaughtUpAtMillis;
 
     public CanalKafkaBridge(CanalOutboxBatchPublisher batchPublisher,
                             @Qualifier("canalOutboxExecutor") TaskExecutor taskExecutor,
@@ -89,6 +90,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
         try {
             while (running) {
                 try {
+                    lastCaughtUpAtMillis = 0L;
                     connector = createConnector();
                     connector.connect();
                     connector.subscribe(filter);
@@ -100,6 +102,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
                         log.error("Canal bridge error, reconnecting in {} ms", reconnectDelayMs, exception);
                     }
                 } finally {
+                    lastCaughtUpAtMillis = 0L;
                     disconnect();
                     connector = null;
                 }
@@ -109,6 +112,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
             }
         } finally {
             running = false;
+            lastCaughtUpAtMillis = 0L;
         }
     }
 
@@ -119,6 +123,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
             long batchId = message.getId();
             if (batchId == -1 || message.getEntries() == null || message.getEntries().isEmpty()) {
                 sleep(intervalMs);
+                lastCaughtUpAtMillis = System.currentTimeMillis();
                 continue;
             }
             if (processBatch(connector, message)) {
@@ -137,6 +142,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
             connector.ack(batchId);
             return true;
         } catch (Exception exception) {
+            lastCaughtUpAtMillis = 0L;
             connector.rollback(batchId);
             log.error("Canal outbox batch failed and was rolled back: batchId={}", batchId, exception);
             return false;
@@ -187,10 +193,21 @@ public class CanalKafkaBridge implements SmartLifecycle {
     @Override
     public void stop() {
         running = false;
+        lastCaughtUpAtMillis = 0L;
     }
 
     @Override
     public boolean isRunning() {
         return running;
+    }
+
+    boolean isCleanupSafe(long nowMillis, long maxCaughtUpAgeMillis) {
+        long caughtUpAt = lastCaughtUpAtMillis;
+        return enabled
+                && running
+                && maxCaughtUpAgeMillis > 0L
+                && caughtUpAt > 0L
+                && nowMillis >= caughtUpAt
+                && nowMillis - caughtUpAt <= maxCaughtUpAgeMillis;
     }
 }

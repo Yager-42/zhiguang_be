@@ -10,5 +10,12 @@
         INSERT INTO outbox (id, event_key, aggregate_type, aggregate_id, type, payload, created_at)
         VALUES (#{id}, #{eventKey}, #{aggregateType}, #{aggregateId}, #{type}, #{payload}, NOW(3))
     </insert>
+
+    <delete id="deleteCreatedBefore">
+        DELETE FROM outbox
+        WHERE created_at &lt; #{cutoff}
+        ORDER BY created_at, id
+        LIMIT #{limit}
+    </delete>
 </mapper>
 

@@ -250,6 +250,14 @@ canal:
   batch-retry-max-ms: ${CANAL_BATCH_RETRY_MAX_MS:30000}
   kafka-send-timeout-ms: ${CANAL_KAFKA_SEND_TIMEOUT_MS:35000}
 
+outbox:
+  cleanup:
+    enabled: ${OUTBOX_CLEANUP_ENABLED:true}
+    retention-hours: ${OUTBOX_CLEANUP_RETENTION_HOURS:720}
+    batch-size: ${OUTBOX_CLEANUP_BATCH_SIZE:1000}
+    max-caught-up-age-ms: ${OUTBOX_CLEANUP_MAX_CAUGHT_UP_AGE_MS:300000}
+    interval-ms: ${OUTBOX_CLEANUP_INTERVAL_MS:3600000}
+
 counter:
   rebuild:
     enabled: false

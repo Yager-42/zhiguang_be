@@ -4,7 +4,9 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 /**
- * Persists domain events in the shared outbox table.
+ * 持久化和有界清理共享 Outbox 事件。
+ *
+ * @since 2026-08-28
  */
 @Mapper
 public interface OutboxMapper {
@@ -20,4 +22,7 @@ public interface OutboxMapper {
                      @Param("aggregateId") Long aggregateId,
                      @Param("type") String type,
                      @Param("payload") String payload);
+
+    int deleteCreatedBefore(@Param("cutoff") java.time.LocalDateTime cutoff,
+                            @Param("limit") int limit);
 }
