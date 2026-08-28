@@ -34,7 +34,7 @@ class CommentEventWriterTest {
         eventPublisher = mock(ApplicationEventPublisher.class);
         writer = new CommentEventWriter(outboxMapper, idService,
                 new ObjectMapper().findAndRegisterModules(), eventPublisher);
-        when(idService.nextId(IdNamespace.OUTBOX_EVENT)).thenReturn(501L);
+        when(idService.nextId(IdNamespace.OUTBOX_EVENT)).thenReturn(501L, 502L);
     }
 
     @Test
@@ -88,6 +88,7 @@ class CommentEventWriterTest {
                 .creatorId(7L).clientRequestId("client-1").build();
 
         writer.deleted(comment);
+        writer.moderated(comment);
 
         verify(outboxMapper).insertUnique(
                 eq(501L),
@@ -97,11 +98,24 @@ class CommentEventWriterTest {
                 eq("COMMENT_DELETED"),
                 any(String.class)
         );
+        verify(outboxMapper).insertUnique(
+                eq(502L),
+                eq("comment-moderated:101"),
+                eq("comment"),
+                eq(101L),
+                eq("COMMENT_MODERATED"),
+                any(String.class)
+        );
         verify(eventPublisher).publishEvent(org.mockito.ArgumentMatchers.argThat((Object event) ->
                 event instanceof CommentMutationEvent mutation
                         && mutation.eventType() == CommentEventType.COMMENT_DELETED
                         && mutation.rootId() == 11L));
+        verify(eventPublisher).publishEvent(org.mockito.ArgumentMatchers.argThat((Object event) ->
+                event instanceof CommentMutationEvent mutation
+                        && mutation.eventType() == CommentEventType.COMMENT_MODERATED
+                        && mutation.rootId() == 11L));
     }
+
     private CommentOutboxEvent read(String payload) {
         try {
             return new ObjectMapper().findAndRegisterModules().readValue(payload, CommentOutboxEvent.class);

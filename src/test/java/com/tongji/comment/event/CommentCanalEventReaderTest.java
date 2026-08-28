@@ -49,6 +49,13 @@ class CommentCanalEventReaderTest {
     }
 
     @Test
+    void rejectsMatchingOutboxEnvelopeWithoutRows() {
+        assertThatThrownBy(() -> reader.readRequested("{\"table\":\"outbox\",\"type\":\"INSERT\"}"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Outbox envelope data must be an array");
+    }
+
+    @Test
     void rejectsTargetRowWhenPayloadEventTypeDiffers() throws Exception {
         CommentOutboxEvent payload = event(CommentEventType.COMMENT_CREATED, null);
 

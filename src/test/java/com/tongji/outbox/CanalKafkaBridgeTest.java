@@ -12,6 +12,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 
 class CanalKafkaBridgeTest {
 
@@ -44,6 +45,24 @@ class CanalKafkaBridgeTest {
     }
 
     @Test
+    void retriesTheSameBatchAfterRollbackAndAcknowledgesOnlyTheSuccessfulAttempt() throws Exception {
+        CanalOutboxBatchPublisher publisher = mock(CanalOutboxBatchPublisher.class);
+        CanalConnector connector = mock(CanalConnector.class);
+        Message message = new Message(13L, List.of());
+        doThrow(new IllegalStateException("broker unavailable"))
+                .doNothing()
+                .when(publisher).publish(message);
+        CanalKafkaBridge bridge = bridge(publisher);
+
+        assertThat(bridge.processBatch(connector, message)).isFalse();
+        assertThat(bridge.processBatch(connector, message)).isTrue();
+
+        verify(publisher, times(2)).publish(message);
+        verify(connector).rollback(13L);
+        verify(connector).ack(13L);
+    }
+
+    @Test
     void retryDelayUsesBoundedExponentialFullJitter() {
         CanalKafkaBridge bridge = bridge(mock(CanalOutboxBatchPublisher.class));
 
@@ -59,7 +78,6 @@ class CanalKafkaBridgeTest {
             assertThat(bridge.batchRetryDelayMs(failures)).isBetween(1L, cap);
         }
     }
-
 
     private static CanalKafkaBridge bridge(CanalOutboxBatchPublisher publisher) {
         return new CanalKafkaBridge(

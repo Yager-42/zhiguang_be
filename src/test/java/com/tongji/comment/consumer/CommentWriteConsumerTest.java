@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class CommentWriteConsumerTest {
@@ -47,6 +48,8 @@ class CommentWriteConsumerTest {
         KafkaListener listener = CommentWriteConsumer.class.getMethod("onMessage", String.class)
                 .getAnnotation(KafkaListener.class);
         assertThat(listener.topics()).containsExactly(OutboxTopics.CANAL_OUTBOX);
+        assertThat(listener.groupId()).isEqualTo("${comment.kafka.write-group:comment-write-consumer}");
+        assertThat(listener.containerFactory()).isEqualTo("commentWriteKafkaListenerContainerFactory");
     }
 
     @Test
@@ -69,6 +72,22 @@ class CommentWriteConsumerTest {
         ordered.verify(finalizer).finalizeMaterialization(event, pending);
         assertThat(CommentWriteConsumer.class.getMethod("onMessage", String.class)
                 .getAnnotation(Transactional.class)).isNull();
+    }
+
+    @Test
+    void succeededReplaySkipsCassandraAndMysqlFinalizer() {
+        PendingCommentMapper pendingMapper = mock(PendingCommentMapper.class);
+        TextStorageService textStorageService = mock(TextStorageService.class);
+        CommentMaterializationService finalizer = mock(CommentMaterializationService.class);
+        CommentWriteConsumer consumer = new CommentWriteConsumer(
+                mock(CommentCanalEventReader.class), pendingMapper, textStorageService, finalizer,
+                mock(CommentMetrics.class));
+        when(pendingMapper.findById(101L)).thenReturn(PendingComment.builder()
+                .pendingCommentId(101L).status("succeeded").build());
+
+        consumer.handle(event());
+
+        verifyNoInteractions(textStorageService, finalizer);
     }
 
     @Test
@@ -106,6 +125,22 @@ class CommentWriteConsumerTest {
         }
 
         verify(metrics).dlt("failed_pending");
+    }
+
+    @Test
+    void failedDltReplayIsIdempotent() throws Exception {
+        PendingCommentMapper pendingMapper = mock(PendingCommentMapper.class);
+        CommentMetrics metrics = mock(CommentMetrics.class);
+        when(pendingMapper.updateStatusIfCurrent(101L, "failed", "pending")).thenReturn(0);
+        when(pendingMapper.findById(101L)).thenReturn(PendingComment.builder()
+                .pendingCommentId(101L).status("failed").build());
+        CommentWriteConsumer consumer = new CommentWriteConsumer(
+                reader(), pendingMapper, mock(TextStorageService.class),
+                mock(CommentMaterializationService.class), metrics);
+
+        consumer.onDlt(envelope(event()));
+
+        verify(metrics).dlt("already_failed");
     }
 
     @Test
