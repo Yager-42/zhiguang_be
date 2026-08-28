@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
 
 public interface TextStorageService {
 
-    void savePostText(long postId, String body, String sha256) throws TextWriteException;
+    void savePostTextIdempotent(long postId, String body, String sha256) throws TextWriteException;
 
     Optional<String> getPostText(long postId, String fallbackContentUrl) throws TextReadException;
 

@@ -7,8 +7,13 @@ import org.springframework.data.cassandra.core.mapping.Table;
 
 import java.time.Instant;
 
-@Table("post_text_by_post_id")
-public class PostText {
+/**
+ * 已发布知文的不可变 Cassandra 正文归档。
+ *
+ * @since 2026-08-28
+ */
+@Table("post_text_archive_by_post_id")
+public class PostTextArchive {
 
     @PrimaryKey
     @Column("post_id")
@@ -17,22 +22,18 @@ public class PostText {
     @Column("body")
     private final String body;
 
-    @Column("version")
-    private final int version;
-
     @Column("sha256")
     private final String sha256;
 
-    @Column("updated_at")
-    private final Instant updatedAt;
+    @Column("archived_at")
+    private final Instant archivedAt;
 
     @PersistenceCreator
-    public PostText(Long postId, String body, int version, String sha256, Instant updatedAt) {
+    public PostTextArchive(Long postId, String body, String sha256, Instant archivedAt) {
         this.postId = postId;
         this.body = body;
-        this.version = version;
         this.sha256 = sha256;
-        this.updatedAt = updatedAt;
+        this.archivedAt = archivedAt;
     }
 
     public Long getPostId() {
@@ -43,15 +44,11 @@ public class PostText {
         return body;
     }
 
-    public int getVersion() {
-        return version;
-    }
-
     public String getSha256() {
         return sha256;
     }
 
-    public Instant getUpdatedAt() {
-        return updatedAt;
+    public Instant getArchivedAt() {
+        return archivedAt;
     }
 }

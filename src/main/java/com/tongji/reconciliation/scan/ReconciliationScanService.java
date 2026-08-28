@@ -1,7 +1,6 @@
 package com.tongji.reconciliation.scan;
 
 import com.tongji.comment.mapper.CommentMapper;
-import com.tongji.knowpost.manager.PublishAttemptService;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPostDetailRow;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
@@ -19,7 +18,7 @@ import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
 import com.tongji.search.index.SearchIndexService;
 import com.tongji.storage.text.CommentTextRepository;
-import com.tongji.storage.text.PostTextRepository;
+import com.tongji.storage.text.PostTextArchiveRepository;
 import com.tongji.counter.service.CounterService;
 import com.tongji.user.mapper.UserMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +29,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.function.IntSupplier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
@@ -48,12 +46,11 @@ public class ReconciliationScanService {
     private final ObjectMapper objectMapper;
     private final CounterService counterService;
     private final SearchIndexService searchIndexService;
-    private final PostTextRepository postTextRepository;
+    private final PostTextArchiveRepository postTextArchiveRepository;
     private final CommentTextRepository commentTextRepository;
     private final PromotionAuctionWindowMapper promotionAuctionWindowMapper;
     private final PromotionAuctionCompensationService promotionAuctionCompensationService;
     private final PromotionBPrimeProperties promotionBPrimeProperties;
-    private final IntSupplier stuckPublishingRecoverer;
     private final Clock clock;
 
     @Autowired
@@ -67,12 +64,11 @@ public class ReconciliationScanService {
                                      ObjectMapper objectMapper,
                                      CounterService counterService,
                                      SearchIndexService searchIndexService,
-                                     PostTextRepository postTextRepository,
+                                     PostTextArchiveRepository postTextArchiveRepository,
                                      CommentTextRepository commentTextRepository,
                                      PromotionAuctionWindowMapper promotionAuctionWindowMapper,
                                      PromotionAuctionCompensationService promotionAuctionCompensationService,
-                                     PromotionBPrimeProperties promotionBPrimeProperties,
-                                     PublishAttemptService publishAttemptService) {
+                                     PromotionBPrimeProperties promotionBPrimeProperties) {
         this(
                 checkpointMapper,
                 knowPostMapper,
@@ -84,12 +80,11 @@ public class ReconciliationScanService {
                 objectMapper,
                 counterService,
                 searchIndexService,
-                postTextRepository,
+                postTextArchiveRepository,
                 commentTextRepository,
                 promotionAuctionWindowMapper,
                 promotionAuctionCompensationService,
                 promotionBPrimeProperties,
-                publishAttemptService::recoverStuckPublishingAttempts,
                 Clock.systemDefaultZone()
         );
     }
@@ -104,12 +99,11 @@ public class ReconciliationScanService {
                               ObjectMapper objectMapper,
                               CounterService counterService,
                               SearchIndexService searchIndexService,
-                              PostTextRepository postTextRepository,
+                              PostTextArchiveRepository postTextArchiveRepository,
                               CommentTextRepository commentTextRepository,
                               PromotionAuctionWindowMapper promotionAuctionWindowMapper,
                               PromotionAuctionCompensationService promotionAuctionCompensationService,
                               PromotionBPrimeProperties promotionBPrimeProperties,
-                              IntSupplier stuckPublishingRecoverer,
                               Clock clock) {
         this.checkpointMapper = checkpointMapper;
         this.knowPostMapper = knowPostMapper;
@@ -121,12 +115,11 @@ public class ReconciliationScanService {
         this.objectMapper = objectMapper;
         this.counterService = counterService;
         this.searchIndexService = searchIndexService;
-        this.postTextRepository = postTextRepository;
+        this.postTextArchiveRepository = postTextArchiveRepository;
         this.commentTextRepository = commentTextRepository;
         this.promotionAuctionWindowMapper = promotionAuctionWindowMapper;
         this.promotionAuctionCompensationService = promotionAuctionCompensationService;
         this.promotionBPrimeProperties = promotionBPrimeProperties;
-        this.stuckPublishingRecoverer = stuckPublishingRecoverer;
         this.clock = clock;
     }
 
@@ -166,7 +159,7 @@ public class ReconciliationScanService {
     public void scanPostCassandraBatch() {
         scanPostBatch(
                 ReconciliationScanType.POST_CASSANDRA,
-                id -> !postTextRepository.existsById(id),
+                id -> !postTextArchiveRepository.existsById(id),
                 ReconciliationTaskType.CASSANDRA_TEXT
         );
     }
@@ -224,9 +217,6 @@ public class ReconciliationScanService {
         );
     }
 
-    public int recoverStuckPublishingPosts() {
-        return stuckPublishingRecoverer.getAsInt();
-    }
 
     public FollowInboxTaskSpec buildFollowInboxTaskSpec(long postId) {
         KnowPostDetailRow row = knowPostMapper.findDetailById(postId);

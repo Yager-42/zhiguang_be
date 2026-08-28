@@ -46,6 +46,6 @@ public class CassandraTextReconciler implements Reconciler {
         }
         String body = textStorageService.getPostText(postId, row.getContentUrl())
                 .orElseThrow(() -> new IllegalStateException("No source body available for post " + postId));
-        textStorageService.savePostText(postId, body, row.getContentSha256());
+        textStorageService.savePostTextIdempotent(postId, body, row.getContentSha256());
     }
 }
