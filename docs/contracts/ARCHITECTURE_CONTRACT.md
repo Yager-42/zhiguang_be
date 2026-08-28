@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **contract_version** | `0.14.0` |
+| **contract_version** | `0.15.0` |
 | **status** | **active**（本文档首次建立；后续架构/契约变更必须同步修改本文并升版本） |
 | **updated** | 2026-08-28 |
 | **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，469 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
@@ -28,7 +28,7 @@
 | D2 | 模块分层 | 每域模块 = `api`（Controller+DTO）→ `service`(+`impl`) → `manager`/`mapper`/`event`/`consumer`/`model`；跨模块调用走 **service 接口** 或 **Kafka 事件**（详见 §3.3 模块依赖） | controller 直连 mapper；跨模块直读他人表 |
 | D3 | HTTP 错误契约 | 全局 `@RestControllerAdvice`（`common/web/GlobalExceptionHandler.java`）：`BusinessException`→400 + `{code,message}`；`@Valid` 失败→400 + `BAD_REQUEST`；无匹配资源→404 + `{code:"NOT_FOUND",message:"请求资源不存在"}`；兜底 `Exception`→500 + `{code:"INTERNAL_ERROR", message:"服务异常，请稍后重试"}`；业务码枚举 `common/exception/ErrorCode.java`（27 值） | 各 controller 自造错误体 |
 | D4 | ID 生成 | 统一 `IdService.nextId(IdNamespace)`（`common/id/`）：**Snowflake** 为默认（41+5+5+12 位，EPOCH 2024-01-01，时钟回拨抛 `ClockBackwardException`），推广历史 command 与保证金分别使用 `PROMOTION_COMMAND`、`PROMOTION_ESCROW`；**Segment**（`leaf_alloc` 表双缓冲，50% 阈值预加载）仅用于 `reconciliation_task/admin_operation/audit_log`；命名空间见 `IdNamespace.java` | 各模块自造随机/自增 ID |
-| D5 | 异步一致性 | **outbox 表 + Canal CDC + Kafka `canal-outbox` 主题** 为跨模块事件总线（`outbox/`）：业务事务内写 outbox；`CanalKafkaBridge` 转发完整 outbox 行并等待该批全部 Kafka send 成功后 ack，解析/发送失败 rollback；**at-least-once + 消费端幂等** | 业务事务内直发 Kafka；未等待 broker 确认即推进 Canal 位点 |
+| D5 | 异步一致性 | **共享 `outbox` 表 + 单活 Canal CDC bridge + Kafka `canal-outbox` 主题** 为跨模块事件总线（`outbox/`）：业务事务内写 outbox；部署中同时只能有一个 `CanalKafkaBridge` 消费同一 Canal destination；Bridge 转发完整 outbox 行并等待该批全部 Kafka send 成功后 ack，失败 rollback 并有界退避；**at-least-once + 稳定 eventKey + 消费端幂等** | 业务事务内直发 Kafka；多个 Bridge 并发消费同一 destination；未等待 broker 确认即推进 Canal 位点；用本地发送状态伪造 exactly-once |
 | D6 | 存储分工 | **MySQL**：长期事实/账务（用户、帖子、评论、发布尝试、outbox、钱包总余额、推广保证金授权与投影、对账、通知、关注关系、收藏关系）；**Redis**：推广窗口运行期间的竞价状态、顺序、排名、已授权保证金占用与 Stream 决策日志实时权威，以及计数 SDS、点赞事实位图、收藏派生位图、缓存、分布式协调（singleflight/锁）；推广 Stream 在 MySQL checkpoint 推进后安全裁剪并保留最近 100000 条；**Kafka**：非推广域异步事件总线；**Cassandra**：长文本正文与关注流时间线；**Elasticsearch**：搜索；**MinIO**：对象。见 §5 | 将 Redis 余额占用扩展为可超出 MySQL 预授权总额的账务事实；把收藏关系重新降级为 Redis 唯一事实；正文大字段进 MySQL |
 | D7 | 计数模型 | 点赞以分片位图为事实；收藏以 MySQL `user_favorite` 为关系事实并通过 Outbox 派生分片位图。二者变化统一进入 **Kafka 事件聚合桶**（`counter-events` → `agg:v1:*`，每秒折叠 SDS）与 **SDS 固定结构**（`cnt:v1:*`，5×uint32 大端）；用户计数 `ucnt:{userId}` 同 SDS 布局（`counter/schema/*.java`），**关注/粉丝段由关系事务提交后的进程内监听器增量维护**（`FollowCounterListener`，失败容忍交由读侧 300s 采样校验与 `follow_graph` 对账收敛，见 §7.4/§7.5） | 计数直接 INCR 单一计数器键；收藏请求同步双写 MySQL 与 Redis |
 | D8 | 发布语义 | **202 Accepted 只表示 attempt 已持久受理**：受理事务原子写 `publish_attempt`、`know_posts.publishing` 与唯一 `publish_requested` Outbox；Kafka 发布消费组直接执行 MinIO 校验、Cassandra 幂等归档及 MySQL `run_version` CAS 完成；临时故障走 Retry Topic，永久故障或 DLT 才进入 `publish_failed` | 同步发布返回 200 表示已发布；把关键任务提交到 JVM 本地 executor；按墙钟时间推断任务死亡；无版本状态流转 |
@@ -90,7 +90,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
         │                              └─→ MinIO（对象预签名）
         │
         ├─→ outbox 表（同事务）── Canal CDC ──→ Kafka canal-outbox ──→ 各消费组
-        ├─→ Kafka：comment-write / comment-feedback / counter-events
+        ├─→ Kafka：comment-feedback / counter-events
         ├─→ Redis Lua + Stream：promotion auction decisions
         └─→ 失败补偿 ──→ reconciliation_task 表 ──→ Reconciler 执行器
 ```
@@ -103,7 +103,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `user` | 用户实体持久化 | `UserService` |
 | `profile` | 资料 PATCH / 头像，更新发 `user_profile_updated` outbox 事件 | `ProfileController` |
 | `knowpost` | 知文草稿/发布（attempt 状态机）/Feed/详情/置顶/可见性/软删 | `KnowPostController` |
-| `comment` | 异步评论管道：pending→outbox→comment-write→落库+Cassandra 正文+feedback | `CommentController` |
+| `comment` | 异步评论管道：pending→共享 outbox→Canal→canal-outbox→落库+Cassandra 正文+feedback | `CommentController` |
 | `counter` | 实体计数（like/fav/comment）与用户计数（SDS） | `ActionController`/`CounterController` |
 | `favorite` | MySQL 收藏事实、同事务 Outbox、收藏列表与 Redis 状态派生 | `FavoriteController`/`ActionController` |
 | `relation` | 关注/取关（`following` 为唯一关系事实）+ 关注/粉丝列表（直查 MySQL，无镜像） | `RelationController` |
@@ -122,7 +122,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 ### 3.3 模块依赖方向（代码事实）
 
 - **进程内 service 调用**（跨模块）：`knowpost → storage.text / counter / wallet(ContentReward) / minio / search.index`；`favorite → knowpost.service / knowpost.feed`；`comment → storage.text / counter / wallet(ContentReward)`；`relation → counter(UserCounterService)`；`moderation → knowpost.mapper / comment.mapper / notification / singleflight`；`promotion → wallet / knowpost.feed / recommendation(HomeFeedMixing) / search`；`recommendation → relation.mapper / knowpost.mapper / counter`；`search → counter / promotion(allocation) / knowpost(dto)`；`auth → wallet(WalletRegistrationGrantService)`；`reconciliation → 全部派生源`。
-- **事件方向**（Kafka）：各模块生产者 → `canal-outbox` / `comment-write` / `comment-feedback` / `counter-events` / `zhiguang.promotion.auction.decisions.v2`；消费组见 §6.2。
+- **事件方向**（Kafka）：各模块生产者 → `canal-outbox` / `comment-feedback` / `counter-events` / `zhiguang.promotion.auction.decisions.v2`；消费组见 §6.2。
 - **禁止反向**：`common` 不依赖任何业务模块；`storage.text` 只依赖 Cassandra；领域 mapper 不互相引用（跨模块读经 service 或自有 SQL）。
 
 ### 3.4 线程池（`config/ThreadPoolConfig.java`，全部 `waitForTasksToCompleteOnShutdown=true`）
@@ -134,7 +134,6 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | `canalOutboxExecutor` | 2/4 | 50 | **Abort** | Canal 桥接消息转投 |
 | `reconciliationExecutor` | 2/4 | 100 | CallerRuns | 对账任务/发布派生工作 |
 | `commentReadExecutor` | 8/16 | 200 | CallerRuns | 评论页 Cassandra/Counter 并行读取 |
-| `commentOutboxExecutor` | 2/4 | 50 | CallerRuns | 评论 outbox future 协调 |
 | `commentCacheInvalidationScheduler` | 1 | 100ms 合并窗口 | 专用单线程延迟调度，不注册为 Spring `TaskScheduler` | 评论缓存失效去重与合并 |
 | `promotionBidDrainerExecutor` | 可配置固定并发 | 可配置有界 ready-window 队列 | **Abort** | 每窗口 flat combiner 的共享 drainer；任务单位为窗口，每轮至多一个有界批次 |
 | `promotionBidWebSocketOutboundExecutor` | 32/32（可配置） | 65536（可配置） | **Abort** | 原生 WebSocket 私有 ACK 与可覆盖公共状态单写泵；跨 session 并行、单 session 串行 |
@@ -181,10 +180,9 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | 审计 | `login_logs` | `(user_id, created_at)` 索引 |
 | 内容 | `know_posts` | 业务层雪花 ID；`tags/img_urls` JSON；正文只存 `content_url/object_key/etag/sha256`；状态守卫索引 |
 | 发布 | `publish_attempt` | `uk(creator_id, post_id, idempotent_key)` 请求幂等；`run_version` 隔离手工 retry 执行轮次；正文 object key/etag/sha256 为 attempt 不可变快照 |
-| 事件 | `outbox` | 总线表：`event_key` 唯一保证业务事件幂等，另含 `aggregate_type/aggregate_id/type/payload(JSON)`；Canal 订阅目标 |
+| 事件 | `outbox` | 追加式总线表：`event_key` 唯一保证业务事件幂等，另含 `aggregate_type/aggregate_id/type/payload(JSON)`；Canal 订阅目标；仅在 Canal 消费位点健康且超过保守保留窗口后有界批删 |
 | 收藏 | `user_favorite` | 收藏关系唯一事实；PK `(user_id,post_id)` 幂等；`idx_user_favorite_page(user_id,created_at DESC,post_id DESC)` 承载稳定游标分页；不保存收藏总数 |
-| 评论 | `comments` / `pending_comments` | 正文**不在此表**（Cassandra）；`status` 0 活跃/1 软删；`uk(creator_id, client_request_id)` |
-| 评论 outbox | `comment_outbox` | **统一事件表**：原子承载 `COMMENT_WRITE_REQUESTED/COMMENT_CREATED/COMMENT_DELETED/COMMENT_MODERATED`；DDL 同时由 `db/schema.sql` 与 `CommentOutboxSchemaInitializer` 保持一致；`state/claim_token/claim_until/next_attempt_at` 构成有界批量 dispatcher 状态机 |
+| 评论 | `comments` / `pending_comments` | 正文**不在此表**（Cassandra）；`status` 0 活跃/1 软删；`uk(creator_id, client_request_id)`；评论请求与状态变化事件写共享 `outbox` |
 | 关系 | `following` | 唯一关系事实；`rel_status` 1 有效/0 取消；`uk(from,to)`；`idx_to_status_created(to,rel_status,created_at,from)` 承载粉丝计数/粉丝列表/fanout 查询 |
 | 通知 | `notifications` | `uk_notification_event_key` 幂等；聚合窗口列 |
 | 审核 | `moderation_reports` | `uk(reporter, target_type, target_id)` 去重；LLM/重试/处置列 |
@@ -254,17 +252,15 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 ### 6.1 outbox → Canal → Kafka 总线（跨模块主总线）
 
 1. **写**：业务事务内通过 `OutboxMapper.insertUnique(id,eventKey,aggregateType,aggregateId,type,payloadJson)` 写入；id=`IdNamespace.OUTBOX_EVENT`（Snowflake），`event_key` 唯一约束承载业务幂等。
-2. **桥**：`CanalKafkaBridge` + `CanalOutboxBatchPublisher`（`outbox/`）由 `SmartLifecycle` 与 `canal.enabled` 门控；订阅 `zhiguang.outbox`，只处理 `EventType.INSERT/UPDATE`，转发完整 after-column 行为 `{"table":"outbox","type":"INSERT|UPDATE","data":[{id,event_key,aggregate_type,aggregate_id,type,payload,created_at}]}`。单行事件以 `{aggregate_type}:{aggregate_id}` 为 Kafka key；每条 `KafkaTemplate.send` 都在 `canal.kafka-send-timeout-ms` 内等待 broker 结果；批次全部成功才 ack，解析/序列化/发送失败对该 batch rollback。
-3. **解**：`OutboxMessageReader` 提供通用 Canal envelope 解析；发布关键消费使用 `PublishEventReader` 严格解析目标事件，畸形目标事件不得被当作空消息确认。
-4. **事件类型注册表**（outbox `type` 字段，代码字面量）：`publish_requested` / `content_published`（knowpost）、`user_profile_updated`（profile）、`KnowPostMetadataUpdated` / `KnowPostDeleted` / `KnowPostModerationRejected`（knowpost+moderation）、`review_requested`（moderation）、`FollowCreated` / `FollowCanceled`（relation，payload=RelationEvent JSON）、`FavoriteChanged`（favorite，payload 含 eventType/schemaVersion/userId/postId/faved/delta/occurredAt）、`moderation` 处置 delete 事件（`{entity:knowpost, op:delete, source:moderation}`）。
+2. **桥**：`CanalKafkaBridge` + `CanalOutboxBatchPublisher`（`outbox/`）由 `SmartLifecycle` 与 `canal.enabled` 门控；同一 Canal destination 在所有部署中同时只能有一个 Bridge 启用。Bridge 订阅 `zhiguang.outbox`，只处理 `EventType.INSERT/UPDATE`，转发完整 after-column 行为 `{"table":"outbox","type":"INSERT|UPDATE","data":[{id,event_key,aggregate_type,aggregate_id,type,payload,created_at}]}`。单行事件以 `{aggregate_type}:{aggregate_id}` 为 Kafka key；每条 `KafkaTemplate.send` 都在 `canal.kafka-send-timeout-ms` 内等待 broker 结果；批次全部成功才 ack，解析、序列化或发送失败对该 batch rollback，并执行有上限的指数退避与 full jitter，成功 ack 后复位失败次数。
+3. **解**：`OutboxMessageReader` 提供通用 Canal envelope 解析；发布和评论关键消费分别使用 `PublishEventReader`、`CommentCanalEventReader` 严格解析目标事件。无关事件返回空集合；畸形 envelope 或目标事件抛异常，不得被当作空消息确认。
+4. **事件类型注册表**（outbox `type` 字段，代码字面量）：`publish_requested` / `content_published`（knowpost）、`COMMENT_WRITE_REQUESTED` / `COMMENT_CREATED` / `COMMENT_DELETED` / `COMMENT_MODERATED`（comment）、`user_profile_updated`（profile）、`KnowPostMetadataUpdated` / `KnowPostDeleted` / `KnowPostModerationRejected`（knowpost+moderation）、`review_requested`（moderation）、`FollowCreated` / `FollowCanceled`（relation，payload=RelationEvent JSON）、`FavoriteChanged`（favorite，payload 含 eventType/schemaVersion/userId/postId/faved/delta/occurredAt）、`moderation` 处置 delete 事件（`{entity:knowpost, op:delete, source:moderation}`）。
 
 ### 6.2 Kafka 主题清单（精确字符串）
 
 | 主题 | 生产者 | 消费组 | 载荷要点 |
 |------|--------|--------|----------|
-| `canal-outbox` | `CanalKafkaBridge` | `publish-requested-consumer`（Retry/DLT）、`publish-reward-consumer`、`publish-user-counter-consumer`、`favorite-outbox-relay`、`moderation-review-consumer`、`notification-follow-consumer`、`feed-timeline-consumer`、`recommendation-content-published-consumer`、`recommendation-user-profile-consumer`、`search-index-consumer` | `publish_requested` 驱动正文归档与发布完成；`content_published` 驱动独立派生效果；其余见事件注册表 |
-| `comment-write`（`comment.kafka.write-topic`，8 分区） | `CommentOutboxDispatcher` 从 `comment_outbox` 有界批量异步发送，key=`aggregateId`；成功/失败子集分别更新 | `comment-write-consumer`（初始并发 4；`@RetryableTopic` → `comment-write-dlt`） | `CommentOutboxEvent(eventId,eventType,commentId,postId,rootId,parentId,creatorId,clientRequestId,body,occurredAt)` |
-| `comment-events`（`comment.kafka.event-topic`） | `CommentOutboxDispatcher`，key=`aggregateId` | `comment-counter-effects`、`comment-reward-effects`、`comment-feedback-effects` 三个独立组 | `CommentOutboxEvent`，类型为 `COMMENT_CREATED/COMMENT_DELETED/COMMENT_MODERATED` |
+| `canal-outbox` | 单活 `CanalKafkaBridge` | `publish-requested-consumer`（Retry/DLT）、`publish-reward-consumer`、`publish-user-counter-consumer`、`comment-write-consumer`（Retry/DLT）、`comment-counter-effects`、`comment-reward-effects`、`comment-feedback-effects`、`favorite-outbox-relay`、`moderation-review-consumer`、`notification-follow-consumer`、`feed-timeline-consumer`、`recommendation-content-published-consumer`、`recommendation-user-profile-consumer`、`search-index-consumer` | 发布与评论关键消费者通过领域严格 Reader 过滤目标事件；`publish_requested` 与 `COMMENT_WRITE_REQUESTED` 驱动关键物化，完成事实事件驱动独立幂等副作用；其余见事件注册表 |
 | `comment-feedback`（`comment.kafka.feedback-topic`） | `CommentFeedbackProducer`（best-effort）+ Controller 内联 | `notification-comment-consumer`、`recommendation-comment-feedback-consumer` | `CommentFeedbackEvent(...,action∈{comment,delete,like,unlike})` |
 | `counter-events`（`CounterTopics.EVENTS`） | 点赞由 `CounterEventProducer` 无 key 异步发送；收藏由 `FavoriteOutboxRelay` 可靠发送且 key=`userId:postId` | `counter-agg`（每秒折叠 SDS）、`favorite-state-consumer`（收藏绝对态投影 Bitmap）、`counter-rebuild`（earliest 回放，`counter.rebuild.enabled` 门控）、`notification-like-consumer`、`recommendation-counter-feedback-consumer` | `CounterEvent(eventId,occurredAt,entityType,entityId,metric,idx,userId,delta)` |
 | `relation-command`（`FollowCommandTopics.COMMAND`，默认 16 分区） | `RelationCommandService`（令牌桶限流 → 同步投递 acks=all，key=`fromUserId` 保序）；启动时经 `relation:command-delivery` guard 向每个分区并行写 no-op 预热标记 | `relation-follow-command-consumer`（预热标记只 ack；业务命令并发 8（默认，≤分区数），手动 ack；DefaultErrorHandler 重试 10 次后进 `relation-command-dlt`） | `FollowCommandEvent(fromUserId,toUserId,follow,warmup)` |
@@ -284,7 +280,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 | 环节 | 机制 |
 |------|------|
-| 评论提交 | `pending_comments uk(creator,client_request_id)` + `DuplicateKeyException` 返回既有 |
+| 评论提交/执行 | `pending_comments uk(creator,client_request_id)` + `outbox.uk(event_key)`；请求事件键 `comment-write-requested:{commentId}`，完成与变更事件键包含事件类型和 commentId；Cassandra 正文固定 commentId 幂等写，MySQL `comments` 使用 insert-ignore 并校验规范行；DLT 仅 CAS 当前 pending 状态 |
 | 发布受理/执行 | `publish_attempt uk(creator,post,idempotent_key)` + `outbox.uk(event_key)`；每次手工 retry 递增 `run_version`，成功、失败、Retry/DLT CAS 全部携带版本；Cassandra 以 `(post_id,sha256)` 语义幂等 |
 | 推广竞价 | 确定性 commandId + `requestHash`；Redis Lua 在窗口 state 仅保存当前赢家 `winnerCommandId/winnerRequestHash/winnerAck`。当前赢家同 hash 精确重放，冲突 hash 稳定拒绝；被超过的历史接受与所有拒绝按当前状态重新裁决，不保存历史 command record。接受与 Stream append 在同一批量 Lua 原子完成。 |
 | 推广保证金 | `promotion_bid_escrow uk(window,campaign)` + 授权目标金额 businessRef + Redis `authorizedAmount` 仅接受单调增加 |
@@ -336,17 +332,19 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 **API**（`/api/v1/...`）：`POST posts/{postId}/comments`（**恒 202**）、`GET comments/{pendingCommentId}/status`、`GET posts/{postId}/comments`（游标 `cursorCreateTime+cursorCommentId`，`sort=latest|earliest` 使用同向稳定键集分页，1≤limit≤100）、`GET comments/{commentId}/replies`（按 root_id，两级评论）、`DELETE comments/{commentId}`（204 属主软删）、`POST/DELETE comments/{commentId}/like`（仅返回 `{changed}`；生效时才发 feedback like/unlike 事件；点赞状态在 counter 模块 `ActionController` 以 `{changed,liked}` 返回）。
 
-**写路径**：`submit` 幂等（`pending_comments` 查重/唯一键）→ 同事务经 `CommentEventWriter.writeRequested` 写 `comment_outbox(COMMENT_WRITE_REQUESTED)` → `CommentOutboxDispatcher` 批量 claim、异步发送并按成功/失败子集批量更新 → `CommentWriteConsumer` 经 `CommentEventReader` 解析并校验 pending 后先对 Cassandra 正文做固定版本幂等 upsert，再把已校验 pending 传入代理后的短事务 `CommentMaterializationService`，原子写 `comments`、`pending=succeeded` 与 `COMMENT_CREATED` outbox；仅在条件更新丢失并发竞争时回读 pending。`COMMENT_CREATED` 由 Counter、Reward、Feedback 三个独立 consumer group 处理，物化线程不串行执行副作用；DLT 仅将仍为 pending 的记录置 failed。
+**写路径**：`submit` 幂等（`pending_comments` 查重/唯一键）→ 同一事务经 `CommentEventWriter.writeRequested` 写共享 `outbox(COMMENT_WRITE_REQUESTED)` → 单活 `CanalKafkaBridge` 批量发送 `canal-outbox` 并在整批成功后 ack → `CommentWriteConsumer` 经严格 `CommentCanalEventReader` 过滤并校验 pending 后，先对 Cassandra 正文做固定 commentId 幂等 upsert，再把已校验 pending 传入代理后的短事务 `CommentMaterializationService`，原子写 `comments`、`pending=succeeded` 与共享 `outbox(COMMENT_CREATED)`；仅在条件更新丢失并发竞争时回读 pending。关键消费临时失败进入独立 Retry Topic，确定性坏消息或重试耗尽进入独立 DLT；DLT 仅将仍为 pending 的记录置 failed。
 
-**outbox 状态机**（`CommentOutboxMapper.xml`）：`ready(0)→claimed(1)→published(2)` 或退回 `ready(0)`（重试退避）；claim 超时可回收。published 保留 24 小时后由 cleaner 每批最多删除 1000 条。旧 `comment_write_outbox` 不迁移、不双写，clean cutover 前置检查要求旧表无未发布记录。
+**事件 fanout**：`COMMENT_CREATED/COMMENT_DELETED/COMMENT_MODERATED` 与其他领域事件共用 `canal-outbox`；Counter、Reward、Feedback 使用独立 consumer group 和独立 retry/dlt suffix。无关事件由领域 Reader 忽略；目标事件格式非法必须抛异常。计数事件使用稳定 eventId 派生键，钱包奖励使用稳定 businessRef，推荐等外部派生失败持久化 reconciliation task 后才允许确认。
 
-**事件 module**：`CommentEventWriter` 是事件 ID、稳定 `CommentOutboxEvent` 序列化、`comment_outbox` 行构建和本地变更事件发布的唯一 implementation；写请求用严格 insert 且不触发缓存失效，created/deleted/moderated 用幂等 insert 并发布 `CommentMutationEvent`。`CommentEventReader` 是所有 comment Kafka consumer 的 envelope 解析 seam，并统一映射缓存变更。事务调用方仍拥有状态变化；缓存 listener 以 `@TransactionalEventListener(AFTER_COMMIT)` 消费本地事件，Kafka 重投以相同 eventId 去重。
+**共享 outbox 生命周期**：评论不再维护 polling/claim/published 状态机。Outbox 行由业务事务追加，Canal 位点负责 relay 进度；Kafka send 成功但 Canal ack 前崩溃允许重放，由稳定 eventKey 与消费者幂等吸收。清理器仅在 Canal 启用且位点健康时，对超过保守保留窗口的行执行有界批删；停用或不可证明安全时停止清理。
+
+**事件 module**：`CommentEventWriter` 是事件 ID、稳定 `CommentOutboxEvent` 序列化、共享 outbox 写入和本地变更事件发布的唯一 implementation；写请求用 `OutboxMapper.insertUnique` 且不触发缓存失效，created/deleted/moderated 同样用稳定 eventKey 幂等写并发布 `CommentMutationEvent`。`CommentCanalEventReader` 解析 Canal envelope 并严格校验目标评论事件；`CommentEventReader` 仅保留评论业务 payload 与本地缓存变更映射职责。事务调用方仍拥有状态变化；缓存 listener 以 `@TransactionalEventListener(AFTER_COMMIT)` 消费本地事件，Kafka 重投以相同 eventId 去重。
 
 **不变量**：回复必须 parent 为顶层（`parent.parentId==0`）、post_id 一致、status=0；`root_id=parent_id=parent.commentId`；已删评论 body 恒 `[deleted]` 且不查 Cassandra；计数服务故障降级为空 Map 不影响列表。
 
 **缓存失效**：事务提交事件与 Kafka 重投以 outbox eventId 去重，默认在 100ms 窗口内按 post/root scope 合并；一批反向索引只读取一次，Caffeine 批量失效，Redis index/item/scope key 使用单次 multi-key `UNLINK`。页面重建使用 pipeline 批量写 item fragment，index metadata 保持独立的短 `MULTI/EXEC`；缓存失效调度器不参与 Spring 全局 `@Scheduled` 任务调度。
 
-**关键类**：`event/CommentEventWriter.java`、`event/CommentEventReader.java`、`service/impl/CommentServiceImpl.java`、`service/impl/CommentMaterializationService.java`、`service/impl/CommentMutationService.java`、`event/CommentOutboxDispatcher.java`、`event/CommentOutboxCleaner.java`、`consumer/CommentWriteConsumer.java`、`consumer/CommentCounterConsumer.java`、`consumer/CommentRewardConsumer.java`、`consumer/CommentFeedbackConsumer.java`、`config/CommentKafkaConfig.java`、`config/CommentOutboxSchemaInitializer.java`。
+**关键类**：`event/CommentEventWriter.java`、`event/CommentCanalEventReader.java`、`event/CommentEventReader.java`、`service/impl/CommentServiceImpl.java`、`service/impl/CommentMaterializationService.java`、`service/impl/CommentMutationService.java`、`consumer/CommentWriteConsumer.java`、`consumer/CommentCounterConsumer.java`、`consumer/CommentRewardConsumer.java`、`consumer/CommentFeedbackConsumer.java`、`outbox/CanalKafkaBridge.java`。
 
 ### 7.4 counter
 
@@ -530,7 +528,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 | G10 | 验证码 `EXPIRED` 状态枚举声明但**永不显式返回**（TTL 过期表现为键消失→NOT_FOUND 合并映射） | `VerificationCodeStatus.java`；`RedisVerificationCodeStore.verify` |
 | G11 | `VerificationScene`/`Expired` 相关：`PromotionBidResponse` DTO 当前**无 controller 使用**（预留/对账） | `PromotionBidResponse.java` |
 | G12 | `resolveExpiredEscrow` 无 scheduler 驱动（javadoc「本期不要求 scheduler」） | `WalletEscrowService.java` javadoc |
-| G13 | `comment_outbox` DDL 由 `db/schema.sql` 与启动 initializer 双重声明并由 contract test 锁定一致性；旧 `comment_write_outbox` 只允许 clean-cutover 排空检查，不允许迁移或生产读写 | `CommentOutboxSchemaInitializer.java`；`db/schema.sql`；`CommentOutboxSchemaContractTest.java` |
+| G13 | 评论迁移采用 clean cutover：旧 `comment_outbox` 与专属 dispatcher 仅允许在切换前排空，不允许继续生产写入或与共享 `outbox` 双写；表和旧 relay 代码在迁移完成后删除 | `CommentEventWriter.java`；`db/schema.sql`；§7.3 |
 | G14 | `KnowPostMapper.publish(id, creatorId)`（XML `<update id="publish">` 无 status 守卫、`status='published'` 直改）接口已声明但**全仓无调用方**（死代码，勿用于新发布路径；实际发布走 `startPublishing→completePublish` 守卫链） | `KnowPostMapper.java:21`；`KnowPostMapper.xml:70-74` |
 
 ---
@@ -539,6 +537,6 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 - 全局：`ZhiGuangApplication.java`、`config/ThreadPoolConfig.java`、`config/RedissonConfig.java`、`config/ElasticsearchConfig.java`、`config/RestTemplateConfig.java`
 - 契约常量：`common/exception/ErrorCode.java`（27 码）、`common/id/IdNamespace.java`（11 命名空间）、`outbox/OutboxTopics.java`（`canal-outbox`）、`counter/event/CounterTopics.java`（`counter-events`）、`promotion/bprime/config/PromotionBPrimeProperties.java`（主题/组）
-- 状态机 SQL：`resources/mapper/KnowPostMapper.xml`、`PublishAttemptMapper.xml`、`CommentOutboxMapper.xml`、`ModerationReportMapper.xml`、`ReconciliationTaskMapper.xml`、`WalletEscrowMapper.xml`
+- 状态机 SQL：`resources/mapper/KnowPostMapper.xml`、`PublishAttemptMapper.xml`、`ModerationReportMapper.xml`、`ReconciliationTaskMapper.xml`、`WalletEscrowMapper.xml`
 - 原子脚本：`resources/redis/lua/promotion-auction-decision-batch.lua`（推广批量决策）、`common/singleflight/RedisSingleFlightCoordinatorRepository.java`（6 Lua）、`counter/service/impl/CounterServiceImpl.java`（TOGGLE_LUA 等）
 - DDL：`db/schema.sql`（26 表）、`db/cassandra/init.cql`（4 表）
