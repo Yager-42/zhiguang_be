@@ -2,11 +2,10 @@ package com.tongji.comment.event;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.comment.cache.CommentMutationEvent;
-import com.tongji.comment.mapper.CommentOutboxMapper;
 import com.tongji.comment.model.Comment;
-import com.tongji.comment.model.CommentOutbox;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.outbox.OutboxMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -16,20 +15,21 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CommentEventWriterTest {
-    private CommentOutboxMapper outboxMapper;
+    private OutboxMapper outboxMapper;
     private IdService idService;
     private ApplicationEventPublisher eventPublisher;
     private CommentEventWriter writer;
 
     @BeforeEach
     void setUp() {
-        outboxMapper = mock(CommentOutboxMapper.class);
+        outboxMapper = mock(OutboxMapper.class);
         idService = mock(IdService.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
         writer = new CommentEventWriter(outboxMapper, idService,
@@ -45,12 +45,16 @@ class CommentEventWriterTest {
                 101L, 9L, 0L, 0L, 7L, "client-1", "hello", occurredAt));
 
         assertThat(eventId).isEqualTo(501L);
-        ArgumentCaptor<CommentOutbox> row = ArgumentCaptor.forClass(CommentOutbox.class);
-        verify(outboxMapper).insert(row.capture());
-        assertThat(row.getValue().getEventType()).isEqualTo("COMMENT_WRITE_REQUESTED");
-        assertThat(row.getValue().getAggregateId()).isEqualTo(101L);
-        assertThat(row.getValue().getPayload()).contains("\"eventId\":501", "\"body\":\"hello\"");
-        verify(outboxMapper, never()).insertIgnore(any(CommentOutbox.class));
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(outboxMapper).insertUnique(
+                eq(501L),
+                eq("comment-write-requested:101"),
+                eq("comment"),
+                eq(101L),
+                eq("COMMENT_WRITE_REQUESTED"),
+                payload.capture()
+        );
+        assertThat(payload.getValue()).contains("\"eventId\":501", "\"body\":\"hello\"");
         verify(eventPublisher, never()).publishEvent(any());
     }
 
@@ -62,10 +66,16 @@ class CommentEventWriterTest {
 
         writer.createdFrom(source);
 
-        ArgumentCaptor<CommentOutbox> row = ArgumentCaptor.forClass(CommentOutbox.class);
-        verify(outboxMapper).insertIgnore(row.capture());
-        assertThat(row.getValue().getEventType()).isEqualTo("COMMENT_CREATED");
-        assertThat(read(row.getValue().getPayload()).occurredAt()).isEqualTo(occurredAt);
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(outboxMapper).insertUnique(
+                eq(501L),
+                eq("comment-created:101"),
+                eq("comment"),
+                eq(101L),
+                eq("COMMENT_CREATED"),
+                payload.capture()
+        );
+        assertThat(read(payload.getValue()).occurredAt()).isEqualTo(occurredAt);
         ArgumentCaptor<CommentMutationEvent> local = ArgumentCaptor.forClass(CommentMutationEvent.class);
         verify(eventPublisher).publishEvent(local.capture());
         assertThat(local.getValue().eventId()).isEqualTo(501L);
@@ -79,8 +89,14 @@ class CommentEventWriterTest {
 
         writer.deleted(comment);
 
-        verify(outboxMapper).insertIgnore(org.mockito.ArgumentMatchers.argThat(row ->
-                "COMMENT_DELETED".equals(row.getEventType()) && row.getAggregateId().equals(101L)));
+        verify(outboxMapper).insertUnique(
+                eq(501L),
+                eq("comment-deleted:101"),
+                eq("comment"),
+                eq(101L),
+                eq("COMMENT_DELETED"),
+                any(String.class)
+        );
         verify(eventPublisher).publishEvent(org.mockito.ArgumentMatchers.argThat((Object event) ->
                 event instanceof CommentMutationEvent mutation
                         && mutation.eventType() == CommentEventType.COMMENT_DELETED
