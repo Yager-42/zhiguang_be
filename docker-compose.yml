@@ -61,6 +61,9 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /tmp/kafka-logs
+    volumes:
+      - kafka-data:/tmp/kafka-logs
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 10s
@@ -289,6 +292,7 @@ services:
       FEED_HOME_MIXED_ENABLED: ${FEED_HOME_MIXED_ENABLED:-true}
       SINGLEFLIGHT_MODE: ${SINGLEFLIGHT_MODE:-distributed}
       COMMENT_WRITE_CONCURRENCY: ${COMMENT_WRITE_CONCURRENCY:-4}
+      PUBLISH_KAFKA_CONCURRENCY: ${PUBLISH_KAFKA_CONCURRENCY:-2}
       COMMENT_OUTBOX_CLEAN_INTERVAL_MS: ${COMMENT_OUTBOX_CLEAN_INTERVAL_MS:-86400000}
       TZ: Asia/Shanghai
     ports:
@@ -303,6 +307,7 @@ services:
 volumes:
   mysql-data:
   redis-data:
+  kafka-data:
   canal-data:
   canal-logs:
   cassandra-data:

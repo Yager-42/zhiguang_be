@@ -113,6 +113,22 @@ comment:
   metrics:
     sample-interval-ms: ${COMMENT_METRICS_SAMPLE_INTERVAL_MS:5000}
 
+
+publish:
+  kafka:
+    group: ${PUBLISH_KAFKA_GROUP:publish-requested-consumer}
+    reward-group: ${PUBLISH_KAFKA_REWARD_GROUP:publish-reward-consumer}
+    counter-group: ${PUBLISH_KAFKA_COUNTER_GROUP:publish-user-counter-consumer}
+    consumer-concurrency: ${PUBLISH_KAFKA_CONCURRENCY:2}
+    retry-attempts: ${PUBLISH_KAFKA_RETRY_ATTEMPTS:10}
+    retry-delay-ms: ${PUBLISH_KAFKA_RETRY_DELAY_MS:1000}
+    retry-multiplier: ${PUBLISH_KAFKA_RETRY_MULTIPLIER:2}
+    retry-max-delay-ms: ${PUBLISH_KAFKA_RETRY_MAX_DELAY_MS:10000}
+    effect-retry-attempts: ${PUBLISH_EFFECT_RETRY_ATTEMPTS:10}
+    effect-retry-delay-ms: ${PUBLISH_EFFECT_RETRY_DELAY_MS:1000}
+    effect-retry-multiplier: ${PUBLISH_EFFECT_RETRY_MULTIPLIER:2}
+    effect-retry-max-delay-ms: ${PUBLISH_EFFECT_RETRY_MAX_DELAY_MS:10000}
+
 cache:
   l2:
     comment-page:
