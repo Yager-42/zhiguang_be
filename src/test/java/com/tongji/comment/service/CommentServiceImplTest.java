@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.lang.reflect.Method;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -59,4 +60,37 @@ class CommentServiceImplTest {
                 "submit", long.class, long.class, CommentSubmitRequest.class);
         assertThat(submit.getAnnotation(Transactional.class)).isNotNull();
     }
+
+    @Test
+    void submitRejectsOversizedBodyBeforePersistence() {
+        PendingCommentMapper pendingMapper = mock(PendingCommentMapper.class);
+        CommentEventWriter eventWriter = mock(CommentEventWriter.class);
+        CommentServiceImpl service = new CommentServiceImpl(
+                mock(CommentMapper.class),
+                pendingMapper,
+                mock(TextStorageService.class),
+                mock(IdService.class),
+                mock(CounterService.class),
+                mock(CommentPageCacheService.class),
+                Runnable::run,
+                mock(CommentMutationService.class),
+                eventWriter,
+                mock(CommentMetrics.class),
+                mock(ProfileService.class)
+        );
+
+        CommentSubmitRequest request = new CommentSubmitRequest(
+                9L,
+                null,
+                null,
+                "client-1",
+                "x".repeat(CommentSubmitRequest.MAX_BODY_LENGTH + 1)
+        );
+
+        assertThatThrownBy(() -> service.submit(7L, 9L, request))
+                .hasMessageContaining("exceeds size limit");
+        verify(pendingMapper, never()).insert(any(PendingComment.class));
+        verify(eventWriter, never()).writeRequested(any(CommentWriteRequest.class));
+    }
+
 }

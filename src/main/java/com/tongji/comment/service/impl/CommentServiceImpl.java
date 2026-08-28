@@ -95,6 +95,10 @@ public class CommentServiceImpl implements CommentService {
         if (request == null || blank(request.clientRequestId()) || blank(request.body())) {
             throw badRequest("comment body and clientRequestId are required");
         }
+        if (request.clientRequestId().length() > CommentSubmitRequest.MAX_CLIENT_REQUEST_ID_LENGTH
+                || request.body().length() > CommentSubmitRequest.MAX_BODY_LENGTH) {
+            throw badRequest("comment body or clientRequestId exceeds size limit");
+        }
         if (positive(request.rootId()) && !positive(request.parentId())) {
             throw badRequest("root comment requires parent comment");
         }

@@ -117,6 +117,39 @@ class CommentControllerTest {
     }
 
     @Test
+    void submitRejectsClientRequestIdBeyondDatabaseLimit() throws Exception {
+        String payload = new ObjectMapper().writeValueAsString(Map.of(
+                "clientRequestId", "x".repeat(CommentSubmitRequest.MAX_CLIENT_REQUEST_ID_LENGTH + 1),
+                "body", "hello"
+        ));
+
+        mockMvc.perform(post("/api/v1/posts/{postId}/comments", POST_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+
+        verify(commentService, never()).submit(eq(USER_ID), eq(POST_ID), any(CommentSubmitRequest.class));
+    }
+
+    @Test
+    void submitRejectsBodyBeyondOutboxLimit() throws Exception {
+        String payload = new ObjectMapper().writeValueAsString(Map.of(
+                "clientRequestId", "client-1",
+                "body", "x".repeat(CommentSubmitRequest.MAX_BODY_LENGTH + 1)
+        ));
+
+        mockMvc.perform(post("/api/v1/posts/{postId}/comments", POST_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+
+        verify(commentService, never()).submit(eq(USER_ID), eq(POST_ID), any(CommentSubmitRequest.class));
+    }
+
+
+    @Test
     void submitWithMalformedRelationIdsReturnsBadRequest() throws Exception {
         mockMvc.perform(post("/api/v1/posts/{postId}/comments", POST_ID)
                         .contentType(MediaType.APPLICATION_JSON)

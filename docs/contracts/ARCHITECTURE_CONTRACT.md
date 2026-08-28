@@ -330,7 +330,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 ### 7.3 comment
 
-**API**（`/api/v1/...`）：`POST posts/{postId}/comments`（**恒 202**）、`GET comments/{pendingCommentId}/status`、`GET posts/{postId}/comments`（游标 `cursorCreateTime+cursorCommentId`，`sort=latest|earliest` 使用同向稳定键集分页，1≤limit≤100）、`GET comments/{commentId}/replies`（按 root_id，两级评论）、`DELETE comments/{commentId}`（204 属主软删）、`POST/DELETE comments/{commentId}/like`（仅返回 `{changed}`；生效时才发 feedback like/unlike 事件；点赞状态在 counter 模块 `ActionController` 以 `{changed,liked}` 返回）。
+**API**（`/api/v1/...`）：`POST posts/{postId}/comments`（**恒 202**；`clientRequestId` 必填且至多 64 字符，`body` 必填且至多 4000 字符）、`GET comments/{pendingCommentId}/status`、`GET posts/{postId}/comments`（游标 `cursorCreateTime+cursorCommentId`，`sort=latest|earliest` 使用同向稳定键集分页，1≤limit≤100）、`GET comments/{commentId}/replies`（按 root_id，两级评论）、`DELETE comments/{commentId}`（204 属主软删）、`POST/DELETE comments/{commentId}/like`（仅返回 `{changed}`；生效时才发 feedback like/unlike 事件；点赞状态在 counter 模块 `ActionController` 以 `{changed,liked}` 返回）。
 
 **写路径**：`submit` 幂等（`pending_comments` 查重/唯一键）→ 同一事务经 `CommentEventWriter.writeRequested` 写共享 `outbox(COMMENT_WRITE_REQUESTED)` → 单活 `CanalKafkaBridge` 批量发送 `canal-outbox` 并在整批成功后 ack → `CommentWriteConsumer` 经严格 `CommentCanalEventReader` 过滤并校验 pending 后，先对 Cassandra 正文做固定 commentId 幂等 upsert，再把已校验 pending 传入代理后的短事务 `CommentMaterializationService`，原子写 `comments`、`pending=succeeded` 与共享 `outbox(COMMENT_CREATED)`；仅在条件更新丢失并发竞争时回读 pending。关键消费临时失败进入独立 Retry Topic，确定性坏消息或重试耗尽进入独立 DLT；DLT 仅将仍为 pending 的记录置 failed。
 
