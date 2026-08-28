@@ -9,6 +9,4 @@ public interface PublishManager {
     PublishAcceptedResponse retryPublish(long authorId, long postId, long attemptId);
 
     PublishStatusResponse getPublishStatus(long authorId, long postId, long attemptId);
-
-    int recoverStuckPublishing();
 }

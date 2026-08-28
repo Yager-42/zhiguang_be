@@ -57,7 +57,7 @@
             <if test="contentSha256 != null">content_sha256 = #{contentSha256},</if>
             update_time = #{updateTime}
         </set>
-        WHERE id = #{id} AND creator_id = #{creatorId}
+        WHERE id = #{id} AND creator_id = #{creatorId} AND status = 'draft'
     </update>
 
     <update id="updateMetadata" parameterType="com.tongji.knowpost.model.KnowPost">
@@ -96,9 +96,9 @@
     <update id="completePublish">
         UPDATE know_posts
         SET status = 'published',
-            publish_time = NOW(),
+            publish_time = #{publishedAt},
             publish_failed_reason = NULL,
-            update_time = NOW()
+            update_time = #{publishedAt}
         WHERE id = #{id}
           AND creator_id = #{creatorId}
           AND status = 'publishing'

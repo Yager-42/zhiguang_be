@@ -17,13 +17,12 @@ public class PublishAttempt {
     private Long creatorId;
     private String idempotentKey;
     private String status;
+    private Integer runVersion;
     private String failedStep;
     private String errorMessage;
-    private String fallbackTaskType;
-    private String fallbackTargetType;
-    private Long fallbackTargetId;
-    private String fallbackFailureReason;
-    private Instant fallbackNextRetryAt;
+    private String contentObjectKeySnapshot;
+    private String contentEtagSnapshot;
+    private String contentSha256Snapshot;
     private Integer retryCount;
     private Instant createdAt;
     private Instant updatedAt;

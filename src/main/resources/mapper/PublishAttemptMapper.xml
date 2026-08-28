@@ -8,13 +8,12 @@
         <result property="creatorId" column="creator_id" />
         <result property="idempotentKey" column="idempotent_key" />
         <result property="status" column="status" />
+        <result property="runVersion" column="run_version" />
         <result property="failedStep" column="failed_step" />
         <result property="errorMessage" column="error_message" />
-        <result property="fallbackTaskType" column="fallback_task_type" />
-        <result property="fallbackTargetType" column="fallback_target_type" />
-        <result property="fallbackTargetId" column="fallback_target_id" />
-        <result property="fallbackFailureReason" column="fallback_failure_reason" />
-        <result property="fallbackNextRetryAt" column="fallback_next_retry_at" />
+        <result property="contentObjectKeySnapshot" column="content_object_key_snapshot" />
+        <result property="contentEtagSnapshot" column="content_etag_snapshot" />
+        <result property="contentSha256Snapshot" column="content_sha256_snapshot" />
         <result property="retryCount" column="retry_count" />
         <result property="createdAt" column="created_at" />
         <result property="updatedAt" column="updated_at" />
@@ -22,13 +21,13 @@
 
     <insert id="insert" parameterType="com.tongji.knowpost.publish.PublishAttempt">
         INSERT INTO publish_attempt (
-            attempt_id, post_id, creator_id, idempotent_key, status, failed_step,
-            error_message, fallback_task_type, fallback_target_type, fallback_target_id,
-            fallback_failure_reason, fallback_next_retry_at, retry_count, created_at, updated_at
+            attempt_id, post_id, creator_id, idempotent_key, status, run_version,
+            failed_step, error_message, content_object_key_snapshot, content_etag_snapshot,
+            content_sha256_snapshot, retry_count, created_at, updated_at
         ) VALUES (
-            #{attemptId}, #{postId}, #{creatorId}, #{idempotentKey}, #{status}, #{failedStep},
-            #{errorMessage}, #{fallbackTaskType}, #{fallbackTargetType}, #{fallbackTargetId},
-            #{fallbackFailureReason}, #{fallbackNextRetryAt}, #{retryCount}, #{createdAt}, #{updatedAt}
+            #{attemptId}, #{postId}, #{creatorId}, #{idempotentKey}, #{status}, #{runVersion},
+            #{failedStep}, #{errorMessage}, #{contentObjectKeySnapshot}, #{contentEtagSnapshot},
+            #{contentSha256Snapshot}, #{retryCount}, #{createdAt}, #{updatedAt}
         )
     </insert>
 
@@ -53,13 +52,10 @@
         SET status = 'succeeded',
             failed_step = NULL,
             error_message = NULL,
-            fallback_task_type = NULL,
-            fallback_target_type = NULL,
-            fallback_target_id = NULL,
-            fallback_failure_reason = NULL,
-            fallback_next_retry_at = NULL,
-            updated_at = NOW()
+            updated_at = #{publishedAt}
         WHERE attempt_id = #{attemptId}
+          AND run_version = #{runVersion}
+          AND status = 'publishing'
     </update>
 
     <update id="markFailed">
@@ -67,13 +63,16 @@
         SET status = 'failed',
             failed_step = #{failedStep},
             error_message = #{errorMessage},
-            updated_at = NOW()
+            updated_at = NOW(3)
         WHERE attempt_id = #{attemptId}
+          AND run_version = #{runVersion}
+          AND status = 'publishing'
     </update>
 
     <select id="findStatusById" resultMap="PublishAttemptResultMap">
-        SELECT attempt_id, post_id, creator_id, idempotent_key, status, failed_step,
-               error_message, retry_count, created_at, updated_at
+        SELECT attempt_id, post_id, creator_id, idempotent_key, status, run_version,
+               failed_step, error_message, content_object_key_snapshot, content_etag_snapshot,
+               content_sha256_snapshot, retry_count, created_at, updated_at
         FROM publish_attempt
         WHERE attempt_id = #{attemptId}
         LIMIT 1
@@ -82,34 +81,13 @@
     <update id="restartFailedAttempt">
         UPDATE publish_attempt
         SET status = 'publishing',
+            run_version = run_version + 1,
             failed_step = NULL,
             error_message = NULL,
-            fallback_task_type = NULL,
-            fallback_target_type = NULL,
-            fallback_target_id = NULL,
-            fallback_failure_reason = NULL,
-            fallback_next_retry_at = NULL,
             retry_count = retry_count + 1,
-            updated_at = NOW()
+            updated_at = NOW(3)
         WHERE attempt_id = #{attemptId}
+          AND run_version = #{expectedRunVersion}
           AND status = 'failed'
-    </update>
-
-    <select id="findStuckPublishingAttempts" resultMap="PublishAttemptResultMap">
-        SELECT *
-        FROM publish_attempt
-        WHERE status = 'publishing'
-          AND updated_at &lt; #{updatedBefore}
-    </select>
-
-    <update id="updateDerivedFailureFallback">
-        UPDATE publish_attempt
-        SET fallback_task_type = #{taskType},
-            fallback_target_type = #{targetType},
-            fallback_target_id = #{targetId},
-            fallback_failure_reason = #{failureReason},
-            fallback_next_retry_at = #{nextRetryAt},
-            updated_at = NOW()
-        WHERE attempt_id = #{attemptId}
     </update>
 </mapper>

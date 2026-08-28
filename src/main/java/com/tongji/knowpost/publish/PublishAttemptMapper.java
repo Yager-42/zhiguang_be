@@ -4,7 +4,6 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.time.Instant;
-import java.util.List;
 
 @Mapper
 public interface PublishAttemptMapper {
@@ -16,22 +15,17 @@ public interface PublishAttemptMapper {
 
     PublishAttempt findById(@Param("attemptId") Long attemptId);
 
-    int markSucceeded(@Param("attemptId") Long attemptId);
+    int markSucceeded(@Param("attemptId") Long attemptId,
+                      @Param("runVersion") Integer runVersion,
+                      @Param("publishedAt") Instant publishedAt);
 
     int markFailed(@Param("attemptId") Long attemptId,
+                   @Param("runVersion") Integer runVersion,
                    @Param("failedStep") String failedStep,
                    @Param("errorMessage") String errorMessage);
 
     PublishAttempt findStatusById(@Param("attemptId") Long attemptId);
 
-    int restartFailedAttempt(@Param("attemptId") Long attemptId);
-
-    List<PublishAttempt> findStuckPublishingAttempts(@Param("updatedBefore") Instant updatedBefore);
-
-    int updateDerivedFailureFallback(@Param("attemptId") Long attemptId,
-                                     @Param("taskType") String taskType,
-                                     @Param("targetType") String targetType,
-                                     @Param("targetId") Long targetId,
-                                     @Param("failureReason") String failureReason,
-                                     @Param("nextRetryAt") Instant nextRetryAt);
+    int restartFailedAttempt(@Param("attemptId") Long attemptId,
+                             @Param("expectedRunVersion") Integer expectedRunVersion);
 }

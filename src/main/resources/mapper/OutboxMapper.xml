@@ -5,5 +5,10 @@
         INSERT INTO outbox (id, aggregate_type, aggregate_id, type, payload, created_at)
         VALUES (#{id}, #{aggregateType}, #{aggregateId}, #{type}, #{payload}, NOW(3))
     </insert>
+
+    <insert id="insertUnique">
+        INSERT INTO outbox (id, event_key, aggregate_type, aggregate_id, type, payload, created_at)
+        VALUES (#{id}, #{eventKey}, #{aggregateType}, #{aggregateId}, #{type}, #{payload}, NOW(3))
+    </insert>
 </mapper>
 

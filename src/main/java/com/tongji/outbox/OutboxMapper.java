@@ -13,4 +13,11 @@ public interface OutboxMapper {
                @Param("aggregateId") Long aggregateId,
                @Param("type") String type,
                @Param("payload") String payload);
+
+    int insertUnique(@Param("id") Long id,
+                     @Param("eventKey") String eventKey,
+                     @Param("aggregateType") String aggregateType,
+                     @Param("aggregateId") Long aggregateId,
+                     @Param("type") String type,
+                     @Param("payload") String payload);
 }

@@ -6,6 +6,7 @@ import com.tongji.knowpost.model.KnowPostFeedRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.Instant;
 import java.util.List;
 
 @Mapper
@@ -28,7 +29,8 @@ public interface KnowPostMapper {
 
     int completePublish(@Param("id") Long id,
                         @Param("creatorId") Long creatorId,
-                        @Param("publishAttemptId") Long publishAttemptId);
+                        @Param("publishAttemptId") Long publishAttemptId,
+                        @Param("publishedAt") Instant publishedAt);
 
     int failPublish(@Param("id") Long id,
                     @Param("creatorId") Long creatorId,
