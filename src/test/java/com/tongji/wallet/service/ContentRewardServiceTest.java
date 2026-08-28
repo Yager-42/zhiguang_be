@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -37,7 +38,7 @@ class ContentRewardServiceTest {
 
     @Test
     void rewardPostCreationGrantsPostAmount() {
-        long amount = rewardService.rewardPostCreation(USER_ID, POST_ID);
+        long amount = rewardService.rewardPostCreationStrict(USER_ID, POST_ID);
 
         assertThat(amount).isEqualTo(10L);
         verify(walletService).grant(eq(USER_ID), eq(10L), eq(WalletLedgerReason.CONTENT_CREATION_REWARD),
@@ -57,7 +58,7 @@ class ContentRewardServiceTest {
     void rewardIsNoOpWhenDisabled() {
         properties.setEnabled(false);
 
-        long postAmount = rewardService.rewardPostCreation(USER_ID, POST_ID);
+        long postAmount = rewardService.rewardPostCreationStrict(USER_ID, POST_ID);
         long commentAmount = rewardService.rewardCommentCreation(USER_ID, COMMENT_ID);
 
         assertThat(postAmount).isZero();
@@ -66,14 +67,12 @@ class ContentRewardServiceTest {
     }
 
     @Test
-    void rewardReturnsZeroWhenWalletNotFoundAndDoesNotThrow() {
+    void postRewardPropagatesWalletFailureForKafkaRetry() {
         when(walletService.grant(anyLong(), anyLong(), any(), any(), any()))
                 .thenThrow(new BusinessException(ErrorCode.WALLET_NOT_FOUND));
 
-        long amount = rewardService.rewardPostCreation(USER_ID, POST_ID);
-
-        assertThat(amount).isZero();
-        // 关键：异常被 catch 不冒泡 caller
+        assertThatThrownBy(() -> rewardService.rewardPostCreationStrict(USER_ID, POST_ID))
+                .isInstanceOf(BusinessException.class);
     }
 
     @Test
@@ -92,8 +91,8 @@ class ContentRewardServiceTest {
         // grant 内置 businessRef 幂等，重试时同 businessRef+同操作幂等返回
         // 调用方重试调 rewardPostCreation 两次，grant 也调两次（幂等由 grant 内部 matchSingleSidedGroup 处理）
         // 这里验证 service 层不额外加防重（复用 grant 幂等）
-        rewardService.rewardPostCreation(USER_ID, POST_ID);
-        rewardService.rewardPostCreation(USER_ID, POST_ID);
+        rewardService.rewardPostCreationStrict(USER_ID, POST_ID);
+        rewardService.rewardPostCreationStrict(USER_ID, POST_ID);
 
         // service 每次都调 grant（幂等由 grant 内部保证），不外层查重
         verify(walletService, times(2)).grant(eq(USER_ID), eq(10L), eq(WalletLedgerReason.CONTENT_CREATION_REWARD),

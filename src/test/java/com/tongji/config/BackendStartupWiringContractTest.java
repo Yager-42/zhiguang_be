@@ -5,17 +5,15 @@ import com.tongji.common.id.IdService;
 import com.tongji.common.id.segment.SegmentAllocator;
 import com.tongji.common.id.segment.SegmentIdGenerator;
 import com.tongji.common.id.segment.SegmentIdProperties;
-import com.tongji.common.resilience.ResilienceGuard;
 import com.tongji.knowpost.manager.PublishAttemptService;
 import com.tongji.knowpost.manager.PublishValidationHelper;
 import com.tongji.knowpost.mapper.KnowPostMapper;
-import com.tongji.knowpost.publish.ContentPublishedPublisher;
+import com.tongji.knowpost.publish.PublishOutboxWriter;
 import com.tongji.knowpost.publish.PublishAttemptMapper;
 import com.tongji.promotion.bprime.realtime.NoopPromotionAuctionRealtimePublisher;
 import com.tongji.promotion.bprime.realtime.PromotionAuctionRealtimePublisher;
 import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
-import com.tongji.wallet.service.ContentRewardService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -36,9 +34,7 @@ class BackendStartupWiringContractTest {
                 .withBean(PublishAttemptMapper.class, () -> mock(PublishAttemptMapper.class))
                 .withBean(PublishValidationHelper.class, () -> mock(PublishValidationHelper.class))
                 .withBean(IdService.class, () -> mock(IdService.class))
-                .withBean(ContentPublishedPublisher.class, () -> mock(ContentPublishedPublisher.class))
-                .withBean(ResilienceGuard.class, () -> mock(ResilienceGuard.class))
-                .withBean(ContentRewardService.class, () -> mock(ContentRewardService.class))
+                .withBean(PublishOutboxWriter.class, () -> mock(PublishOutboxWriter.class))
                 .withBean(PublishAttemptService.class)
                 .withBean(GorseProperties.class)
                 .withBean(GorseClient.class)

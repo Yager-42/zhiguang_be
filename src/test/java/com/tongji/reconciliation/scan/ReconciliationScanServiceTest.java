@@ -16,7 +16,7 @@ import com.tongji.recommendation.gorse.GorseClient;
 import com.tongji.recommendation.gorse.GorseProperties;
 import com.tongji.search.index.SearchIndexService;
 import com.tongji.storage.text.CommentTextRepository;
-import com.tongji.storage.text.PostTextRepository;
+import com.tongji.storage.text.PostTextArchiveRepository;
 import com.tongji.user.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,6 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -50,13 +49,12 @@ class ReconciliationScanServiceTest {
     private CounterService counterService;
     private GorseClient gorseClient;
     private GorseProperties gorseProperties;
-    private PostTextRepository postTextRepository;
+    private PostTextArchiveRepository postTextArchiveRepository;
     private CommentTextRepository commentTextRepository;
     private PromotionAuctionWindowMapper promotionAuctionWindowMapper;
     private PromotionAuctionCompensationService promotionAuctionCompensationService;
     private PromotionBPrimeProperties promotionBPrimeProperties;
     private RecordingSearchIndexService searchIndexService;
-    private AtomicInteger recovered;
     private ReconciliationScanService service;
 
     @BeforeEach
@@ -71,13 +69,12 @@ class ReconciliationScanServiceTest {
         gorseClient = org.mockito.Mockito.mock(GorseClient.class);
         gorseProperties = new GorseProperties();
         gorseProperties.setEnabled(true);
-        postTextRepository = org.mockito.Mockito.mock(PostTextRepository.class);
+        postTextArchiveRepository = org.mockito.Mockito.mock(PostTextArchiveRepository.class);
         commentTextRepository = org.mockito.Mockito.mock(CommentTextRepository.class);
         promotionAuctionWindowMapper = org.mockito.Mockito.mock(PromotionAuctionWindowMapper.class);
         promotionAuctionCompensationService = org.mockito.Mockito.mock(PromotionAuctionCompensationService.class);
         promotionBPrimeProperties = new PromotionBPrimeProperties();
         searchIndexService = new RecordingSearchIndexService();
-        recovered = new AtomicInteger();
         service = new ReconciliationScanService(
                 checkpointMapper,
                 knowPostMapper,
@@ -89,15 +86,11 @@ class ReconciliationScanServiceTest {
                 new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules(),
                 counterService,
                 searchIndexService,
-                postTextRepository,
+                postTextArchiveRepository,
                 commentTextRepository,
                 promotionAuctionWindowMapper,
                 promotionAuctionCompensationService,
                 promotionBPrimeProperties,
-                () -> {
-                    recovered.incrementAndGet();
-                    return 7;
-                },
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
@@ -341,7 +334,7 @@ class ReconciliationScanServiceTest {
     void scanPostCassandraBatchCreatesCheckpointRowWhenMissing() {
         when(checkpointMapper.findByScanType(ReconciliationScanType.POST_CASSANDRA)).thenReturn(null);
         when(knowPostMapper.listPublishedPostIdsCursor(0L, 1000)).thenReturn(List.of(9L));
-        when(postTextRepository.existsById(9L)).thenReturn(false);
+        when(postTextArchiveRepository.existsById(9L)).thenReturn(false);
 
         service.scanPostCassandraBatch();
 
@@ -358,13 +351,6 @@ class ReconciliationScanServiceTest {
         verify(checkpointMapper).updateCheckpoint(ReconciliationScanType.POST_CASSANDRA, 9L);
     }
 
-    @Test
-    void recoverStuckPublishingDelegatesToPublishAttemptService() {
-        int recoveredCount = service.recoverStuckPublishingPosts();
-
-        assertThat(recoveredCount).isEqualTo(7);
-        assertThat(recovered.get()).isEqualTo(1);
-    }
 
     @Test
     void scanPromotionSettledWindowBatchKeepsCheckpointWhenNoNewWindows() {

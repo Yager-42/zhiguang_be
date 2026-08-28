@@ -146,7 +146,7 @@ class ReconcilerTest {
 
         new CassandraTextReconciler(knowPostMapper, textStorageService).reconcile(task);
 
-        verify(textStorageService).savePostText(103L, "body-103", "sha-103");
+        verify(textStorageService).savePostTextIdempotent(103L, "body-103", "sha-103");
     }
 
     @Test

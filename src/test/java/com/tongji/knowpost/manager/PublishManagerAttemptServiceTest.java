@@ -2,315 +2,196 @@ package com.tongji.knowpost.manager;
 
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
-import com.tongji.common.resilience.GuardResult;
-import com.tongji.common.resilience.GuardedOperation;
-import com.tongji.common.resilience.ResilienceGuard;
-import com.tongji.knowpost.api.dto.PublishStatusResponse;
 import com.tongji.knowpost.mapper.KnowPostMapper;
 import com.tongji.knowpost.model.KnowPost;
 import com.tongji.knowpost.publish.ContentPublishedEvent;
-import com.tongji.knowpost.publish.ContentPublishedPublisher;
 import com.tongji.knowpost.publish.PublishAttempt;
 import com.tongji.knowpost.publish.PublishAttemptMapper;
-import com.tongji.wallet.service.ContentRewardService;
+import com.tongji.knowpost.publish.PublishOutboxWriter;
+import com.tongji.knowpost.publish.PublishRequestedEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.springframework.dao.DuplicateKeyException;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PublishManagerAttemptServiceTest {
 
-    private static final Instant NOW = Instant.parse("2026-06-16T10:00:00Z");
+    private static final Instant NOW = Instant.parse("2026-08-28T10:15:30Z");
+    private static final String SHA256 = "a".repeat(64);
 
-    @Mock
     private KnowPostMapper knowPostMapper;
-    @Mock
     private PublishAttemptMapper publishAttemptMapper;
-    @Mock
+    private PublishOutboxWriter outboxWriter;
     private IdService idService;
-    @Mock
-    private ContentRewardService contentRewardService;
-
-    private PublishValidationHelper publishValidationHelper;
-    private RecordingContentPublishedPublisher contentPublishedPublisher;
-    private RecordingResilienceGuard resilienceGuard;
     private PublishAttemptService service;
 
     @BeforeEach
     void setUp() {
-        org.mockito.MockitoAnnotations.openMocks(this);
-        publishValidationHelper = new PublishValidationHelper(knowPostMapper);
-        contentPublishedPublisher = new RecordingContentPublishedPublisher();
-        resilienceGuard = new RecordingResilienceGuard();
+        knowPostMapper = mock(KnowPostMapper.class);
+        publishAttemptMapper = mock(PublishAttemptMapper.class);
+        outboxWriter = mock(PublishOutboxWriter.class);
+        idService = mock(IdService.class);
         service = new PublishAttemptService(
                 knowPostMapper,
                 publishAttemptMapper,
-                publishValidationHelper,
+                new PublishValidationHelper(knowPostMapper),
                 idService,
-                contentPublishedPublisher,
-                resilienceGuard,
-                Clock.fixed(NOW, ZoneOffset.UTC),
-                contentRewardService
+                outboxWriter,
+                Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
 
     @Test
-    void acceptPublishReturnsExistingAttemptForSameIdempotentKey() {
-        PublishAttempt existing = attempt(81L, 9L, 7L, "failed", 2, NOW.minusSeconds(30), "critical_publish", "boom");
-        when(publishAttemptMapper.findByIdempotencyKey(7L, 9L, "same-key")).thenReturn(existing);
-
-        PublishAcceptance accepted = service.acceptPublish(7L, 9L, "same-key");
-
-        assertThat(accepted.attempt()).isSameAs(existing);
-        assertThat(accepted.schedulePublishWork()).isFalse();
-        verify(knowPostMapper, never()).findById(any());
-        verify(publishAttemptMapper, never()).insert(any());
-    }
-
-    @Test
-    void acceptPublishCreatesAttemptAndTransitionsDraftToPublishing() {
-        KnowPost draft = post(9L, 7L, "draft", null, NOW.minusSeconds(5), null);
-        when(publishAttemptMapper.findByIdempotencyKey(7L, 9L, "fresh-key")).thenReturn(null);
+    void acceptPublishPersistsFrozenSnapshotAndRequestedOutbox() {
+        KnowPost draft = post("draft", null);
+        draft.setContentObjectKey("posts/9/body.md");
+        draft.setContentEtag("etag-1");
+        draft.setContentSha256(SHA256.toUpperCase());
         when(knowPostMapper.findById(9L)).thenReturn(draft);
         when(idService.nextId(IdNamespace.PUBLISH_ATTEMPT)).thenReturn(88L);
         when(knowPostMapper.startPublishing(9L, 7L, 88L)).thenReturn(1);
 
-        PublishAcceptance accepted = service.acceptPublish(7L, 9L, "fresh-key");
+        PublishAttempt accepted = service.acceptPublish(7L, 9L, "publish-key");
 
-        assertThat(accepted.schedulePublishWork()).isTrue();
-        assertThat(accepted.attempt().getAttemptId()).isEqualTo(88L);
-        assertThat(accepted.attempt().getStatus()).isEqualTo("publishing");
-        assertThat(accepted.attempt().getRetryCount()).isZero();
-        verify(knowPostMapper).startPublishing(9L, 7L, 88L);
-        verify(publishAttemptMapper).insert(any(PublishAttempt.class));
+        assertThat(accepted.getAttemptId()).isEqualTo(88L);
+        assertThat(accepted.getRunVersion()).isEqualTo(1);
+        assertThat(accepted.getContentObjectKeySnapshot()).isEqualTo("posts/9/body.md");
+        assertThat(accepted.getContentEtagSnapshot()).isEqualTo("etag-1");
+        assertThat(accepted.getContentSha256Snapshot()).isEqualTo(SHA256);
+        assertThat(accepted.getUpdatedAt()).isEqualTo(NOW);
+        verify(publishAttemptMapper).insert(accepted);
+        verify(outboxWriter).writeRequested(accepted);
     }
 
     @Test
-    void acceptPublishRecoversOriginalAttemptWhenInsertHitsDuplicateKeyRace() {
-        KnowPost draft = post(9L, 7L, "draft", null, NOW.minusSeconds(5), null);
-        PublishAttempt existing = attempt(91L, 9L, 7L, "publishing", 0, NOW.minusSeconds(2), null, null);
-        when(publishAttemptMapper.findByIdempotencyKey(7L, 9L, "race-key"))
-                .thenReturn(null)
-                .thenReturn(existing);
-        when(knowPostMapper.findById(9L)).thenReturn(draft);
-        when(idService.nextId(IdNamespace.PUBLISH_ATTEMPT)).thenReturn(88L);
-        doThrow(new DuplicateKeyException("duplicate")).when(publishAttemptMapper).insert(any(PublishAttempt.class));
+    void idempotencyReplayReturnsExistingAttemptWithoutWritingAnotherEvent() {
+        PublishAttempt existing = attempt("publishing", 1);
+        when(publishAttemptMapper.findByIdempotencyKey(7L, 9L, "same-key")).thenReturn(existing);
 
-        PublishAcceptance accepted = service.acceptPublish(7L, 9L, "race-key");
+        PublishAttempt replay = service.acceptPublish(7L, 9L, "same-key");
 
-        assertThat(accepted.schedulePublishWork()).isFalse();
-        assertThat(accepted.attempt()).isSameAs(existing);
-        verify(knowPostMapper, never()).startPublishing(any(), any(), any());
+        assertThat(replay).isSameAs(existing);
+        verify(publishAttemptMapper, never()).insert(any());
+        verify(outboxWriter, never()).writeRequested(any());
     }
 
     @Test
-    void retryPublishReusesOriginalAttemptRowAndIncrementsRetryCount() {
-        PublishAttempt failedAttempt = attempt(88L, 9L, 7L, "failed", 1, NOW.minusSeconds(20), "critical_publish", "broken");
-        KnowPost failedPost = post(9L, 7L, "publish_failed", 88L, NOW.minusSeconds(20), "broken");
-        when(publishAttemptMapper.findById(88L)).thenReturn(failedAttempt);
-        when(knowPostMapper.findPublishStatus(9L, 7L)).thenReturn(failedPost);
+    void retryFailedAttemptAdvancesVersionAndPreservesSnapshot() {
+        PublishAttempt failed = attempt("failed", 1);
+        failed.setRetryCount(2);
+        KnowPost post = post("publish_failed", 88L);
+        when(publishAttemptMapper.findById(88L)).thenReturn(failed);
+        when(knowPostMapper.findPublishStatus(9L, 7L)).thenReturn(post);
+        when(publishAttemptMapper.restartFailedAttempt(88L, 1)).thenReturn(1);
         when(knowPostMapper.retryPublishing(9L, 7L, 88L)).thenReturn(1);
-        when(publishAttemptMapper.restartFailedAttempt(88L)).thenReturn(1);
 
         PublishAttempt retried = service.retryPublish(7L, 9L, 88L);
 
-        assertThat(retried.getAttemptId()).isEqualTo(88L);
+        assertThat(retried.getRunVersion()).isEqualTo(2);
+        assertThat(retried.getRetryCount()).isEqualTo(3);
         assertThat(retried.getStatus()).isEqualTo("publishing");
-        assertThat(retried.getRetryCount()).isEqualTo(2);
-        assertThat(retried.getFailedStep()).isNull();
-        assertThat(retried.getErrorMessage()).isNull();
-        verify(knowPostMapper).retryPublishing(9L, 7L, 88L);
-        verify(publishAttemptMapper).restartFailedAttempt(88L);
+        assertThat(retried.getContentObjectKeySnapshot()).isEqualTo("posts/9/body.md");
+        assertThat(retried.getContentSha256Snapshot()).isEqualTo(SHA256);
+        verify(outboxWriter).writeRequested(retried);
     }
 
     @Test
-    void getPublishStatusRecoversStuckPublishingAttempt() {
-        PublishAttempt stuckAttempt = attempt(88L, 9L, 7L, "publishing", 0, NOW.minusSeconds(360), null, null);
-        KnowPost stuckPost = post(9L, 7L, "publishing", 88L, NOW.minusSeconds(360), null);
-        when(publishAttemptMapper.findById(88L)).thenReturn(stuckAttempt);
-        when(knowPostMapper.findPublishStatus(9L, 7L)).thenReturn(stuckPost);
-        when(knowPostMapper.failPublish(9L, 7L, 88L, "Publishing timed out after 5 minutes")).thenReturn(1);
-        when(publishAttemptMapper.markFailed(88L, "stuck_publishing", "Publishing timed out after 5 minutes")).thenReturn(1);
+    void onlySuccessfulAttemptCasCompletesPostAndWritesPublishedFact() {
+        PublishAttempt current = attempt("publishing", 1);
+        PublishRequestedEvent event = event(1);
+        when(publishAttemptMapper.findById(88L)).thenReturn(current);
+        when(publishAttemptMapper.markSucceeded(88L, 1, NOW)).thenReturn(1);
+        when(knowPostMapper.completePublish(9L, 7L, 88L, NOW)).thenReturn(1);
 
-        PublishStatusResponse status = service.getPublishStatus(7L, 9L, 88L);
+        service.completePublish(event);
 
-        assertThat(status.publishAttemptId()).isEqualTo("88");
-        assertThat(status.attemptStatus()).isEqualTo("failed");
-        assertThat(status.postStatus()).isEqualTo("publish_failed");
-        assertThat(status.failedStep()).isEqualTo("stuck_publishing");
-        assertThat(status.retryable()).isTrue();
+        ArgumentCaptor<ContentPublishedEvent> published = ArgumentCaptor.forClass(ContentPublishedEvent.class);
+        verify(outboxWriter).writeContentPublished(published.capture());
+        assertThat(published.getValue().runVersion()).isEqualTo(1);
+        assertThat(published.getValue().publishedAt()).isEqualTo(NOW);
     }
 
     @Test
-    void completePublishWritesDurableEventAndMarksAttemptSucceeded() {
-        PublishAttempt attempt = attempt(88L, 9L, 7L, "publishing", 0, NOW.minusSeconds(20), null, null);
-        KnowPost publishingPost = post(9L, 7L, "publishing", 88L, NOW.minusSeconds(20), null);
-        when(publishAttemptMapper.findById(88L)).thenReturn(attempt);
-        when(knowPostMapper.findById(9L)).thenReturn(publishingPost);
-        when(knowPostMapper.completePublish(9L, 7L, 88L)).thenReturn(1);
-        when(publishAttemptMapper.markSucceeded(88L)).thenReturn(1);
+    void staleSuccessCannotCompletePostOrWritePublishedFact() {
+        PublishRequestedEvent staleEvent = event(1);
+        PublishAttempt current = attempt("publishing", 2);
+        when(publishAttemptMapper.findById(88L)).thenReturn(current);
+        when(publishAttemptMapper.markSucceeded(88L, 1, NOW)).thenReturn(0);
+        when(publishAttemptMapper.findStatusById(88L)).thenReturn(current);
 
-        service.completePublish(7L, 9L, 88L);
+        service.completePublish(staleEvent);
 
-        assertThat(resilienceGuard.resourceNames).contains("publish:content-published");
-        assertThat(contentPublishedPublisher.publishedEvents).singleElement().satisfies(event -> {
-            assertThat(event.postId()).isEqualTo(9L);
-            assertThat(event.authorId()).isEqualTo(7L);
-            assertThat(event.publishAttemptId()).isEqualTo(88L);
-        });
-        verify(knowPostMapper).completePublish(9L, 7L, 88L);
-        verify(publishAttemptMapper).markSucceeded(88L);
-        // 发布成功后发积分奖励（挂载点：markSucceeded 后）
-        verify(contentRewardService).rewardPostCreation(7L, 9L);
+        verify(knowPostMapper, never()).completePublish(any(Long.class), any(Long.class), any(Long.class), any());
+        verify(outboxWriter, never()).writeContentPublished(any());
     }
 
     @Test
-    void completePublishStopsWhenDurableEventWriteFails() {
-        PublishAttempt attempt = attempt(88L, 9L, 7L, "publishing", 0, NOW.minusSeconds(20), null, null);
-        KnowPost publishingPost = post(9L, 7L, "publishing", 88L, NOW.minusSeconds(20), null);
-        when(publishAttemptMapper.findById(88L)).thenReturn(attempt);
-        when(knowPostMapper.findById(9L)).thenReturn(publishingPost);
-        RuntimeException failure = new RuntimeException("outbox down");
-        contentPublishedPublisher.publishFailure = failure;
+    void staleDltFailureCannotMoveCurrentRunToFailed() {
+        PublishRequestedEvent staleEvent = event(1);
+        PublishAttempt current = attempt("publishing", 2);
+        when(publishAttemptMapper.findById(88L)).thenReturn(current);
+        when(publishAttemptMapper.markFailed(88L, 1, "publish_dlt", "exhausted")).thenReturn(0);
+        when(publishAttemptMapper.findStatusById(88L)).thenReturn(current);
 
-        assertThatThrownBy(() -> service.completePublish(7L, 9L, 88L))
-                .isSameAs(failure);
+        service.failPublish(staleEvent, "publish_dlt", "exhausted");
 
-        verify(knowPostMapper, never()).completePublish(any(), any(), any());
-        verify(publishAttemptMapper, never()).markSucceeded(any());
-        // 发布失败不发奖励（AC9 反向核对）
-        verify(contentRewardService, never()).rewardPostCreation(anyLong(), anyLong());
+        verify(knowPostMapper, never()).failPublish(any(Long.class), any(Long.class), any(Long.class), any());
     }
 
     @Test
-    void completePublishTreatsGuardFallbackAsCriticalFailure() {
-        PublishAttempt attempt = attempt(88L, 9L, 7L, "publishing", 0, NOW.minusSeconds(20), null, null);
-        KnowPost publishingPost = post(9L, 7L, "publishing", 88L, NOW.minusSeconds(20), null);
-        when(publishAttemptMapper.findById(88L)).thenReturn(attempt);
-        when(knowPostMapper.findById(9L)).thenReturn(publishingPost);
-        resilienceGuard.forceFallback = true;
+    void oldRunRequestIsSkippedBeforeExternalWork() {
+        PublishAttempt current = attempt("publishing", 2);
+        when(publishAttemptMapper.findById(88L)).thenReturn(current);
 
-        assertThatThrownBy(() -> service.completePublish(7L, 9L, 88L))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("content published event degraded");
-
-        verify(knowPostMapper, never()).completePublish(any(), any(), any());
-        verify(publishAttemptMapper, never()).markSucceeded(any());
-        // 发布失败不发奖励（AC9 反向核对）
-        verify(contentRewardService, never()).rewardPostCreation(anyLong(), anyLong());
+        assertThat(service.shouldProcess(event(1))).isFalse();
     }
 
-    @Test
-    void recoverStuckPublishingSweepsScheduledCandidates() {
-        PublishAttempt stuckAttempt = attempt(88L, 9L, 7L, "publishing", 0, NOW.minusSeconds(360), null, null);
-        KnowPost stuckPost = post(9L, 7L, "publishing", 88L, NOW.minusSeconds(360), null);
-        when(publishAttemptMapper.findStuckPublishingAttempts(NOW.minusSeconds(300))).thenReturn(List.of(stuckAttempt));
-        when(knowPostMapper.findPublishStatus(9L, 7L)).thenReturn(stuckPost);
-        when(knowPostMapper.failPublish(9L, 7L, 88L, "Publishing timed out after 5 minutes")).thenReturn(1);
-        when(publishAttemptMapper.markFailed(88L, "stuck_publishing", "Publishing timed out after 5 minutes")).thenReturn(1);
-
-        int recovered = service.recoverStuckPublishingAttempts();
-
-        assertThat(recovered).isEqualTo(1);
-        assertThat(stuckAttempt.getStatus()).isEqualTo("failed");
-        assertThat(stuckPost.getStatus()).isEqualTo("publish_failed");
-        verify(publishAttemptMapper).findStuckPublishingAttempts(NOW.minusSeconds(300));
-    }
-
-    private static PublishAttempt attempt(Long attemptId,
-                                          Long postId,
-                                          Long creatorId,
-                                          String status,
-                                          int retryCount,
-                                          Instant updatedAt,
-                                          String failedStep,
-                                          String errorMessage) {
+    private PublishAttempt attempt(String status, int runVersion) {
         return PublishAttempt.builder()
-                .attemptId(attemptId)
-                .postId(postId)
-                .creatorId(creatorId)
-                .idempotentKey("key-" + attemptId)
+                .attemptId(88L)
+                .postId(9L)
+                .creatorId(7L)
+                .idempotentKey("publish-key")
                 .status(status)
-                .retryCount(retryCount)
-                .failedStep(failedStep)
-                .errorMessage(errorMessage)
-                .createdAt(updatedAt.minusSeconds(10))
-                .updatedAt(updatedAt)
+                .runVersion(runVersion)
+                .contentObjectKeySnapshot("posts/9/body.md")
+                .contentEtagSnapshot("etag-1")
+                .contentSha256Snapshot(SHA256)
+                .retryCount(0)
+                .createdAt(NOW)
+                .updatedAt(NOW)
                 .build();
     }
 
-    private static KnowPost post(Long postId,
-                                 Long creatorId,
-                                 String status,
-                                 Long attemptId,
-                                 Instant updateTime,
-                                 String failedReason) {
+    private KnowPost post(String status, Long attemptId) {
         return KnowPost.builder()
-                .id(postId)
-                .creatorId(creatorId)
+                .id(9L)
+                .creatorId(7L)
                 .status(status)
                 .publishAttemptId(attemptId)
-                .publishFailedReason(failedReason)
-                .updateTime(updateTime)
                 .build();
     }
 
-    private static final class RecordingContentPublishedPublisher extends ContentPublishedPublisher {
-        private final List<ContentPublishedEvent> publishedEvents = new ArrayList<>();
-        private RuntimeException publishFailure;
-
-        private RecordingContentPublishedPublisher() {
-            super(null, null, null);
-        }
-
-        @Override
-        public void publish(ContentPublishedEvent event) {
-            if (publishFailure != null) {
-                throw publishFailure;
-            }
-            publishedEvents.add(event);
-        }
-
-        @Override
-        public void publishDerivedFailure(String taskType, String targetType, Long targetId, String failureReason, Instant nextRetryHint) {
-        }
-    }
-
-    private static final class RecordingResilienceGuard implements ResilienceGuard {
-        private final List<String> resourceNames = new ArrayList<>();
-        private boolean forceFallback;
-
-        @Override
-        public <T> GuardResult<T> execute(String resourceName,
-                                          GuardedOperation<T> operation,
-                                          Supplier<T> fallbackSupplier,
-                                          Predicate<Throwable> systemFailureClassifier) {
-            resourceNames.add(resourceName);
-            if (forceFallback) {
-                return GuardResult.fallback(fallbackSupplier.get(), null);
-            }
-            try {
-                return GuardResult.success(operation.execute());
-            } catch (Exception exception) {
-                return GuardResult.fallback(fallbackSupplier.get(), exception);
-            }
-        }
+    private PublishRequestedEvent event(int runVersion) {
+        return new PublishRequestedEvent(
+                88L,
+                9L,
+                7L,
+                runVersion,
+                "posts/9/body.md",
+                "etag-1",
+                SHA256,
+                NOW
+        );
     }
 }

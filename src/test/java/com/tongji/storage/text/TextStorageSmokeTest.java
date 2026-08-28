@@ -44,7 +44,7 @@ class TextStorageSmokeTest {
     private CassandraTextStorageService textStorageService;
 
     @Autowired
-    private PostTextRepository postTextRepository;
+    private PostTextArchiveRepository postTextArchiveRepository;
 
     @Autowired
     private CommentTextRepository commentTextRepository;
@@ -68,12 +68,12 @@ class TextStorageSmokeTest {
     @BeforeEach
     void clearTables() {
         commentTextRepository.deleteAll();
-        postTextRepository.deleteAll();
+        postTextArchiveRepository.deleteAll();
     }
 
     @Test
     void postSaveReadDeleteRoundTrip() {
-        textStorageService.savePostText(101L, "post body", "sha-101");
+        textStorageService.savePostTextIdempotent(101L, "post body", "a".repeat(64));
 
         assertThat(textStorageService.getPostText(101L, null)).contains("post body");
 

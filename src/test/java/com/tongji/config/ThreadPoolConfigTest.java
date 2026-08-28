@@ -49,8 +49,7 @@ class ThreadPoolConfigTest {
 
             assertExecutor(context.getBean("taskExecutor", ThreadPoolTaskExecutor.class),
                     "task-", 10, 50, 200, ThreadPoolExecutor.CallerRunsPolicy.class, true, 60);
-            assertExecutor(context.getBean("publishExecutor", ThreadPoolTaskExecutor.class),
-                    "publish-", 8, 16, 100, ThreadPoolExecutor.CallerRunsPolicy.class, true, 60);
+            assertThat(context).doesNotHaveBean("publishExecutor");
             assertExecutor(context.getBean("canalOutboxExecutor", ThreadPoolTaskExecutor.class),
                     "canal-outbox-", 2, 4, 50, ThreadPoolExecutor.AbortPolicy.class, true, 60);
             assertExecutor(context.getBean("reconciliationExecutor", ThreadPoolTaskExecutor.class),
