@@ -7,6 +7,7 @@ import org.springframework.core.task.SyncTaskExecutor;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -21,7 +22,7 @@ class CanalKafkaBridgeTest {
         Message message = new Message(11L, List.of());
         CanalKafkaBridge bridge = bridge(publisher);
 
-        bridge.processBatch(connector, message);
+        assertThat(bridge.processBatch(connector, message)).isTrue();
 
         verify(publisher).publish(message);
         verify(connector).ack(11L);
@@ -36,11 +37,29 @@ class CanalKafkaBridgeTest {
         doThrow(new IllegalStateException("broker unavailable")).when(publisher).publish(message);
         CanalKafkaBridge bridge = bridge(publisher);
 
-        bridge.processBatch(connector, message);
+        assertThat(bridge.processBatch(connector, message)).isFalse();
 
         verify(connector).rollback(12L);
         verify(connector, never()).ack(12L);
     }
+
+    @Test
+    void retryDelayUsesBoundedExponentialFullJitter() {
+        CanalKafkaBridge bridge = bridge(mock(CanalOutboxBatchPublisher.class));
+
+        assertDelayWithinCap(bridge, 1, 100L);
+        assertDelayWithinCap(bridge, 2, 200L);
+        assertDelayWithinCap(bridge, 3, 400L);
+        assertDelayWithinCap(bridge, 4, 800L);
+        assertDelayWithinCap(bridge, 20, 800L);
+    }
+
+    private static void assertDelayWithinCap(CanalKafkaBridge bridge, int failures, long cap) {
+        for (int sample = 0; sample < 100; sample++) {
+            assertThat(bridge.batchRetryDelayMs(failures)).isBetween(1L, cap);
+        }
+    }
+
 
     private static CanalKafkaBridge bridge(CanalOutboxBatchPublisher publisher) {
         return new CanalKafkaBridge(
@@ -55,7 +74,9 @@ class CanalKafkaBridgeTest {
                 "outbox",
                 100,
                 0L,
-                5_000L
+                5_000L,
+                100L,
+                800L
         );
     }
 }

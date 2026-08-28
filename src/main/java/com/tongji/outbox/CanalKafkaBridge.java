@@ -12,10 +12,14 @@ import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Owns the Canal connection lifecycle and acknowledges a batch only after Kafka accepts every
- * relevant outbox change in that batch.
+ * 管理 Canal 连接，并仅在整批 Outbox 变化全部被 Kafka 接受后确认位点。
+ *
+ * <p>批次失败先 rollback，再执行有上限的指数退避与 full jitter；成功确认后重置连续失败次数。</p>
+ *
+ * @since 2026-08-28
  */
 @Service
 public class CanalKafkaBridge implements SmartLifecycle {
@@ -33,6 +37,8 @@ public class CanalKafkaBridge implements SmartLifecycle {
     private final int batchSize;
     private final long intervalMs;
     private final long reconnectDelayMs;
+    private final long batchRetryInitialMs;
+    private final long batchRetryMaxMs;
 
     private volatile boolean running;
     private volatile CanalConnector connector;
@@ -48,7 +54,12 @@ public class CanalKafkaBridge implements SmartLifecycle {
                             @Value("${canal.filter}") String filter,
                             @Value("${canal.batchSize}") int batchSize,
                             @Value("${canal.intervalMs}") long intervalMs,
-                            @Value("${canal.reconnectDelayMs:5000}") long reconnectDelayMs) {
+                            @Value("${canal.reconnectDelayMs:5000}") long reconnectDelayMs,
+                            @Value("${canal.batch-retry-initial-ms:250}") long batchRetryInitialMs,
+                            @Value("${canal.batch-retry-max-ms:30000}") long batchRetryMaxMs) {
+        if (batchRetryInitialMs <= 0L || batchRetryMaxMs < batchRetryInitialMs) {
+            throw new IllegalArgumentException("Canal batch retry range is invalid");
+        }
         this.batchPublisher = batchPublisher;
         this.taskExecutor = taskExecutor;
         this.enabled = enabled;
@@ -61,6 +72,8 @@ public class CanalKafkaBridge implements SmartLifecycle {
         this.batchSize = batchSize;
         this.intervalMs = intervalMs;
         this.reconnectDelayMs = reconnectDelayMs;
+        this.batchRetryInitialMs = batchRetryInitialMs;
+        this.batchRetryMaxMs = batchRetryMaxMs;
     }
 
     @Override
@@ -100,6 +113,7 @@ public class CanalKafkaBridge implements SmartLifecycle {
     }
 
     private void consume() throws Exception {
+        int consecutiveFailures = 0;
         while (running) {
             Message message = connector.getWithoutAck(batchSize);
             long batchId = message.getId();
@@ -107,19 +121,37 @@ public class CanalKafkaBridge implements SmartLifecycle {
                 sleep(intervalMs);
                 continue;
             }
-            processBatch(connector, message);
+            if (processBatch(connector, message)) {
+                consecutiveFailures = 0;
+                continue;
+            }
+            consecutiveFailures = Math.min(consecutiveFailures + 1, 63);
+            sleep(batchRetryDelayMs(consecutiveFailures));
         }
     }
 
-    void processBatch(CanalConnector connector, Message message) {
+    boolean processBatch(CanalConnector connector, Message message) {
         long batchId = message.getId();
         try {
             batchPublisher.publish(message);
             connector.ack(batchId);
+            return true;
         } catch (Exception exception) {
             connector.rollback(batchId);
             log.error("Canal outbox batch failed and was rolled back: batchId={}", batchId, exception);
+            return false;
         }
+    }
+
+    long batchRetryDelayMs(int consecutiveFailures) {
+        if (consecutiveFailures <= 0) {
+            throw new IllegalArgumentException("consecutiveFailures must be positive");
+        }
+        long cap = batchRetryInitialMs;
+        for (int failure = 1; failure < consecutiveFailures && cap < batchRetryMaxMs; failure++) {
+            cap = cap > batchRetryMaxMs / 2L ? batchRetryMaxMs : cap * 2L;
+        }
+        return ThreadLocalRandom.current().nextLong(cap) + 1L;
     }
 
     CanalConnector createConnector() {
