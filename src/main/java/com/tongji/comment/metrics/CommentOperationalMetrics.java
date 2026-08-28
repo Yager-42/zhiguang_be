@@ -9,9 +9,7 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Caches low-frequency database backlog snapshots for metrics scrapes.
- *
- * <p>The scheduled sampler owns the database queries, so scraping metrics never scans hot tables.</p>
+ * 缓存低频评论 pending 快照，使指标抓取不扫描热表。
  *
  * @since 2026-08-07
  */
@@ -24,9 +22,6 @@ public class CommentOperationalMetrics {
     private final CommentMetrics metrics;
     private final AtomicLong pendingCount = new AtomicLong();
     private final AtomicLong pendingOldestSeconds = new AtomicLong();
-    private final AtomicLong outboxReadyCount = new AtomicLong();
-    private final AtomicLong outboxClaimedCount = new AtomicLong();
-    private final AtomicLong outboxOldestReadySeconds = new AtomicLong();
     private final AtomicLong nextWarningNanos = new AtomicLong();
 
     public CommentOperationalMetrics(JdbcTemplate jdbcTemplate,
@@ -36,9 +31,6 @@ public class CommentOperationalMetrics {
         this.metrics = metrics;
         registry.gauge("comment.pending.count", pendingCount);
         registry.gauge("comment.pending.oldest.seconds", pendingOldestSeconds);
-        registry.gauge("comment.outbox.ready.count", outboxReadyCount);
-        registry.gauge("comment.outbox.claimed.count", outboxClaimedCount);
-        registry.gauge("comment.outbox.oldest.ready.seconds", outboxOldestReadySeconds);
     }
 
     @Scheduled(fixedDelayString = "${comment.metrics.sample-interval-ms:5000}")
@@ -51,21 +43,9 @@ public class CommentOperationalMetrics {
                     WHERE status = 'pending'
                     """, (resultSet, rowNumber) -> new PendingSnapshot(
                     resultSet.getLong(1), resultSet.getLong(2)));
-            OutboxSnapshot outbox = jdbcTemplate.queryForObject("""
-                    SELECT COALESCE(SUM(state = 0), 0),
-                           COALESCE(SUM(state = 1), 0),
-                           COALESCE(TIMESTAMPDIFF(
-                               SECOND, MIN(CASE WHEN state = 0 THEN created_at END), NOW()), 0)
-                    FROM comment_outbox
-                    WHERE state IN (0, 1)
-                    """, (resultSet, rowNumber) -> new OutboxSnapshot(
-                    resultSet.getLong(1), resultSet.getLong(2), resultSet.getLong(3)));
-            if (pending != null && outbox != null) {
+            if (pending != null) {
                 pendingCount.set(pending.count());
                 pendingOldestSeconds.set(nonNegative(pending.oldestSeconds()));
-                outboxReadyCount.set(outbox.readyCount());
-                outboxClaimedCount.set(outbox.claimedCount());
-                outboxOldestReadySeconds.set(nonNegative(outbox.oldestReadySeconds()));
                 metrics.operationalSample("success");
             }
         } catch (RuntimeException exception) {
@@ -89,6 +69,4 @@ public class CommentOperationalMetrics {
     private record PendingSnapshot(long count, long oldestSeconds) {
     }
 
-    private record OutboxSnapshot(long readyCount, long claimedCount, long oldestReadySeconds) {
-    }
 }

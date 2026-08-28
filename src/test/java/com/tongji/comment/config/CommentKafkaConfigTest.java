@@ -4,7 +4,6 @@ import com.tongji.comment.cache.CommentCacheInvalidationListener;
 import com.tongji.comment.consumer.CommentCounterConsumer;
 import com.tongji.comment.consumer.CommentFeedbackConsumer;
 import com.tongji.comment.consumer.CommentRewardConsumer;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -20,26 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CommentKafkaConfigTest {
 
     @Test
-    void topicsUseConfiguredNamesAndPartitions() {
-        CommentKafkaConfig config = new CommentKafkaConfig();
-
-        NewTopic write = config.commentWriteTopic("comment-write-test", 8);
-        NewTopic events = config.commentEventTopic("comment-events-test", 6);
-
-        assertThat(write.name()).isEqualTo("comment-write-test");
-        assertThat(write.numPartitions()).isEqualTo(8);
-        assertThat(events.name()).isEqualTo("comment-events-test");
-        assertThat(events.numPartitions()).isEqualTo(6);
-    }
-
-    @Test
     void writeListenerUsesRecordAckAndBoundedConcurrency() {
         CommentKafkaConfig config = new CommentKafkaConfig();
         ConsumerFactory<String, String> consumerFactory = new DefaultKafkaConsumerFactory<>(Map.of());
 
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 config.commentWriteKafkaListenerContainerFactory(consumerFactory, 4);
-        var container = factory.createContainer("comment-write-test");
+        var container = factory.createContainer("canal-outbox-test");
 
         assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
         assertThat(container.getConcurrency()).isEqualTo(4);

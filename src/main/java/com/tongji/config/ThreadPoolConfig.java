@@ -75,15 +75,6 @@ public class ThreadPoolConfig {
                 new ThreadPoolExecutor.CallerRunsPolicy(), 60);
     }
 
-    @Bean(name = "commentOutboxExecutor")
-    public TaskExecutor commentOutboxExecutor(
-            @Value("${comment.executor.outbox.core-size:2}") int coreSize,
-            @Value("${comment.executor.outbox.max-size:4}") int maxSize,
-            @Value("${comment.executor.outbox.queue-capacity:50}") int queueCapacity) {
-        return buildExecutor(coreSize, maxSize, queueCapacity, 60, "comment-outbox-",
-                new ThreadPoolExecutor.CallerRunsPolicy(), 60);
-    }
-
     private ThreadPoolTaskExecutor buildExecutor(int corePoolSize,
                                                  int maxPoolSize,
                                                  int queueCapacity,

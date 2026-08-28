@@ -30,7 +30,7 @@ class CommentOperationalMetricsTest {
     }
 
     @Test
-    void outboxSamplingOnlyScansActiveStates() {
+    void samplingOnlyScansPendingComments() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         when(jdbcTemplate.queryForObject(anyString(), any(org.springframework.jdbc.core.RowMapper.class)))
                 .thenReturn(null);
@@ -40,7 +40,7 @@ class CommentOperationalMetricsTest {
 
         metrics.sample();
 
-        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.contains("WHERE state IN (0, 1)"),
+        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.contains("WHERE status = 'pending'"),
                 any(org.springframework.jdbc.core.RowMapper.class));
     }
 }

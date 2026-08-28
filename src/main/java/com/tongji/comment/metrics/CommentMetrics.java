@@ -33,15 +33,6 @@ public class CommentMetrics {
         sample.stop(registry.timer("comment.cache.l3.duration", "result", result));
     }
 
-    public void outbox(String result, String eventType, long count) {
-        registry.counter("comment.outbox.events", "result", result, "event_type", eventType).increment(count);
-    }
-
-    public void outboxBatch(int size, Duration duration) {
-        registry.summary("comment.outbox.batch.size").record(size);
-        registry.timer("comment.outbox.batch.duration").record(duration);
-    }
-
     public void materialization(String stage, String result, Duration duration) {
         registry.timer("comment.materialization.duration", "stage", stage, "result", result).record(duration);
     }

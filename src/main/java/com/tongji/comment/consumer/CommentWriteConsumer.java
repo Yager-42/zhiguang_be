@@ -70,7 +70,7 @@ public class CommentWriteConsumer {
 
     void handle(CommentOutboxEvent event) {
         if (event.eventType() != CommentEventType.COMMENT_WRITE_REQUESTED) {
-            throw new IllegalArgumentException("unexpected event type on comment-write topic");
+            throw new IllegalArgumentException("unexpected comment write event type");
         }
         PendingComment pending = pendingCommentMapper.findById(event.commentId());
         if (pending == null) {
