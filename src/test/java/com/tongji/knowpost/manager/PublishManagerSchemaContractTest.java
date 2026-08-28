@@ -14,21 +14,21 @@ class PublishManagerSchemaContractTest {
     private static final Path MAPPER_PATH = Path.of("src/main/resources/mapper/PublishAttemptMapper.xml");
 
     @Test
-    void publishAttemptSchemaIncludesFallbackColumnsUsedByMapper() throws IOException {
+    void publishAttemptSchemaMatchesVersionedSnapshotMapper() throws IOException {
         String schema = Files.readString(SCHEMA_PATH);
         String mapper = Files.readString(MAPPER_PATH);
 
-        assertThat(mapper).contains("<update id=\"updateDerivedFailureFallback\">");
-        assertThat(mapper).contains("fallback_task_type");
-        assertThat(mapper).contains("fallback_target_type");
-        assertThat(mapper).contains("fallback_target_id");
-        assertThat(mapper).contains("fallback_failure_reason");
-        assertThat(mapper).contains("fallback_next_retry_at");
+        assertThat(schema).contains("run_version INT NOT NULL DEFAULT 1");
+        assertThat(schema).contains("content_object_key_snapshot VARCHAR(512) NULL");
+        assertThat(schema).contains("content_etag_snapshot VARCHAR(128) NULL");
+        assertThat(schema).contains("content_sha256_snapshot CHAR(64) NULL");
+        assertThat(schema).contains("event_key VARCHAR(191) NULL");
+        assertThat(schema).contains("UNIQUE KEY uk_outbox_event_key (event_key)");
 
-        assertThat(schema).contains("fallback_task_type VARCHAR(64) NULL");
-        assertThat(schema).contains("fallback_target_type VARCHAR(64) NULL");
-        assertThat(schema).contains("fallback_target_id BIGINT UNSIGNED NULL");
-        assertThat(schema).contains("fallback_failure_reason VARCHAR(1024) NULL");
-        assertThat(schema).contains("fallback_next_retry_at TIMESTAMP NULL");
+        assertThat(mapper).contains("property=\"runVersion\" column=\"run_version\"");
+        assertThat(mapper).contains("property=\"contentObjectKeySnapshot\" column=\"content_object_key_snapshot\"");
+        assertThat(mapper).contains("AND run_version = #{runVersion}");
+        assertThat(mapper).contains("run_version = run_version + 1");
+        assertThat(mapper).doesNotContain("fallback_task_type");
     }
 }
