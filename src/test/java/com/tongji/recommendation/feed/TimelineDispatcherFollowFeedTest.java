@@ -114,7 +114,7 @@ class TimelineDispatcherFollowFeedTest {
     @Test
     void ignoresNonContentPublishedRows() {
         dispatcher.onMessage(canalMessage("""
-                {"payload":"{\"eventType\":\"publish_derived_failure\",\"postId\":101,\"authorId\":7}"}
+                {"payload":"{\"eventType\":\"FavoriteChanged\",\"postId\":101,\"authorId\":7}"}
                 """), acknowledgment);
 
         verify(feedTimelineExecutor, never()).execute(org.mockito.ArgumentMatchers.any());

@@ -24,6 +24,7 @@ class PublishManagerSchemaContractTest {
         assertThat(schema).contains("content_sha256_snapshot CHAR(64) NULL");
         assertThat(schema).contains("event_key VARCHAR(191) NULL");
         assertThat(schema).contains("UNIQUE KEY uk_outbox_event_key (event_key)");
+        assertThat(schema).doesNotContain("fallback_task_type");
 
         assertThat(mapper).contains("property=\"runVersion\" column=\"run_version\"");
         assertThat(mapper).contains("property=\"contentObjectKeySnapshot\" column=\"content_object_key_snapshot\"");
