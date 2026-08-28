@@ -12,7 +12,11 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Converts one Canal batch into complete outbox-row messages and waits for Kafka acceptance.
+ * 将 Canal 批次转换为完整 Outbox 行 envelope，并等待 Kafka Producer 给出终态结果。
+ *
+ * <p>发送等待时间必须大于 Producer 的 {@code delivery.timeout.ms}，避免 Bridge 回滚时原发送仍长期在途。</p>
+ *
+ * @since 2026-08-28
  */
 @Component
 public class CanalOutboxBatchPublisher {
@@ -22,12 +26,21 @@ public class CanalOutboxBatchPublisher {
 
     public CanalOutboxBatchPublisher(KafkaTemplate<String, String> kafka,
                                      ObjectMapper objectMapper,
-                                     @Value("${canal.kafka-send-timeout-ms:10000}") long sendTimeoutMs) {
+                                     @Value("${canal.kafka-send-timeout-ms:35000}") long sendTimeoutMs) {
+        if (sendTimeoutMs <= 0L) {
+            throw new IllegalArgumentException("Canal Kafka send timeout must be positive");
+        }
         this.kafka = kafka;
         this.objectMapper = objectMapper;
         this.sendTimeoutMs = sendTimeoutMs;
     }
 
+    /**
+     * 顺序发布一个 Canal 批次中的有效 Outbox 行；任一发送失败时抛出异常，由 Bridge 回滚整批。
+     *
+     * @param message Canal 批次
+     * @throws Exception 当解析、序列化、Kafka 入队或 broker 投递失败时
+     */
     public void publish(Message message) throws Exception {
         for (CanalEntry.Entry entry : message.getEntries()) {
             if (entry.getEntryType() != CanalEntry.EntryType.ROWDATA) {

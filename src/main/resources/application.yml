@@ -37,6 +37,10 @@ spring:
       acks: all
       properties:
         enable.idempotence: true
+        # Bridge 等待 35s，必须大于 Producer 30s 的总投递窗口，避免超时后原发送仍长期在途。
+        request.timeout.ms: ${KAFKA_REQUEST_TIMEOUT_MS:10000}
+        delivery.timeout.ms: ${KAFKA_DELIVERY_TIMEOUT_MS:30000}
+        max.block.ms: ${KAFKA_MAX_BLOCK_MS:10000}
         linger.ms: 5
         batch.size: 32768
         compression.type: lz4
@@ -242,6 +246,9 @@ canal:
   batchSize: ${CANAL_BATCH_SIZE:100}
   intervalMs: ${CANAL_INTERVAL_MS:1000}
   reconnectDelayMs: ${CANAL_RECONNECT_DELAY_MS:5000}
+  batch-retry-initial-ms: ${CANAL_BATCH_RETRY_INITIAL_MS:250}
+  batch-retry-max-ms: ${CANAL_BATCH_RETRY_MAX_MS:30000}
+  kafka-send-timeout-ms: ${CANAL_KAFKA_SEND_TIMEOUT_MS:35000}
 
 counter:
   rebuild:
