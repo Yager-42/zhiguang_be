@@ -46,8 +46,8 @@ class ContentRewardServiceTest {
     }
 
     @Test
-    void rewardCommentCreationGrantsCommentAmount() {
-        long amount = rewardService.rewardCommentCreation(USER_ID, COMMENT_ID);
+    void rewardCommentCreationStrictGrantsCommentAmount() {
+        long amount = rewardService.rewardCommentCreationStrict(USER_ID, COMMENT_ID);
 
         assertThat(amount).isEqualTo(2L);
         verify(walletService).grant(eq(USER_ID), eq(2L), eq(WalletLedgerReason.CONTENT_CREATION_REWARD),
@@ -59,7 +59,7 @@ class ContentRewardServiceTest {
         properties.setEnabled(false);
 
         long postAmount = rewardService.rewardPostCreationStrict(USER_ID, POST_ID);
-        long commentAmount = rewardService.rewardCommentCreation(USER_ID, COMMENT_ID);
+        long commentAmount = rewardService.rewardCommentCreationStrict(USER_ID, COMMENT_ID);
 
         assertThat(postAmount).isZero();
         assertThat(commentAmount).isZero();
@@ -76,14 +76,13 @@ class ContentRewardServiceTest {
     }
 
     @Test
-    void rewardReturnsZeroOnRuntimeExceptionAndDoesNotThrow() {
-        // AC8 关键路径：非受检异常（如 DataAccessException / DB 抖动）也被 catch 不冒泡
+    void commentRewardPropagatesWalletFailureForKafkaRetry() {
         when(walletService.grant(anyLong(), anyLong(), any(), any(), any()))
                 .thenThrow(new RuntimeException("db connection lost"));
 
-        long amount = rewardService.rewardCommentCreation(USER_ID, COMMENT_ID);
-
-        assertThat(amount).isZero();
+        assertThatThrownBy(() -> rewardService.rewardCommentCreationStrict(USER_ID, COMMENT_ID))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("db connection lost");
     }
 
     @Test

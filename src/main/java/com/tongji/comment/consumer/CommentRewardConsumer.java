@@ -54,7 +54,7 @@ public class CommentRewardConsumer {
             if (event.eventType() != CommentEventType.COMMENT_CREATED) {
                 continue;
             }
-            long rewarded = contentRewardService.rewardCommentCreation(event.creatorId(), event.commentId());
+            long rewarded = contentRewardService.rewardCommentCreationStrict(event.creatorId(), event.commentId());
             metrics.sideEffect("reward", rewarded > 0 ? "success" : "disabled_or_zero");
         }
     }

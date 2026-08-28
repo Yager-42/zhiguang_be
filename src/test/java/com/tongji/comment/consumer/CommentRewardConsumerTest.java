@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,7 +22,7 @@ class CommentRewardConsumerTest {
     void createdEventRewardsByStableCommentBusinessKey() throws Exception {
         ContentRewardService rewardService = mock(ContentRewardService.class);
         CommentMetrics metrics = mock(CommentMetrics.class);
-        when(rewardService.rewardCommentCreation(7L, 101L)).thenReturn(2L);
+        when(rewardService.rewardCommentCreationStrict(7L, 101L)).thenReturn(2L);
         CommentCanalEventReader eventReader = mock(CommentCanalEventReader.class);
         CommentOutboxEvent event = event(CommentEventType.COMMENT_CREATED);
         when(eventReader.readMutations("message")).thenReturn(List.of(event));
@@ -29,7 +30,7 @@ class CommentRewardConsumerTest {
 
         consumer.onMessage("message");
 
-        verify(rewardService).rewardCommentCreation(7L, 101L);
+        verify(rewardService).rewardCommentCreationStrict(7L, 101L);
         verify(metrics).sideEffect("reward", "success");
     }
 
@@ -44,7 +45,23 @@ class CommentRewardConsumerTest {
 
         consumer.onMessage("message");
 
-        verify(rewardService, never()).rewardCommentCreation(7L, 101L);
+        verify(rewardService, never()).rewardCommentCreationStrict(7L, 101L);
+    }
+
+    @Test
+    void walletFailurePropagatesForRetryTopic() {
+        ContentRewardService rewardService = mock(ContentRewardService.class);
+        when(rewardService.rewardCommentCreationStrict(7L, 101L))
+                .thenThrow(new IllegalStateException("wallet unavailable"));
+        CommentCanalEventReader eventReader = mock(CommentCanalEventReader.class);
+        when(eventReader.readMutations("message"))
+                .thenReturn(List.of(event(CommentEventType.COMMENT_CREATED)));
+        CommentRewardConsumer consumer = new CommentRewardConsumer(
+                eventReader, rewardService, mock(CommentMetrics.class));
+
+        assertThatThrownBy(() -> consumer.onMessage("message"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("wallet unavailable");
     }
 
     private CommentOutboxEvent event(CommentEventType type) {
