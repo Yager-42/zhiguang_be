@@ -91,8 +91,19 @@ class CommentMaterializationServiceTest {
     }
 
     private CommentOutboxEvent event() {
-        return new CommentOutboxEvent(201L, CommentEventType.COMMENT_WRITE_REQUESTED, 101L, 9L,
-                0L, 0L, 7L, "client-1", "hello", LocalDateTime.of(2026, 8, 7, 10, 0));
+        return new CommentOutboxEvent(
+                201L,
+                CommentEventType.COMMENT_WRITE_REQUESTED,
+                CommentOutboxEvent.CURRENT_SCHEMA_VERSION,
+                101L,
+                9L,
+                0L,
+                0L,
+                7L,
+                "client-1",
+                "hello",
+                LocalDateTime.of(2026, 8, 7, 10, 0)
+        );
     }
 
     private PendingComment pending(String status) {

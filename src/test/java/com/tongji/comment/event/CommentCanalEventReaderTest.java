@@ -92,6 +92,32 @@ class CommentCanalEventReaderTest {
                 .hasMessage("comment payload eventId mismatch");
     }
 
+    @Test
+    void rejectsUnsupportedSchemaVersion() throws Exception {
+        CommentOutboxEvent payload = event(
+                CommentEventType.COMMENT_CREATED,
+                null,
+                CommentOutboxEvent.CURRENT_SCHEMA_VERSION + 1);
+
+        assertThatThrownBy(() -> reader.readMutations(envelope(payload)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("unsupported comment payload schemaVersion");
+    }
+
+    @Test
+    void rejectsMissingSchemaVersion() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(
+                envelope(event(CommentEventType.COMMENT_CREATED, null)));
+        ObjectNode row = (ObjectNode) root.get("data").get(0);
+        ObjectNode payload = (ObjectNode) objectMapper.readTree(row.get("payload").asText());
+        payload.remove("schemaVersion");
+        row.put("payload", objectMapper.writeValueAsString(payload));
+
+        assertThatThrownBy(() -> reader.readMutations(objectMapper.writeValueAsString(root)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("unsupported comment payload schemaVersion");
+    }
+
     private String envelope(CommentOutboxEvent event) throws Exception {
         return envelope(event.eventType(), event, event.eventId(), event.commentId());
     }
@@ -114,9 +140,14 @@ class CommentCanalEventReaderTest {
     }
 
     private CommentOutboxEvent event(CommentEventType type, String body) {
+        return event(type, body, CommentOutboxEvent.CURRENT_SCHEMA_VERSION);
+    }
+
+    private CommentOutboxEvent event(CommentEventType type, String body, int schemaVersion) {
         return new CommentOutboxEvent(
                 201L,
                 type,
+                schemaVersion,
                 101L,
                 9L,
                 0L,

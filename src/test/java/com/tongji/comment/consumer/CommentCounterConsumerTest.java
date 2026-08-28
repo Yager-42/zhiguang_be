@@ -77,8 +77,19 @@ class CommentCounterConsumerTest {
     }
 
     private CommentOutboxEvent event(CommentEventType type, Long rootId, Long parentId) {
-        return new CommentOutboxEvent(201L, type, 101L, 9L, rootId, parentId, 7L,
-                "client-1", null, LocalDateTime.of(2026, 8, 7, 10, 0));
+        return new CommentOutboxEvent(
+                201L,
+                type,
+                CommentOutboxEvent.CURRENT_SCHEMA_VERSION,
+                101L,
+                9L,
+                rootId,
+                parentId,
+                7L,
+                "client-1",
+                null,
+                LocalDateTime.of(2026, 8, 7, 10, 0)
+        );
     }
 
 }

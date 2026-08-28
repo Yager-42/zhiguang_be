@@ -128,6 +128,9 @@ public class CommentCanalEventReader {
         if (event == null || event.eventType() != rowType) {
             throw new IllegalArgumentException("comment payload eventType mismatch");
         }
+        if (event.schemaVersion() != CommentOutboxEvent.CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException("unsupported comment payload schemaVersion");
+        }
         if (!Objects.equals(event.eventId(), rowId)) {
             throw new IllegalArgumentException("comment payload eventId mismatch");
         }

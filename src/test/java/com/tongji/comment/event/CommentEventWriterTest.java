@@ -54,15 +54,29 @@ class CommentEventWriterTest {
                 eq("COMMENT_WRITE_REQUESTED"),
                 payload.capture()
         );
-        assertThat(payload.getValue()).contains("\"eventId\":501", "\"body\":\"hello\"");
+        assertThat(payload.getValue()).contains(
+                "\"eventId\":501",
+                "\"schemaVersion\":" + CommentOutboxEvent.CURRENT_SCHEMA_VERSION,
+                "\"body\":\"hello\"");
         verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
     void createdEventReusesOriginalOccurrenceTimeAndPublishesLocalMutation() {
         LocalDateTime occurredAt = LocalDateTime.of(2026, 8, 7, 10, 0);
-        CommentOutboxEvent source = new CommentOutboxEvent(201L, CommentEventType.COMMENT_WRITE_REQUESTED,
-                101L, 9L, 0L, 0L, 7L, "client-1", "hello", occurredAt);
+        CommentOutboxEvent source = new CommentOutboxEvent(
+                201L,
+                CommentEventType.COMMENT_WRITE_REQUESTED,
+                CommentOutboxEvent.CURRENT_SCHEMA_VERSION,
+                101L,
+                9L,
+                0L,
+                0L,
+                7L,
+                "client-1",
+                "hello",
+                occurredAt
+        );
 
         writer.createdFrom(source);
 
@@ -76,6 +90,8 @@ class CommentEventWriterTest {
                 payload.capture()
         );
         assertThat(read(payload.getValue()).occurredAt()).isEqualTo(occurredAt);
+        assertThat(read(payload.getValue()).schemaVersion())
+                .isEqualTo(CommentOutboxEvent.CURRENT_SCHEMA_VERSION);
         ArgumentCaptor<CommentMutationEvent> local = ArgumentCaptor.forClass(CommentMutationEvent.class);
         verify(eventPublisher).publishEvent(local.capture());
         assertThat(local.getValue().eventId()).isEqualTo(501L);

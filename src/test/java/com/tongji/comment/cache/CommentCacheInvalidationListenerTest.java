@@ -46,8 +46,12 @@ class CommentCacheInvalidationListenerTest {
         CommentMutationEvent created = new CommentMutationEvent(
                 202L, CommentEventType.COMMENT_CREATED, 13L, 9L, 11L, 11L);
         CommentOutboxEvent duplicate = new CommentOutboxEvent(
-                201L, CommentEventType.COMMENT_DELETED, 12L, 9L, 11L, 11L, 7L,
-                "client-1", null, LocalDateTime.of(2026, 8, 7, 10, 0));
+                201L,
+                CommentEventType.COMMENT_DELETED,
+                CommentOutboxEvent.CURRENT_SCHEMA_VERSION,
+                12L, 9L, 11L, 11L, 7L,
+                "client-1", null, LocalDateTime.of(2026, 8, 7, 10, 0)
+        );
         when(canalEventReader.readMutations("message")).thenReturn(List.of(duplicate));
 
         listener.afterCommit(deleted);

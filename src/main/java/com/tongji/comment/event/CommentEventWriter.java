@@ -48,6 +48,7 @@ public class CommentEventWriter {
         CommentOutboxEvent event = new CommentOutboxEvent(
                 idService.nextId(IdNamespace.OUTBOX_EVENT),
                 CommentEventType.COMMENT_WRITE_REQUESTED,
+                CommentOutboxEvent.CURRENT_SCHEMA_VERSION,
                 request.commentId(),
                 request.postId(),
                 request.rootId(),
@@ -71,6 +72,7 @@ public class CommentEventWriter {
         return changed(new CommentOutboxEvent(
                 idService.nextId(IdNamespace.OUTBOX_EVENT),
                 CommentEventType.COMMENT_CREATED,
+                CommentOutboxEvent.CURRENT_SCHEMA_VERSION,
                 source.commentId(),
                 source.postId(),
                 source.rootId(),
@@ -111,6 +113,7 @@ public class CommentEventWriter {
         return new CommentOutboxEvent(
                 idService.nextId(IdNamespace.OUTBOX_EVENT),
                 eventType,
+                CommentOutboxEvent.CURRENT_SCHEMA_VERSION,
                 comment.getCommentId(),
                 comment.getPostId(),
                 comment.getRootId(),

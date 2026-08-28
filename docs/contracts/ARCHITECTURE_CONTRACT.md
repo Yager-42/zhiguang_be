@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **contract_version** | `0.15.0` |
+| **contract_version** | `0.15.1` |
 | **status** | **active**（本文档首次建立；后续架构/契约变更必须同步修改本文并升版本） |
 | **updated** | 2026-08-28 |
 | **scope** | 单体应用 `com.tongji`（`src/main/java/com/tongji`，469 个 Java 文件）的运行时边界、模块分层、HTTP/事件/存储契约、状态机、配置键、错误码；`db/schema.sql`、`db/cassandra/init.cql`、`src/main/resources/application.yml`、`docker-compose.yml` 承载的外部系统边界 |
@@ -254,7 +254,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 1. **写**：业务事务内通过 `OutboxMapper.insertUnique(id,eventKey,aggregateType,aggregateId,type,payloadJson)` 写入；id=`IdNamespace.OUTBOX_EVENT`（Snowflake），`event_key` 唯一约束承载业务幂等。
 2. **桥**：`CanalKafkaBridge` + `CanalOutboxBatchPublisher`（`outbox/`）由 `SmartLifecycle` 与 `canal.enabled` 门控；同一 Canal destination 在所有部署中同时只能有一个 Bridge 启用。Bridge 订阅 `zhiguang.outbox`，只处理 `EventType.INSERT/UPDATE`，转发完整 after-column 行为 `{"table":"outbox","type":"INSERT|UPDATE","data":[{id,event_key,aggregate_type,aggregate_id,type,payload,created_at}]}`。单行事件以 `{aggregate_type}:{aggregate_id}` 为 Kafka key；每条 `KafkaTemplate.send` 都在 `canal.kafka-send-timeout-ms` 内等待 broker 结果；批次全部成功才 ack，解析、序列化或发送失败对该 batch rollback，并执行有上限的指数退避与 full jitter，成功 ack 后复位失败次数。
 3. **解**：`OutboxMessageReader` 提供通用 Canal envelope 解析；发布和评论关键消费分别使用 `PublishEventReader`、`CommentCanalEventReader` 严格解析目标事件。无关事件返回空集合；畸形 envelope 或目标事件抛异常，不得被当作空消息确认。
-4. **事件类型注册表**（outbox `type` 字段，代码字面量）：`publish_requested` / `content_published`（knowpost）、`COMMENT_WRITE_REQUESTED` / `COMMENT_CREATED` / `COMMENT_DELETED` / `COMMENT_MODERATED`（comment）、`user_profile_updated`（profile）、`KnowPostMetadataUpdated` / `KnowPostDeleted` / `KnowPostModerationRejected`（knowpost+moderation）、`review_requested`（moderation）、`FollowCreated` / `FollowCanceled`（relation，payload=RelationEvent JSON）、`FavoriteChanged`（favorite，payload 含 eventType/schemaVersion/userId/postId/faved/delta/occurredAt）、`moderation` 处置 delete 事件（`{entity:knowpost, op:delete, source:moderation}`）。
+4. **事件类型注册表**（outbox `type` 字段，代码字面量）：`publish_requested` / `content_published`（knowpost）、`COMMENT_WRITE_REQUESTED` / `COMMENT_CREATED` / `COMMENT_DELETED` / `COMMENT_MODERATED`（comment，`CommentOutboxEvent.schemaVersion=1`）、`user_profile_updated`（profile）、`KnowPostMetadataUpdated` / `KnowPostDeleted` / `KnowPostModerationRejected`（knowpost+moderation）、`review_requested`（moderation）、`FollowCreated` / `FollowCanceled`（relation，payload=RelationEvent JSON）、`FavoriteChanged`（favorite，payload 含 eventType/schemaVersion/userId/postId/faved/delta/occurredAt）、`moderation` 处置 delete 事件（`{entity:knowpost, op:delete, source:moderation}`）。
 
 ### 6.2 Kafka 主题清单（精确字符串）
 
@@ -338,7 +338,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 **共享 outbox 生命周期**：评论不再维护 polling/claim/published 状态机。Outbox 行由业务事务追加，Canal 位点负责 relay 进度；Kafka send 成功但 Canal ack 前崩溃允许重放，由稳定 eventKey 与消费者幂等吸收。`OutboxCleaner` 默认保留 720 小时、单批最多删除 1000 行；只有单活 Bridge 仍在运行并于最近 300 秒内通过空轮询证明已追平时才允许清理，Canal 停用、断连、存在积压或证据过期时停止删除。实际清理记录 `outbox.cleanup.runs{result=success|failure}` 与 `outbox.cleanup.deleted.rows`；数据库失败保留 cause 向调度错误边界抛出，不得只写日志后吞掉，6 小时内失败达到 3 次必须告警。
 
-**事件 module**：`CommentEventWriter` 是事件 ID、稳定 `CommentOutboxEvent` 序列化、共享 outbox 写入和本地变更事件发布的唯一 implementation；写请求用 `OutboxMapper.insertUnique` 且不触发缓存失效，created/deleted/moderated 同样用稳定 eventKey 幂等写并发布 `CommentMutationEvent`。`CommentCanalEventReader` 解析 Canal envelope 并严格校验目标评论事件；`CommentEventReader` 仅保留评论业务 payload 与本地缓存变更映射职责。事务调用方仍拥有状态变化；缓存 listener 以 `@TransactionalEventListener(AFTER_COMMIT)` 消费本地事件，Kafka 重投以相同 eventId 去重。
+**事件 module**：`CommentEventWriter` 是事件 ID、稳定 `CommentOutboxEvent` v1 序列化、共享 outbox 写入和本地变更事件发布的唯一 implementation；写请求用 `OutboxMapper.insertUnique` 且不触发缓存失效，created/deleted/moderated 同样用稳定 eventKey 幂等写并发布 `CommentMutationEvent`。`CommentCanalEventReader` 解析 Canal envelope，严格校验 `schemaVersion=1` 和目标评论事件；缺失或不支持的版本不得确认。`CommentEventReader` 仅保留评论业务 payload 与本地缓存变更映射职责。事务调用方仍拥有状态变化；缓存 listener 以 `@TransactionalEventListener(AFTER_COMMIT)` 消费本地事件，Kafka 重投以相同 eventId 去重。
 
 **部署切换**：这是停写 clean cutover，不允许滚动重叠。先停止评论新流量并让旧版本 dispatcher 排空，确认 `SELECT COUNT(*) FROM comment_outbox WHERE state <> 2` 为 0；再停止全部旧版本实例并删除旧表，随后启动新版本，且只允许一个实例启用 `CANAL_ENABLED=true`。未满足任一步不得切换 Writer，也不得通过双写或按 Snowflake ID 回填绕过。
 
