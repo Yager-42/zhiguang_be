@@ -1,7 +1,7 @@
 # publish-relation-architecture Specification
 
 ## Purpose
-TBD - created by archiving change align-publish-relation-architecture. Update Purpose after archive.
+Defines durable publish acceptance/execution semantics and manager boundaries for publish and relation use cases.
 ## Requirements
 ### Requirement: Publish and relation chains SHALL use manager orchestration
 
@@ -71,23 +71,46 @@ The system SHALL expose publish status query and retry endpoints based on `publi
 - **THEN** the system accepts the retry
 - **AND** returns a `publishAttemptId` for the retry execution
 
-### Requirement: Critical publish flow SHALL complete after acceptance
+### Requirement: Publish acceptance SHALL durably enqueue critical work
 
-After a publish request is accepted, critical publish work SHALL run under the publish manager/executor and eventually transition the attempt and post to a final state.
+The acceptance transaction SHALL atomically persist the publish attempt, transition the post to `publishing`, freeze the content snapshot, and insert one uniquely keyed `PublishRequested` Outbox event. Critical work SHALL be executed directly by the publish Kafka listener and SHALL NOT be submitted to a second JVM-local executor.
+
+#### Scenario: Accepted process exits before execution
+
+- **WHEN** the application exits after the acceptance transaction commits
+- **THEN** the committed Outbox event remains recoverable through Canal and Kafka
+- **AND** a later consumer instance can execute the same publish run
+
+### Requirement: Critical publish execution SHALL be versioned and idempotent
+
+Each attempt SHALL carry a `runVersion`. Success, permanent failure, retry, and DLT handling SHALL compare that version. Cassandra text archival SHALL accept a repeated `postId + sha256` and SHALL reject replacement by a different digest.
+
+#### Scenario: Old run completes after manual retry
+
+- **WHEN** run version N delivers after the attempt has advanced to N+1
+- **THEN** its success or failure transition is a no-op
+- **AND** it cannot overwrite the state of run N+1
 
 #### Scenario: Critical publish succeeds
 
-- **WHEN** an accepted attempt completes critical publish validation and persistence
+- **WHEN** the frozen object digest is valid and Cassandra archival succeeds
 - **THEN** the attempt becomes `succeeded`
 - **AND** the post changes from `publishing` to `published`
+- **AND** one unique `ContentPublished` Outbox event is committed with the state transition
 
-#### Scenario: Critical publish fails
+#### Scenario: Critical publish fails transiently
 
-- **WHEN** an accepted attempt fails a critical fact write or validation
-- **THEN** the attempt becomes `failed`
+- **WHEN** a retryable infrastructure failure occurs
+- **THEN** Kafka Retry Topics perform bounded backoff retries
+- **AND** the post remains `publishing` until success or terminal handling
+
+#### Scenario: Critical publish reaches a terminal failure
+
+- **WHEN** a permanent validation error occurs or retries reach the DLT
+- **THEN** the matching run version changes to `failed`
 - **AND** the post changes from `publishing` to `publish_failed`
-- **AND** the status response exposes the failed step and retry eligibility
 
+The system SHALL NOT infer a terminal publish failure from `updated_at` or elapsed wall-clock time.
 ### Requirement: Relation writes SHALL remain naturally idempotent
 
 Follow and unfollow operations SHALL remain idempotent without requiring a client idempotency key. The system SHALL derive idempotency from actor, target, action, current relation state, and database constraints.
@@ -104,15 +127,15 @@ Follow and unfollow operations SHALL remain idempotent without requiring a clien
 - **THEN** the relation state remains unfollowed
 - **AND** duplicate side effects are not emitted
 
-### Requirement: Execution resources SHALL be isolated by chain
+### Requirement: Execution resources SHALL be isolated by Kafka consumer group
 
-The system SHALL use separate named executors for publish work, relation event handling, Canal/Outbox consumption, and reconciliation work so that saturation in one chain does not exhaust the others.
+Publish critical work, publish rewards, publish author counters, relation commands, Canal bridging, and reconciliation SHALL use independent consumer groups or bounded executors appropriate to their delivery contracts. The publish listener SHALL execute critical work on its listener container thread.
 
-#### Scenario: Relation event executor saturates
+#### Scenario: Publish consumer is saturated
 
-- **WHEN** relation event handling is saturated
-- **THEN** publish work continues to use its own executor
-- **AND** Canal/Outbox bridge work continues to use its own executor
+- **WHEN** publish processing reaches its configured listener concurrency
+- **THEN** Kafka retains unprocessed records
+- **AND** Canal/Outbox bridging and unrelated consumer groups continue independently
 
 #### Scenario: Canal bridge is wired
 
@@ -139,15 +162,9 @@ Expected business validation failures, such as missing permission, invalid state
 - **THEN** the system rejects the request as a business failure
 - **AND** the resilience guard does not record it as a dependency or system failure
 
-### Requirement: Fallback behavior SHALL separate critical facts from derivative tasks
+### Requirement: Derived publish effects SHALL be independent and idempotent
 
-The publish manager SHALL distinguish critical publish facts from derivative work. Critical failures SHALL prevent or fail the publish attempt; derivative failures SHALL create retry or reconciliation work without rolling back already-published content.
-
-#### Scenario: Critical publish persistence fails
-
-- **WHEN** a critical publish state transition or durable attempt record fails
-- **THEN** the publish attempt is not reported as successful
-- **AND** the publish status does not report successful publication for that transition
+Search indexing, recommendation upsert, follow-feed fanout, wallet reward, and author post count SHALL consume `ContentPublished` independently. A derived failure SHALL NOT roll back published content. Repeated reward delivery SHALL rely on the wallet business reference; repeated author-count delivery SHALL rebuild an absolute value from MySQL facts rather than incrementing.
 
 #### Scenario: Derived indexing task fails after publish
 
@@ -155,4 +172,14 @@ The publish manager SHALL distinguish critical publish facts from derivative wor
 - **AND** a derived task such as search indexing fails
 - **THEN** the content remains published
 - **AND** the system records retry or reconciliation work
+
+#### Scenario: Reward message is replayed
+
+- **WHEN** the same `ContentPublished` reward effect is delivered more than once
+- **THEN** the wallet contains one matching content reward ledger effect
+
+#### Scenario: Author-count message is replayed
+
+- **WHEN** the same `ContentPublished` counter effect is delivered more than once
+- **THEN** the stored post count equals the current number of published posts
 
