@@ -1,5 +1,7 @@
 package com.tongji.outbox;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,20 +28,25 @@ public class OutboxCleaner {
     private final int batchSize;
     private final long maxCaughtUpAgeMillis;
     private final Clock clock;
+    private final Counter cleanupSuccess;
+    private final Counter cleanupFailure;
+    private final Counter deletedRows;
 
     @Autowired
     public OutboxCleaner(OutboxMapper outboxMapper,
                          CanalKafkaBridge canalKafkaBridge,
+                         MeterRegistry meterRegistry,
                          @Value("${outbox.cleanup.enabled:true}") boolean enabled,
                          @Value("${outbox.cleanup.retention-hours:720}") int retentionHours,
                          @Value("${outbox.cleanup.batch-size:1000}") int batchSize,
                          @Value("${outbox.cleanup.max-caught-up-age-ms:300000}") long maxCaughtUpAgeMillis) {
-        this(outboxMapper, canalKafkaBridge, enabled, retentionHours, batchSize,
+        this(outboxMapper, canalKafkaBridge, meterRegistry, enabled, retentionHours, batchSize,
                 maxCaughtUpAgeMillis, Clock.systemDefaultZone());
     }
 
     OutboxCleaner(OutboxMapper outboxMapper,
                   CanalKafkaBridge canalKafkaBridge,
+                  MeterRegistry meterRegistry,
                   boolean enabled,
                   int retentionHours,
                   int batchSize,
@@ -55,6 +62,9 @@ public class OutboxCleaner {
         this.batchSize = batchSize;
         this.maxCaughtUpAgeMillis = maxCaughtUpAgeMillis;
         this.clock = clock;
+        this.cleanupSuccess = meterRegistry.counter("outbox.cleanup.runs", "result", "success");
+        this.cleanupFailure = meterRegistry.counter("outbox.cleanup.runs", "result", "failure");
+        this.deletedRows = meterRegistry.counter("outbox.cleanup.deleted.rows");
     }
 
     /**
@@ -68,11 +78,16 @@ public class OutboxCleaner {
         LocalDateTime cutoff = LocalDateTime.now(clock).minusHours(retentionHours);
         try {
             int deleted = outboxMapper.deleteCreatedBefore(cutoff, batchSize);
+            cleanupSuccess.increment();
+            deletedRows.increment(deleted);
             if (deleted > 0) {
                 log.info("shared outbox cleanup deleted {} rows before {}", deleted, cutoff);
             }
         } catch (RuntimeException exception) {
-            log.warn("shared outbox cleanup failed", exception);
+            cleanupFailure.increment();
+            throw new IllegalStateException(
+                    "shared outbox cleanup failed, cutoff=" + cutoff + ", batchSize=" + batchSize,
+                    exception);
         }
     }
 }

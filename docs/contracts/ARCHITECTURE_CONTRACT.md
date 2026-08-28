@@ -336,7 +336,7 @@ Services / Managers (事务边界) ──→ Mappers (MyBatis) ──→ MySQL
 
 **事件 fanout**：`COMMENT_CREATED/COMMENT_DELETED/COMMENT_MODERATED` 与其他领域事件共用 `canal-outbox`；Counter、Reward、Feedback 使用独立 consumer group 和独立 retry/dlt suffix。无关事件由领域 Reader 忽略；目标事件格式非法必须抛异常。计数事件使用稳定 eventId 派生键，钱包奖励使用稳定 businessRef，推荐等外部派生失败持久化 reconciliation task 后才允许确认。
 
-**共享 outbox 生命周期**：评论不再维护 polling/claim/published 状态机。Outbox 行由业务事务追加，Canal 位点负责 relay 进度；Kafka send 成功但 Canal ack 前崩溃允许重放，由稳定 eventKey 与消费者幂等吸收。`OutboxCleaner` 默认保留 720 小时、单批最多删除 1000 行；只有单活 Bridge 仍在运行并于最近 300 秒内通过空轮询证明已追平时才允许清理，Canal 停用、断连、存在积压或证据过期时停止删除。
+**共享 outbox 生命周期**：评论不再维护 polling/claim/published 状态机。Outbox 行由业务事务追加，Canal 位点负责 relay 进度；Kafka send 成功但 Canal ack 前崩溃允许重放，由稳定 eventKey 与消费者幂等吸收。`OutboxCleaner` 默认保留 720 小时、单批最多删除 1000 行；只有单活 Bridge 仍在运行并于最近 300 秒内通过空轮询证明已追平时才允许清理，Canal 停用、断连、存在积压或证据过期时停止删除。实际清理记录 `outbox.cleanup.runs{result=success|failure}` 与 `outbox.cleanup.deleted.rows`；数据库失败保留 cause 向调度错误边界抛出，不得只写日志后吞掉，6 小时内失败达到 3 次必须告警。
 
 **事件 module**：`CommentEventWriter` 是事件 ID、稳定 `CommentOutboxEvent` 序列化、共享 outbox 写入和本地变更事件发布的唯一 implementation；写请求用 `OutboxMapper.insertUnique` 且不触发缓存失效，created/deleted/moderated 同样用稳定 eventKey 幂等写并发布 `CommentMutationEvent`。`CommentCanalEventReader` 解析 Canal envelope 并严格校验目标评论事件；`CommentEventReader` 仅保留评论业务 payload 与本地缓存变更映射职责。事务调用方仍拥有状态变化；缓存 listener 以 `@TransactionalEventListener(AFTER_COMMIT)` 消费本地事件，Kafka 重投以相同 eventId 去重。
 
