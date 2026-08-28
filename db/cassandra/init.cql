@@ -12,6 +12,13 @@ CREATE TABLE IF NOT EXISTS zhiguang.post_text_by_post_id (
   updated_at timestamp
 );
 
+CREATE TABLE IF NOT EXISTS zhiguang.post_text_archive_by_post_id (
+  post_id bigint PRIMARY KEY,
+  body text,
+  sha256 text,
+  archived_at timestamp
+);
+
 CREATE TABLE IF NOT EXISTS zhiguang.comment_text_by_comment_id (
   comment_id bigint PRIMARY KEY,
   body text,

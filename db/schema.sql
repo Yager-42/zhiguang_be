@@ -80,8 +80,12 @@ CREATE TABLE IF NOT EXISTS publish_attempt (
     creator_id BIGINT UNSIGNED NOT NULL,
     idempotent_key VARCHAR(128) NOT NULL,
     status VARCHAR(32) NOT NULL,
+    run_version INT NOT NULL DEFAULT 1 COMMENT '发布执行轮次，手工重试时递增',
     failed_step VARCHAR(64) NULL,
     error_message VARCHAR(1024) NULL,
+    content_object_key_snapshot VARCHAR(512) NULL COMMENT '受理时固定的正文对象 Key',
+    content_etag_snapshot VARCHAR(128) NULL COMMENT '受理时固定的正文 ETag',
+    content_sha256_snapshot CHAR(64) NULL COMMENT '受理时固定的正文 SHA-256',
     fallback_task_type VARCHAR(64) NULL,
     fallback_target_type VARCHAR(64) NULL,
     fallback_target_id BIGINT UNSIGNED NULL,
@@ -100,12 +104,14 @@ CREATE TABLE IF NOT EXISTS publish_attempt (
 
 CREATE TABLE IF NOT EXISTS outbox (
     id BIGINT UNSIGNED NOT NULL,
+    event_key VARCHAR(191) NULL COMMENT '业务事件幂等键',
     aggregate_type VARCHAR(64) NOT NULL,
     aggregate_id BIGINT UNSIGNED NULL,
     type VARCHAR(64) NOT NULL,
     payload JSON NOT NULL,
     created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
+    UNIQUE KEY uk_outbox_event_key (event_key),
     KEY ix_outbox_agg (aggregate_type, aggregate_id),
     KEY ix_outbox_ct (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
