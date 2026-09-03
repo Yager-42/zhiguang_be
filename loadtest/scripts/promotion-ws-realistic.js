@@ -134,7 +134,7 @@ export default function (data) {
   }, (socket) => {
     socket.on('open', () => {
       startedAt = Date.now();
-      // 知情对抗前提：订阅房间以接收 RANKING_DELTA/AUCTION_EXTENDED/WINDOW_CLOSED 公共事件
+      // 知情对抗前提：订阅房间以接收 RANKING_DELTA/WINDOW_CLOSED 公共事件
       socket.send(JSON.stringify({ type: 'SUBSCRIBE', auctionWindowId: Number(expectedWindowId) }));
       socket.setInterval(() => {
         // 知情对抗前提：收到 SUBSCRIBED 确认（房间公共事件通道就绪）后才开始出价，

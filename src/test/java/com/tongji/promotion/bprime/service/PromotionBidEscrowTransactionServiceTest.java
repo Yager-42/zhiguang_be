@@ -1,7 +1,10 @@
 package com.tongji.promotion.bprime.service;
 
+import com.tongji.common.exception.BusinessException;
+import com.tongji.common.exception.ErrorCode;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.promotion.bprime.availability.PromotionAuctionAvailabilityGate;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
 import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
@@ -22,6 +25,8 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -37,6 +42,7 @@ class PromotionBidEscrowTransactionServiceTest {
     private PromotionAuctionWindowMapper windowMapper;
     private PromotionBidEscrowMapper escrowMapper;
     private WalletService walletService;
+    private PromotionAuctionAvailabilityGate availabilityGate;
     private PromotionBPrimeProperties properties;
     private PromotionBidEscrowTransactionService service;
 
@@ -46,13 +52,14 @@ class PromotionBidEscrowTransactionServiceTest {
         windowMapper = mock(PromotionAuctionWindowMapper.class);
         escrowMapper = mock(PromotionBidEscrowMapper.class);
         walletService = mock(WalletService.class);
+        availabilityGate = mock(PromotionAuctionAvailabilityGate.class);
         IdService idService = mock(IdService.class);
         ReconciliationService reconciliationService = mock(ReconciliationService.class);
         properties = new PromotionBPrimeProperties();
         properties.setEnabled(true);
         service = new PromotionBidEscrowTransactionService(
                 campaignMapper, windowMapper, escrowMapper, walletService, idService,
-                reconciliationService, properties);
+                reconciliationService, properties, availabilityGate);
 
         Instant now = Instant.parse("2026-08-09T12:00:00Z");
         PromotionCampaign campaign = PromotionCampaign.builder()
@@ -78,6 +85,18 @@ class PromotionBidEscrowTransactionServiceTest {
         when(windowMapper.findOpenWindow(PromotionResourceType.FEED_TOP_SLOT, now)).thenReturn(window);
         when(idService.nextId(IdNamespace.PROMOTION_ESCROW)).thenReturn(501L);
         when(reconciliationService.createTaskIfAbsent(any(), any(), anyLong())).thenReturn(task);
+    }
+
+    @Test
+    void pausedAvailabilityRejectsEscrowBeforeCampaignLock() {
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED))
+                .when(availabilityGate).requireAvailable();
+        assertThatThrownBy(() -> service.authorize(42L, 201L, 500L, Instant.parse("2026-08-09T12:00:00Z")))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.PROMOTION_AUCTION_PAUSED));
+
+        verifyNoInteractions(campaignMapper, windowMapper, escrowMapper, walletService);
     }
 
     @Test

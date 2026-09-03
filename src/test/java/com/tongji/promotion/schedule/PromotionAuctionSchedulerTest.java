@@ -1,6 +1,5 @@
 package com.tongji.promotion.schedule;
 
-import com.tongji.promotion.config.PromotionProperties;
 import com.tongji.promotion.model.PromotionResourceType;
 import com.tongji.promotion.service.PromotionAuctionWindowService;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,14 +11,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class PromotionAuctionSchedulerTest {
 
     @Mock
-    private PromotionAuctionWindowCloser closer;
+    private PromotionAllocationRefresher allocationRefresher;
 
     @Mock
     private PromotionAuctionWindowService windowService;
@@ -28,14 +26,7 @@ class PromotionAuctionSchedulerTest {
 
     @BeforeEach
     void setUp() {
-        scheduler = new PromotionAuctionScheduler(windowService, closer, new PromotionProperties());
-    }
-
-    @Test
-    void dispatchesWindowCloseJob() {
-        scheduler.closeDueWindows();
-
-        verify(closer).closeDueWindows(any(Instant.class), eq(50));
+        scheduler = new PromotionAuctionScheduler(windowService, allocationRefresher);
     }
 
     @Test
@@ -47,9 +38,9 @@ class PromotionAuctionSchedulerTest {
     }
 
     @Test
-    void refreshAllocationsDelegatesToCloser() {
+    void refreshAllocationsDelegatesToRefresher() {
         scheduler.refreshAllocations();
 
-        verify(closer).refreshCurrentAllocations(any(Instant.class));
+        verify(allocationRefresher).refreshCurrentAllocations(any(Instant.class));
     }
 }

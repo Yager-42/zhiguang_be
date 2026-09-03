@@ -97,6 +97,7 @@ class PromotionAuctionHotStateLifecycleTest {
         assertThat(route.authorizedAmount()).isEqualTo(500L);
     }
 
+
     @Test
     void recoveryUsesSameProjectionRecipeWithoutOwningTaskCompletion() {
         lifecycle.restoreAuthorization(campaign, window, escrow, now);

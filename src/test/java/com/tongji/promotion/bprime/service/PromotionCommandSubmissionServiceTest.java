@@ -3,6 +3,7 @@ package com.tongji.promotion.bprime.service;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.promotion.api.dto.SubmitPromotionBidCommandResponse;
+import com.tongji.promotion.bprime.availability.PromotionAuctionAvailabilityGate;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.metrics.PromotionPerformanceMetrics;
 import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
@@ -43,6 +44,8 @@ class PromotionCommandSubmissionServiceTest {
     private PromotionRedisDecisionAdapter decisionAdapter;
     @Mock
     private PromotionPerformanceMetrics performanceMetrics;
+    @Mock
+    private PromotionAuctionAvailabilityGate availabilityGate;
     private PromotionBidAdmissionState admissionState;
     private PromotionCommandSubmissionService service;
     @BeforeEach
@@ -51,7 +54,20 @@ class PromotionCommandSubmissionServiceTest {
         properties.setEnabled(true);
         admissionState = new PromotionBidAdmissionState(properties);
         service = new PromotionCommandSubmissionService(
-                routeRepository, decisionAdapter, performanceMetrics, properties, Runnable::run, admissionState);
+                routeRepository, decisionAdapter, performanceMetrics, properties, availabilityGate,
+                Runnable::run, admissionState);
+    }
+
+    @Test
+    void pausedAvailabilityRejectsBidBeforeRouteLookup() {
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED))
+                .when(availabilityGate).requireAvailable();
+
+        assertThatThrownBy(() -> service.submitAsync(42L, 201L, 120L, "idem-1", Instant.now()).join())
+                .isInstanceOf(CompletionException.class)
+                .hasCauseInstanceOf(BusinessException.class);
+
+        org.mockito.Mockito.verifyNoInteractions(routeRepository);
     }
 
     @Test

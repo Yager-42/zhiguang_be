@@ -45,14 +45,6 @@ class PromotionDecisionFanoutServiceTest {
         verify(coalescer).publishWindowClosed(argThat(value -> value.ranking().equals(List.of(ranking))));
     }
 
-    @Test
-    void extendedDecisionRoutesToExtensionEvent() {
-        PromotionAuctionDecision extended = decision("d-ext", 2L, 1L, "AUCTION_EXTENDED");
-
-        service.publishDecision(extended);
-
-        verify(coalescer).publishWindowExtended(extended);
-    }
 
     @Test
     void noBidDecisionRoutesToWindowClosedEvent() {

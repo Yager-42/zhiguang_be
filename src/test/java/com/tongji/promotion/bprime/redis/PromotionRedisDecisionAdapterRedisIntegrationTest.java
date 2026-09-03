@@ -1,5 +1,6 @@
 package com.tongji.promotion.bprime.redis;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
@@ -30,9 +31,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 英式升价语义集成测试：共享价格台阶 required=current+increment（reserve=100、increment=100，
- * 默认规则：cap=0、反狙击 10s/10s/5），BID_NOT_HIGHER 拒绝带 requiredAmount，终态
- * AUCTION_SOLD/AUCTION_NO_BID，cap-hit 后出价返回 WINDOW_CLOSED。
+ * 英式升价语义集成测试：共享价格台阶 required=current+increment（reserve=100、increment=100），
+ * BID_NOT_HIGHER 拒绝带 requiredAmount，固定 deadline 的终态为 AUCTION_SOLD/AUCTION_NO_BID，
+ * cap-hit 后出价返回 WINDOW_CLOSED。
  */
 @SpringBootTest(classes = PromotionRedisDecisionAdapterRedisIntegrationTest.TestConfig.class)
 @TestPropertySource(properties = {
@@ -45,9 +46,9 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
 
     private static final long WINDOW_ID = 301L;
     private static final String PREFIX = "promotion:auction:{301}";
-    private static final String CLOSING_INDEX = "promotion:auction:closing";
 
     @Autowired private StringRedisTemplate redis;
+    @Autowired private ObjectMapper objectMapper;
     @Autowired private PromotionRedisDecisionAdapter adapter;
     @Autowired private PromotionAuctionHotStateRepository hotStateRepository;
     @Autowired private PromotionRedisWindowCloser windowCloser;
@@ -59,7 +60,6 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         if (keys != null && !keys.isEmpty()) {
             redis.delete(keys);
         }
-        redis.opsForZSet().remove(CLOSING_INDEX, String.valueOf(WINDOW_ID));
     }
 
     @Test
@@ -200,7 +200,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         initialize(Instant.now().minusSeconds(1));
         authorize(243L, 42L, 500L);
 
-        PromotionAuctionDecision close = windowCloser.close(WINDOW_ID).orElseThrow();
+        PromotionAuctionDecision close = closeDecision();
         PromotionAuctionDecision rejected = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
 
         assertThat(close.type()).isEqualTo("AUCTION_NO_BID");
@@ -216,10 +216,10 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         PromotionAuctionDecision accepted =
                 decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
         assertThat(accepted.accepted()).isTrue();
-        // 让窗口过期（反狙击默认 extendWindowSec=10s 且 endAt 在 60s 外，不触发延长）
+        // 本用例只验证到期有赢家关窗，直接把固定 deadline 设置到 Redis 过去时间。
         redis.opsForHash().put(PREFIX + ":state", "windowEndAtEpochMs", "1");
 
-        PromotionAuctionDecision close = windowCloser.close(WINDOW_ID).orElseThrow();
+        PromotionAuctionDecision close = closeDecision();
 
         assertThat(close.type()).isEqualTo("AUCTION_SOLD");
         assertThat(close.payload()).containsEntry("winnerCampaignId", "243");
@@ -228,14 +228,15 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
 
     @Test
     void capHitTerminatesSoldAndLaterBidGetsWindowClosed() {
-        initialize(Instant.now().plusSeconds(60), 100L, 300L, 5);
+        initialize(Instant.now().plusSeconds(60), 100L, 300L);
         authorize(243L, 42L, 500L);
 
         PromotionAuctionDecision capBid = decide(bid("cmd-1", "hash-1", 243L, 42L, 300L));
         PromotionAuctionDecision afterSold = decide(bid("cmd-2", "hash-2", 243L, 42L, 300L));
 
         assertThat(capBid.accepted()).isTrue();
-        assertThat(streamIds()).containsExactly("1-0", "2-0");
+        assertThat(capBid.type()).isEqualTo("BID_ACCEPTED");
+        assertThat(streamDecisionTypes()).containsExactly("BID_ACCEPTED", "AUCTION_SOLD");
         assertThat(redis.opsForHash().get(PREFIX + ":state", "status")).isEqualTo("SOLD");
         assertThat(afterSold.rejectionReason()).isEqualTo("WINDOW_CLOSED");
     }
@@ -247,7 +248,7 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
         try (var executor = Executors.newFixedThreadPool(2)) {
             var bidResult = executor.submit(
                     () -> decide(bid("cmd-race", "hash-race", 243L, 42L, 200L)));
-            var closeResult = executor.submit(() -> windowCloser.close(WINDOW_ID).orElseThrow());
+            var closeResult = executor.submit(this::closeDecision);
 
             assertThat(bidResult.get().rejectionReason()).isEqualTo("WINDOW_CLOSED");
             assertThat(closeResult.get().type()).isEqualTo("AUCTION_NO_BID");
@@ -256,81 +257,71 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
     }
 
     @Test
-    void antiSnipeExtendsWindowAndCloseStaysNotDue() {
+    void nearDeadlineBidDoesNotChangeFixedDeadline() {
         initialize(Instant.now().plusSeconds(5));
         authorize(243L, 42L, 500L);
+        Object fixedDeadline = redis.opsForHash().get(PREFIX + ":state", "windowEndAtEpochMs");
 
         PromotionAuctionDecision accepted = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
 
         assertThat(accepted.accepted()).isTrue();
-        // 反狙击：endAt-now=5s <= 10s → 延长 10s，AUCTION_EXTENDED @v2
-        assertThat(streamIds()).containsExactly("1-0", "2-0");
-        assertThat(redis.opsForHash().get(PREFIX + ":state", "extendCount")).isEqualTo("1");
-        long extendedEndAt = Long.parseLong(
-                String.valueOf(redis.opsForHash().get(PREFIX + ":state", "windowEndAtEpochMs")));
-        assertThat(extendedEndAt).isGreaterThan(Instant.now().toEpochMilli());
-        // 扫描器在旧 endAt（closingIndex score）命中时 close.lua 用 Redis TIME 二次确认 → NOT_DUE
-        assertThat(windowCloser.close(WINDOW_ID)).isEmpty();
+        assertThat(redis.opsForHash().get(PREFIX + ":state", "windowEndAtEpochMs"))
+                .isEqualTo(fixedDeadline);
+        assertThat(streamDecisionTypes()).containsExactly("BID_ACCEPTED");
     }
 
     @Test
-    void antiSnipeStopsAfterMaxExtensions() {
-        // maxExtensions=1：第一次延长后预算耗尽，第二次终窗内出价接受但不延长
-        initialize(Instant.now().plusSeconds(5), 100L, 0L, 1);
+    void bidAfterDeadlineLeavesOpenStateForDeadlineCloser() {
+        initialize(Instant.now().minusSeconds(1));
         authorize(243L, 42L, 500L);
 
-        PromotionAuctionDecision first = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
-        assertThat(first.accepted()).isTrue();
-        assertThat(redis.opsForHash().get(PREFIX + ":state", "extendCount")).isEqualTo("1");
-        // 把 endAt 拉近到 1s 内再出价：extendCount(1) < maxExtensions(1) 不成立 → 不延长
-        redis.opsForHash().put(PREFIX + ":state", "windowEndAtEpochMs",
-                String.valueOf(Instant.now().plusSeconds(1).toEpochMilli()));
+        PromotionAuctionDecision rejected = decide(bid("cmd-1", "hash-1", 243L, 42L, 200L));
 
-        PromotionAuctionDecision second = decide(bid("cmd-2", "hash-2", 243L, 42L, 300L));
-
-        assertThat(second.accepted()).isTrue();
-        assertThat(redis.opsForHash().get(PREFIX + ":state", "extendCount")).isEqualTo("1");
-        assertThat(streamIds()).containsExactly("1-0", "2-0", "3-0");
+        assertThat(rejected.rejectionReason()).isEqualTo("WINDOW_CLOSED");
+        assertThat(redis.opsForHash().get(PREFIX + ":state", "status")).isEqualTo("OPEN");
+        assertThat(streamIds()).isEmpty();
     }
 
     @Test
-    void capHitThenCloseReturnsAlreadyTerminalAndDropsClosingIndex() {
-        initialize(Instant.now().plusSeconds(60), 100L, 300L, 5);
+    void capHitThenCloseReturnsAlreadyTerminal() {
+        initialize(Instant.now().plusSeconds(60), 100L, 300L);
         authorize(243L, 42L, 500L);
         decide(bid("cmd-1", "hash-1", 243L, 42L, 300L));
-        redis.opsForZSet().add(CLOSING_INDEX, String.valueOf(WINDOW_ID),
-                Instant.now().plusSeconds(60).toEpochMilli());
 
-        assertThat(windowCloser.close(WINDOW_ID)).isEmpty();
-        assertThat(redis.opsForZSet().rank(CLOSING_INDEX, String.valueOf(WINDOW_ID)))
-                .isNull();
+        assertThat(windowCloser.close(WINDOW_ID))
+                .isEqualTo(new PromotionRedisCloseOutcome.AlreadyTerminal());
     }
 
     private void initialize(Instant windowEndAt) {
-        initialize(windowEndAt, 100L, 0L, 5);
+        initialize(windowEndAt, 100L, 0L);
     }
 
-    private void initialize(Instant windowEndAt, long reservePrice, long capPriceCents, int maxExtensions) {
-        hotStateRepository.initialize(route(0L, 0L, windowEndAt, 0L, reservePrice, capPriceCents, maxExtensions), 0L);
+    private void initialize(Instant windowEndAt, long reservePrice, long capPriceCents) {
+        hotStateRepository.initialize(route(0L, 0L, windowEndAt, 0L, reservePrice, capPriceCents), 0L);
     }
 
     private void authorize(long campaignId, long bidderUserId, long amount) {
         hotStateRepository.projectAuthorization(
-                route(campaignId, bidderUserId, Instant.now().plusSeconds(60), amount, 100L, 0L, 5));
+                route(campaignId, bidderUserId, Instant.now().plusSeconds(60), amount, 100L, 0L));
     }
 
     private PromotionBidRoute route(long campaignId, long bidderUserId, Instant endAt,
-                                    long authorizedAmount, long reservePrice, long capPriceCents,
-                                    int maxExtensions) {
+                                    long authorizedAmount, long reservePrice, long capPriceCents) {
         return new PromotionBidRoute(campaignId, bidderUserId, 1000L + bidderUserId, WINDOW_ID,
                 "FEED_TOP_SLOT", reservePrice, authorizedAmount, "OPEN", endAt, 2,
-                100L, capPriceCents, 10L, 10L, maxExtensions);
+                100L, capPriceCents);
     }
 
     private PromotionAuctionCommand bid(
             String commandId, String hash, long campaignId, long bidderUserId, long amount) {
         return new PromotionAuctionCommand(commandId, "idem", hash, WINDOW_ID, campaignId, bidderUserId,
                 1000L + bidderUserId, "FEED_TOP_SLOT", amount, 100L, "OPEN", "BID", Instant.now());
+    }
+
+    private PromotionAuctionDecision closeDecision() {
+        PromotionRedisCloseOutcome outcome = windowCloser.close(WINDOW_ID);
+        assertThat(outcome).isInstanceOf(PromotionRedisCloseOutcome.Closed.class);
+        return ((PromotionRedisCloseOutcome.Closed) outcome).decision();
     }
 
     private PromotionAuctionDecision decide(PromotionAuctionCommand command) {
@@ -344,6 +335,21 @@ class PromotionRedisDecisionAdapterRedisIntegrationTest {
             return List.of();
         }
         return records.stream().map(record -> record.getId().getValue()).toList();
+    }
+
+    private List<String> streamDecisionTypes() {
+        var records = redis.opsForStream().range(PREFIX + ":events", Range.unbounded());
+        if (records == null) {
+            return List.of();
+        }
+        return records.stream().map(record -> {
+            try {
+                return objectMapper.readTree(String.valueOf(record.getValue().get("decision")))
+                        .path("type").asText();
+            } catch (JsonProcessingException exception) {
+                throw new AssertionError("invalid Redis Stream decision JSON", exception);
+            }
+        }).toList();
     }
 
     static boolean redisReachable() {

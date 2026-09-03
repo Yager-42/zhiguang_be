@@ -114,28 +114,6 @@ class PromotionDecisionProjectionServiceTest {
         verify(checkpointMapper, never()).upsert(eq(301L), any(), eq(2L), any());
     }
 
-    @Test
-    void extendedDecisionAdvancesCheckpointOnly() {
-        PromotionProjectionCheckpointRecord checkpoint = new PromotionProjectionCheckpointRecord();
-        checkpoint.setAuctionWindowId(301L);
-        checkpoint.setLastDecisionId("d-1");
-        checkpoint.setLastDecisionVersion(1L);
-        checkpoint.setLastStreamId("1-0");
-        when(checkpointMapper.findByAuctionWindowId(301L)).thenReturn(checkpoint);
-
-        List<PromotionAuctionDecision> projected = service.projectBatch(List.of(
-                new PromotionDecisionProjectionItem(
-                        new PromotionAuctionDecision("d-ext", "cmd-1", "hash", 301L, 2L, 1L,
-                                201L, 42L, 1001L, "FEED_TOP_SLOT", "AUCTION_EXTENDED", true, null,
-                                120L, List.of(), List.of(),
-                                Map.of("endAtEpochMs", 123L, "extendCount", 1), DECIDED_AT),
-                        "2-0")));
-
-        assertThat(projected).hasSize(1);
-        verify(bidMapper, never()).upsertAccepted(any());
-        verify(allocationMapper, never()).insert(any());
-        verify(checkpointMapper).upsert(301L, "d-ext", 2L, "2-0");
-    }
 
     @Test
     void soldTerminalDelegatesStronglyTypedInputAndAdvancesCheckpoint() {

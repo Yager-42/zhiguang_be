@@ -89,22 +89,6 @@ class PromotionMysqlIntegrationTest {
         assertThat(exact.getId()).isEqualTo(id);
     }
 
-    @Test
-    void listClosableWindowsAndMarkSettled() {
-        long id = uniqueId();
-        Instant start = uniqueClosableWindowStart();
-        Instant end = start.plusSeconds(3600);
-        insertWindow(id, PromotionResourceType.FEED_TOP_SLOT, start, end,
-                1, 10L, PromotionAuctionWindowStatus.OPEN);
-
-        List<PromotionAuctionWindow> closable = windowMapper.listClosableWindows(Instant.now(), 50);
-        assertThat(closable).extracting(PromotionAuctionWindow::getId).contains(id);
-
-        assertThat(windowMapper.markSettled(id, Instant.now())).isEqualTo(1);
-        // 结算后 status=SETTLED，不再被列为可关闭
-        assertThat(windowMapper.findExactWindow(PromotionResourceType.FEED_TOP_SLOT, start, end).getStatus())
-                .isEqualTo(PromotionAuctionWindowStatus.SETTLED);
-    }
 
     @Test
     void windowLockReadAndGuardedSettlementTransition() {
