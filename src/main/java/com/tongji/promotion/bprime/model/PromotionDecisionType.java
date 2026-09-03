@@ -5,7 +5,6 @@ public enum PromotionDecisionType {
     BID_ACCEPTED,
     BID_REJECTED,
     ESCROW_APPLIED,
-    AUCTION_EXTENDED,
     AUCTION_SOLD,
     AUCTION_NO_BID
 }

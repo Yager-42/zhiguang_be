@@ -10,6 +10,7 @@ import com.tongji.promotion.bprime.model.PromotionDecisionProjectionItem;
 import com.tongji.promotion.bprime.model.PromotionProjectionCheckpointRecord;
 import com.tongji.promotion.bprime.redis.PromotionAuctionRedisKeys;
 import com.tongji.promotion.bprime.redis.PromotionBidAdmissionState;
+import com.tongji.promotion.schedule.PromotionAuctionDeadlineManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
@@ -28,8 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Consumes one auction decision Stream to its stable postcondition: visible facts published,
- * MySQL checkpoint advanced, retained events trimmed, and settled hot state retired only after catch-up.
+ * 消费单窗口决策 Stream，推进实时发布与 MySQL checkpoint，并在终态投影成功后取消本地 deadline。
+ * 仅当 checkpoint 追平最新 Stream 版本后，才退休已结算窗口的 Redis 热状态。
  */
 @Service
 public class PromotionDecisionStreamConsumer {
@@ -46,6 +47,7 @@ public class PromotionDecisionStreamConsumer {
     private final PromotionBPrimeProperties properties;
     private final PromotionBidAdmissionState admissionState;
     private final PromotionAuctionHotStateLifecycle hotStateLifecycle;
+    private final PromotionAuctionDeadlineManager deadlineManager;
     private final DefaultRedisScript<Long> trimScript;
     private final Map<Long, ReentrantLock> windowLocks = new ConcurrentHashMap<>();
 
@@ -57,7 +59,8 @@ public class PromotionDecisionStreamConsumer {
                                            PromotionPerformanceMetrics metrics,
                                            PromotionBPrimeProperties properties,
                                            PromotionBidAdmissionState admissionState,
-                                           PromotionAuctionHotStateLifecycle hotStateLifecycle) {
+                                           PromotionAuctionHotStateLifecycle hotStateLifecycle,
+                                           PromotionAuctionDeadlineManager deadlineManager) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.checkpointMapper = checkpointMapper;
@@ -67,6 +70,7 @@ public class PromotionDecisionStreamConsumer {
         this.properties = properties;
         this.admissionState = admissionState;
         this.hotStateLifecycle = hotStateLifecycle;
+        this.deadlineManager = deadlineManager;
         this.trimScript = new DefaultRedisScript<>();
         this.trimScript.setLocation(new ClassPathResource("redis/lua/promotion-auction-trim.lua"));
         this.trimScript.setResultType(Long.class);
@@ -121,6 +125,11 @@ public class PromotionDecisionStreamConsumer {
                 }
             }
             List<PromotionAuctionDecision> projected = projectionService.projectBatch(items);
+            for (PromotionAuctionDecision decision : projected) {
+                if (decision.terminal()) {
+                    deadlineManager.cancel(decision.auctionWindowId());
+                }
+            }
             projectedAny = true;
             projected.forEach(metrics::recordProjectionComplete);
             afterStreamId = items.getLast().streamId();

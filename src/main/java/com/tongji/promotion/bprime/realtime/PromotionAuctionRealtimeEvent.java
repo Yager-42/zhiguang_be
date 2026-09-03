@@ -28,7 +28,6 @@ public record PromotionAuctionRealtimeEvent(
 ) {
     public static final String RANKING_DELTA = "RANKING_DELTA";
     public static final String WINDOW_CLOSED = "WINDOW_CLOSED";
-    public static final String AUCTION_EXTENDED = "AUCTION_EXTENDED";
 
     public PromotionAuctionRealtimeEvent {
         ranking = ranking == null ? List.of() : List.copyOf(ranking);

@@ -75,14 +75,6 @@
         LIMIT 1
     </select>
 
-    <select id="listClosableWindows" resultMap="PromotionAuctionWindowResultMap">
-        SELECT <include refid="WindowColumns"/>
-        FROM promotion_auction_window
-        WHERE status = 'OPEN'
-          AND window_end_at &lt;= NOW()
-        ORDER BY window_end_at ASC
-        LIMIT #{batchSize}
-    </select>
 
     <select id="listActiveWindows" resultMap="PromotionAuctionWindowResultMap">
         SELECT <include refid="WindowColumns"/>

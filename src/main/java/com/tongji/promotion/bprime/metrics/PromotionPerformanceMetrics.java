@@ -171,7 +171,6 @@ public class PromotionPerformanceMetrics {
     private String result(PromotionAuctionDecision decision) {
         return switch (decision.kind()) {
             case AUCTION_SOLD, AUCTION_NO_BID -> "terminal";
-            case AUCTION_EXTENDED -> "extended";
             default -> decision.accepted() ? "accepted" : "rejected";
         };
     }

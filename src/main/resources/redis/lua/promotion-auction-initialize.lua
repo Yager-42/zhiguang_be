@@ -23,12 +23,9 @@ local slotCount = ARGV[3]
 local resourceType = ARGV[4]
 local initialDecisionVersion = ARGV[5]
 local hotStateTtlSeconds = tonumber(ARGV[6])
--- 英式升价参数（Go freeze_rules 同构，创建期由 route/command 透传）
+-- 创建期冻结共享价格台阶与一口价规则。
 local incrementCents = ARGV[7]
 local capPriceCents = ARGV[8]
-local extendWindowSec = ARGV[9]
-local extendSec = ARGV[10]
-local maxExtensions = ARGV[11]
 
 if redis_type(stateKey) == 'hash' then
     if redis.call('HGET', stateKey, 'windowEndAtEpochMs') ~= windowEndAtEpochMs
@@ -49,25 +46,17 @@ else
             'winnerCampaignId', '',
             'incrementCents', incrementCents,
             'capPriceCents', capPriceCents,
-            'extendWindowSec', extendWindowSec,
-            'extendSec', extendSec,
-            'maxExtensions', maxExtensions,
-            'extendCount', '0',
             'bidCount', '0',
             'winnerCommandId', '',
             'winnerRequestHash', '',
             'winnerAck', '')
 end
 
--- 幂等回填英式字段及当前赢家槽；旧热状态缺失时安全补空，首次新接受会原子覆盖。
+-- 幂等回填价格字段及当前赢家槽；旧热状态缺失时安全补空，首次新接受会原子覆盖。
 redis.call('HSETNX', stateKey, 'currentPriceCents', reservePrice)
 redis.call('HSETNX', stateKey, 'winnerCampaignId', '')
 redis.call('HSETNX', stateKey, 'incrementCents', incrementCents)
 redis.call('HSETNX', stateKey, 'capPriceCents', capPriceCents)
-redis.call('HSETNX', stateKey, 'extendWindowSec', extendWindowSec)
-redis.call('HSETNX', stateKey, 'extendSec', extendSec)
-redis.call('HSETNX', stateKey, 'maxExtensions', maxExtensions)
-redis.call('HSETNX', stateKey, 'extendCount', '0')
 redis.call('HSETNX', stateKey, 'bidCount', '0')
 redis.call('HSETNX', stateKey, 'winnerCommandId', '')
 redis.call('HSETNX', stateKey, 'winnerRequestHash', '')

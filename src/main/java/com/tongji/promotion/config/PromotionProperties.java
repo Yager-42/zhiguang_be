@@ -12,8 +12,7 @@ import org.springframework.stereotype.Component;
  *   <li>{@code *-reserve-price}：各资源位保留价（成交价下限）。</li>
  *   <li>{@code window-minutes}：单个竞价窗口时长（分钟）。</li>
  *   <li>{@code cache-ttl-seconds}：active allocation 缓存 TTL。</li>
- *   <li>{@code settle-batch-size}：单轮结算扫描窗口数。</li>
- *   <li>{@code close-window-delay-ms}：定时关闭/续建调度间隔（毫秒）。</li>
+ *   <li>{@code maintenance-delay-ms}：窗口续建与 allocation 刷新间隔（毫秒）。</li>
  * </ul>
  */
 @Data
@@ -27,8 +26,6 @@ public class PromotionProperties {
     private long searchReservePrice = 1L;
     private int windowMinutes = 60;
     private long cacheTtlSeconds = 300L;
-    private int settleBatchSize = 50;
-    private long closeWindowDelayMs = 30000L;
 
     /** 按资源类型取窗口槽位数。 */
     public int slotCount(PromotionResourceType type) {

@@ -69,7 +69,7 @@ public record PromotionAuctionDecision(
 
     public boolean affectsAdmissionState() {
         return switch (kind()) {
-            case BID_ACCEPTED, AUCTION_EXTENDED, AUCTION_SOLD, AUCTION_NO_BID -> true;
+            case BID_ACCEPTED, AUCTION_SOLD, AUCTION_NO_BID -> true;
             default -> false;
         };
     }
@@ -98,15 +98,6 @@ public record PromotionAuctionDecision(
                     "OPEN",
                     longOr("endAtEpochMs", Long.MAX_VALUE),
                     commandId);
-            case AUCTION_EXTENDED -> {
-                ExtensionFacts extension = extensionFacts();
-                yield new AdmissionFacts(
-                        longOr("currentPriceCents", bidAmount),
-                        stringOr("winnerCampaignId", String.valueOf(campaignId)),
-                        "OPEN",
-                        extension.endAtEpochMs(),
-                        null);
-            }
             case AUCTION_SOLD -> {
                 TerminalFacts terminal = terminalFacts();
                 yield new AdmissionFacts(
@@ -126,10 +117,6 @@ public record PromotionAuctionDecision(
         };
     }
 
-    public ExtensionFacts extensionFacts() {
-        requireKind(PromotionDecisionType.AUCTION_EXTENDED);
-        return new ExtensionFacts(requiredLong("endAtEpochMs"), Math.toIntExact(requiredLong("extendCount")));
-    }
 
     public TerminalFacts terminalFacts() {
         requireKind(PromotionDecisionType.AUCTION_SOLD, PromotionDecisionType.AUCTION_NO_BID);
@@ -241,8 +228,6 @@ public record PromotionAuctionDecision(
                                  String winnerCommandId) {
     }
 
-    public record ExtensionFacts(long endAtEpochMs, int extendCount) {
-    }
 
     public record TerminalFacts(Optional<Long> winnerCampaignId,
                                 Optional<Long> winningAmount,

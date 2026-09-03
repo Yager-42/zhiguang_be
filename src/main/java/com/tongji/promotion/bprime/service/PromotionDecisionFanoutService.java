@@ -41,7 +41,6 @@ public class PromotionDecisionFanoutService {
         try {
             switch (decision.kind()) {
                 case BID_ACCEPTED -> publicUpdateCoalescer.enqueueBid(decision);
-                case AUCTION_EXTENDED -> publicUpdateCoalescer.publishWindowExtended(decision);
                 case AUCTION_SOLD, AUCTION_NO_BID ->
                         publicUpdateCoalescer.publishWindowClosed(withFinalRanking(decision));
                 default -> throw new IllegalArgumentException(

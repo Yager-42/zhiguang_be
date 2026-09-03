@@ -15,22 +15,19 @@ public record PromotionBidRoute(
         Instant windowEndAt,
         int slotCount,
         long incrementCents,
-        long capPriceCents,
-        long extendWindowSec,
-        long extendSec,
-        int maxExtensions
+        long capPriceCents
 ) {
     public PromotionBidRoute(long campaignId, long bidderUserId, long postId, long auctionWindowId,
                              String resourceType, long reservePrice, long authorizedAmount,
                              String windowStatus, Instant windowEndAt) {
         this(campaignId, bidderUserId, postId, auctionWindowId, resourceType, reservePrice, authorizedAmount,
-                windowStatus, windowEndAt, 1, 0L, 0L, 0L, 0L, 0);
+                windowStatus, windowEndAt, 1, 0L, 0L);
     }
 
     public PromotionBidRoute(long campaignId, long bidderUserId, long postId, long auctionWindowId,
                              String resourceType, long reservePrice, long authorizedAmount,
                              String windowStatus, Instant windowEndAt, int slotCount) {
         this(campaignId, bidderUserId, postId, auctionWindowId, resourceType, reservePrice, authorizedAmount,
-                windowStatus, windowEndAt, slotCount, 0L, 0L, 0L, 0L, 0);
+                windowStatus, windowEndAt, slotCount, 0L, 0L);
     }
 }

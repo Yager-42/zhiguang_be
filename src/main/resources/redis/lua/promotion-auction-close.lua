@@ -32,8 +32,7 @@ if stateVersion < 0 or windowEndAtEpochMs < 0 or not status or not resourceType 
     return unavailable('REDIS_STATE_INCOMPLETE')
 end
 
--- Go close_auction.lua L30 同构：非 OPEN（cap-hit SOLD / 已 NO_BID / 已 CLOSED）
--- 直接幂等 no-op，早于 NOT_DUE 判定；Java 侧成功后 ZREM closingIndex，不再重试。
+-- 非 OPEN（cap-hit SOLD 或已由关窗路径终结）直接幂等 no-op，早于 NOT_DUE 判定。
 if status ~= 'OPEN' then
     return cjson.encode({status = 'ALREADY_TERMINAL'})
 end
@@ -48,7 +47,11 @@ end
 local redisTime = redis.call('TIME')
 local nowEpochMs = (tonumber(redisTime[1]) * 1000) + math.floor(tonumber(redisTime[2]) / 1000)
 if nowEpochMs < windowEndAtEpochMs then
-    return cjson.encode({status = 'NOT_DUE'})
+    return cjson.encode({
+        status = 'NOT_DUE',
+        redisNowEpochMs = nowEpochMs,
+        deadlineEpochMs = windowEndAtEpochMs
+    })
 end
 
 local auctionWindowId = ARGV[1]

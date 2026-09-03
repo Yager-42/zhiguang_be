@@ -59,9 +59,7 @@ public class PromotionRedisSnapshotAdapter {
                             rules.path("stepCents").asLong(),
                             rules.hasNonNull("capCents") && rules.path("capCents").asLong() > 0
                                     ? rules.path("capCents").asLong() : null,
-                            rules.path("reserveCents").asLong(),
-                            rules.path("maxExtensions").asInt(),
-                            rules.path("antiSnipeWindowMs").asLong()));
+                            rules.path("reserveCents").asLong()));
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to parse promotion Redis snapshot", exception);
         }

@@ -9,9 +9,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 竞价窗口持久化。
- * <p>{@link #findOpenWindow} 取当前 OPEN 且覆盖 {@code now} 的窗口；{@link #findExactWindow} 用于窗口续建的幂等判等；
- * {@link #listClosableWindows} 取已到期待结算窗口。</p>
+ * 竞价窗口持久化；支持活动窗口查询、启动恢复与结算状态迁移。
  */
 @Mapper
 public interface PromotionAuctionWindowMapper {
@@ -39,9 +37,6 @@ public interface PromotionAuctionWindowMapper {
                                            @Param("startAt") Instant startAt,
                                            @Param("endAt") Instant endAt);
 
-    /** 已到期（window_end_at <= now）且仍 OPEN 的窗口，按到期时间升序，限量结算。 */
-    List<PromotionAuctionWindow> listClosableWindows(@Param("now") Instant now,
-                                                     @Param("batchSize") int batchSize);
     /** 启动恢复所需的 OPEN 活跃窗口。 */
     List<PromotionAuctionWindow> listActiveWindows();
 

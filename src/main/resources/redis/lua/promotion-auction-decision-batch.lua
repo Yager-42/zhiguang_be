@@ -57,10 +57,9 @@ end
 
 local stateValues = redis.call('HMGET', stateKey,
         'decisionVersion', 'windowEndAtEpochMs', 'reservePrice', 'status', 'resourceType',
-        'currentPriceCents', 'winnerCampaignId', 'incrementCents', 'capPriceCents',
-        'extendWindowSec', 'extendSec', 'maxExtensions', 'extendCount', 'bidCount',
+        'currentPriceCents', 'winnerCampaignId', 'incrementCents', 'capPriceCents', 'bidCount',
         'winnerCommandId', 'winnerRequestHash', 'winnerAck')
-for stateIndex = 1, 14 do
+for stateIndex = 1, 10 do
     if stateValues[stateIndex] == false then
         return unavailable('REDIS_STATE_INCOMPLETE')
     end
@@ -74,15 +73,11 @@ local currentPriceCents = tonumber(stateValues[6])
 local winnerCampaignId = stateValues[7]
 local incrementCents = tonumber(stateValues[8])
 local capPriceCents = tonumber(stateValues[9])
-local extendWindowSec = tonumber(stateValues[10])
-local extendSec = tonumber(stateValues[11])
-local maxExtensions = tonumber(stateValues[12])
-local extendCount = tonumber(stateValues[13])
-local winnerCommandId = stateValues[15] or ''
-local winnerRequestHash = stateValues[16] or ''
-local winnerAck = stateValues[17] or ''
+local winnerCommandId = stateValues[11] or ''
+local winnerRequestHash = stateValues[12] or ''
+local winnerAck = stateValues[13] or ''
 if not stateVersion or not windowEndAtEpochMs or not currentPriceCents or not incrementCents
-        or not capPriceCents or not extendWindowSec or not extendSec or not maxExtensions or not extendCount then
+        or not capPriceCents then
     return unavailable('REDIS_STATE_INCOMPLETE')
 end
 
@@ -196,6 +191,7 @@ local function decision_json(item, decisionType, accepted, reason, version, prev
                              decidedAtEpochMs, submittedAt, authorizedAmount, decisionId,
                              requiredAmount, price, winningCampaignId, nextRequiredAmount)
     local payload = {submittedAt = submittedAt}
+    payload.endAtEpochMs = windowEndAtEpochMs
     if authorizedAmount then payload.authorizedAmount = authorizedAmount end
     if requiredAmount then payload.requiredAmount = requiredAmount end
     if price then payload.currentPriceCents = price end
@@ -269,27 +265,7 @@ if selected then
     if campaignWasMissing then redis.call('EXPIRE', selected.campaignKey, hotStateTtlSeconds) end
 
     local capHit = capPriceCents > 0 and selected.bidAmount >= capPriceCents
-    local shouldExtend = (not capHit) and extendWindowSec > 0 and extendSec > 0
-            and (windowEndAtEpochMs - nowEpochMs) <= extendWindowSec * 1000
-            and (maxExtensions <= 0 or extendCount < maxExtensions)
-    if shouldExtend then
-        local extendedEndAtEpochMs = windowEndAtEpochMs + extendSec * 1000
-        local extendVersion = acceptedVersion + 1
-        local extensionJson = decision_json(selected, 'AUCTION_EXTENDED', true, nil,
-                extendVersion, acceptedVersion, nowEpochMs, selected.submittedAt, nil,
-                selected.commandId .. ':v' .. tostring(extendVersion), nil, currentPriceCents,
-                winnerCampaignId, nextRequiredAmount)
-        local extension = cjson.decode(extensionJson)
-        extension.payload.endAtEpochMs = extendedEndAtEpochMs
-        extension.payload.extendCount = extendCount + 1
-        redis.call('HSET', stateKey,
-                'windowEndAtEpochMs', tostring(extendedEndAtEpochMs),
-                'decisionVersion', tostring(extendVersion),
-                'extendCount', tostring(extendCount + 1))
-        redis.call('XADD', eventsKey, tostring(extendVersion) .. '-0', 'decision', cjson.encode(extension))
-        stateVersion = extendVersion
-        windowEndAtEpochMs = extendedEndAtEpochMs
-    elseif capHit then
+    if capHit then
         local soldVersion = acceptedVersion + 1
         local soldJson = decision_json(selected, 'AUCTION_SOLD', true, nil,
                 soldVersion, acceptedVersion, nowEpochMs, selected.submittedAt, nil,
@@ -302,7 +278,6 @@ if selected then
         redis.call('XADD', eventsKey, tostring(soldVersion) .. '-0', 'decision', cjson.encode(sold))
         stateVersion = soldVersion
         windowStatus = 'SOLD'
-        windowEndAtEpochMs = nowEpochMs
     else
         stateVersion = acceptedVersion
     end

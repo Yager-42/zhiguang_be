@@ -11,10 +11,6 @@ public final class PromotionAuctionRedisKeys {
         return "promotion:auction:active-streams";
     }
 
-    /** 关窗索引：member=windowId，score=windowEndAtEpochMs（Go auction:active 同构）。 */
-    public static String closingIndex() {
-        return "promotion:auction:closing";
-    }
 
     public static String prefix(long auctionWindowId) {
         return "promotion:auction:{" + auctionWindowId + "}";

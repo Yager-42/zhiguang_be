@@ -1,5 +1,7 @@
 package com.tongji.promotion.bprime.redis;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
@@ -10,13 +12,19 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.Optional;
 
 /**
  * 通过 Redis TIME 原子关窗并追加 AUCTION_SOLD / AUCTION_NO_BID Stream 终态事件。
+ *
+ * <p>该适配器只解释 Lua 的强类型结果，不维护任何本地或 Redis 到期索引。</p>
+ *
+ * @since 2026-09-03
  */
 @Component
 public class PromotionRedisWindowCloser {
+    private static final String STATUS_NOT_DUE = "NOT_DUE";
+    private static final String STATUS_ALREADY_TERMINAL = "ALREADY_TERMINAL";
+    private static final String STATUS_UNAVAILABLE = "UNAVAILABLE";
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -34,7 +42,17 @@ public class PromotionRedisWindowCloser {
         this.closeScript.setResultType(String.class);
     }
 
-    public Optional<PromotionAuctionDecision> close(long auctionWindowId) {
+    /**
+     * 让 Redis 按其权威时间裁决一次窗口关窗。
+     *
+     * <p>调用幂等：已生成的关窗决策会作为 {@link PromotionRedisCloseOutcome.Closed} 重放，
+     * 已由 cap-hit 等路径终结的窗口返回 {@link PromotionRedisCloseOutcome.AlreadyTerminal}。</p>
+     *
+     * @param auctionWindowId 拍卖窗口 ID
+     * @return 已关闭、尚未到期或已经终结的强类型结果，不返回 {@code null}
+     * @throws PromotionAuctionUnavailableException 当 Redis 不可用、Lua 返回 UNAVAILABLE 或结果无法解析时
+     */
+    public PromotionRedisCloseOutcome close(long auctionWindowId) {
         final String payload;
         try {
             payload = redisTemplate.execute(closeScript,
@@ -44,36 +62,48 @@ public class PromotionRedisWindowCloser {
         } catch (RuntimeException exception) {
             throw new PromotionAuctionUnavailableException("promotion auction Redis close failed", exception);
         }
+
         try {
-            ObjectNode node = (ObjectNode) objectMapper.readTree(payload);
-            String status = node.path("status").asText();
-            if ("NOT_DUE".equals(status)) {
-                return Optional.empty();
-            }
-            if ("ALREADY_TERMINAL".equals(status)) {
-                // cap-hit SOLD / NO_BID 已由 decision/close 终态裁决：从秒级扫描索引移除，幂等 no-op。
-                redisTemplate.opsForZSet().remove(
-                        PromotionAuctionRedisKeys.closingIndex(), String.valueOf(auctionWindowId));
-                return Optional.empty();
-            }
-            if ("UNAVAILABLE".equals(status)) {
-                throw new PromotionAuctionUnavailableException(node.path("rejectionReason").asText());
-            }
-            // 关窗成功：从秒级扫描索引移除；幂等重放（closeResult）也走这里，ZREM 幂等无害。
-            redisTemplate.opsForZSet().remove(
-                    PromotionAuctionRedisKeys.closingIndex(), String.valueOf(auctionWindowId));
-            node.put("decidedAt",
-                    Instant.ofEpochMilli(node.path("decidedAtEpochMs").asLong()).toString());
-            normalizeArray(node, "ranking");
-            normalizeArray(node, "walletEffects");
-            node.remove("decidedAtEpochMs");
-            return Optional.of(objectMapper.treeToValue(node, PromotionAuctionDecision.class));
-        } catch (Exception exception) {
-            if (exception instanceof PromotionAuctionUnavailableException unavailableException) {
-                throw unavailableException;
-            }
+            return decode(payload);
+        } catch (PromotionAuctionUnavailableException exception) {
+            throw exception;
+        } catch (JsonProcessingException | RuntimeException exception) {
             throw new PromotionAuctionUnavailableException("failed to parse promotion close result", exception);
         }
+    }
+
+    private PromotionRedisCloseOutcome decode(String payload) throws JsonProcessingException {
+        JsonNode parsed = objectMapper.readTree(payload);
+        if (!(parsed instanceof ObjectNode node)) {
+            throw new IllegalArgumentException("promotion close result must be a JSON object");
+        }
+
+        if (node.has("status")) {
+            return switch (node.path("status").asText()) {
+                case STATUS_NOT_DUE -> new PromotionRedisCloseOutcome.NotDue(
+                        requiredLong(node, "redisNowEpochMs"), requiredLong(node, "deadlineEpochMs"));
+                case STATUS_ALREADY_TERMINAL -> new PromotionRedisCloseOutcome.AlreadyTerminal();
+                case STATUS_UNAVAILABLE -> throw new PromotionAuctionUnavailableException(
+                        node.path("rejectionReason").asText());
+                default -> throw new IllegalArgumentException(
+                        "unsupported promotion close status: " + node.path("status").asText());
+            };
+        }
+
+        node.put("decidedAt", Instant.ofEpochMilli(requiredLong(node, "decidedAtEpochMs")).toString());
+        normalizeArray(node, "ranking");
+        normalizeArray(node, "walletEffects");
+        node.remove("decidedAtEpochMs");
+        PromotionAuctionDecision decision = objectMapper.treeToValue(node, PromotionAuctionDecision.class);
+        return new PromotionRedisCloseOutcome.Closed(decision);
+    }
+
+    private long requiredLong(ObjectNode node, String fieldName) {
+        JsonNode value = node.get(fieldName);
+        if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
+            throw new IllegalArgumentException("promotion close result requires integer field: " + fieldName);
+        }
+        return value.longValue();
     }
 
     private void normalizeArray(ObjectNode node, String fieldName) {

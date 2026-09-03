@@ -169,8 +169,7 @@ promotion:
     search-reserve-price: ${PROMOTION_SEARCH_RESERVE_PRICE:1}
     window-minutes: ${PROMOTION_WINDOW_MINUTES:60}
     cache-ttl-seconds: ${PROMOTION_CACHE_TTL_SECONDS:300}
-    settle-batch-size: ${PROMOTION_SETTLE_BATCH_SIZE:50}
-    close-window-delay-ms: ${PROMOTION_CLOSE_WINDOW_DELAY_MS:30000}
+    maintenance-delay-ms: ${PROMOTION_WINDOW_MAINTENANCE_DELAY_MS:30000}
   bprime:
     enabled: ${PROMOTION_BPRIME_ENABLED:false}
     hot-state-ttl-seconds: ${PROMOTION_BPRIME_HOT_STATE_TTL_SECONDS:86400}
@@ -202,22 +201,14 @@ promotion:
     fast-reject-enabled: ${PROMOTION_BPRIME_FAST_REJECT_ENABLED:true}
     fast-reject-margin-seconds: ${PROMOTION_BPRIME_FAST_REJECT_MARGIN_SECONDS:2}
     fast-reject-price-cache-maximum-size: ${PROMOTION_BPRIME_FAST_REJECT_PRICE_CACHE_MAXIMUM_SIZE:1000000}
-    closing-scan-interval-ms: ${PROMOTION_BPRIME_CLOSING_SCAN_INTERVAL_MS:1000}
-    closing-scan-batch-size: ${PROMOTION_BPRIME_CLOSING_SCAN_BATCH_SIZE:100}
-    # 英式升价拍卖规则（Go freeze_rules 同构）：共享价格台阶步长 / 一口价（0=禁用）/ 反狙击延长
+    # 英式升价拍卖规则：共享价格台阶步长 / 一口价（0=禁用）
     auction-rules:
       feed-top-slot:
         increment-cents: ${PROMOTION_BPRIME_FEED_INCREMENT_CENTS:100}
         cap-price-cents: ${PROMOTION_BPRIME_FEED_CAP_PRICE_CENTS:0}
-        extend-window-sec: ${PROMOTION_BPRIME_FEED_EXTEND_WINDOW_SEC:10}
-        extend-sec: ${PROMOTION_BPRIME_FEED_EXTEND_SEC:10}
-        max-extensions: ${PROMOTION_BPRIME_FEED_MAX_EXTENSIONS:5}
       search-top-slot:
         increment-cents: ${PROMOTION_BPRIME_SEARCH_INCREMENT_CENTS:100}
         cap-price-cents: ${PROMOTION_BPRIME_SEARCH_CAP_PRICE_CENTS:0}
-        extend-window-sec: ${PROMOTION_BPRIME_SEARCH_EXTEND_WINDOW_SEC:10}
-        extend-sec: ${PROMOTION_BPRIME_SEARCH_EXTEND_SEC:10}
-        max-extensions: ${PROMOTION_BPRIME_SEARCH_MAX_EXTENSIONS:5}
 
 storage:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

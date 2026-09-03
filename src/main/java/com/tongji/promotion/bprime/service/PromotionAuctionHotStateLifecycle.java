@@ -47,6 +47,7 @@ public class PromotionAuctionHotStateLifecycle {
         hotStateRepository.initialize(window, 0L);
     }
 
+
     public void makeAuthorizationReady(PromotionBidEscrowTransactionService.Authorization authorization,
                                        Instant now) {
         projectAuthorization(authorization.campaign(), authorization.window(), authorization.escrow(), now);
@@ -63,7 +64,7 @@ public class PromotionAuctionHotStateLifecycle {
     }
 
     public void recoverActiveWindows() {
-        hotStateRepository.recoverActiveWindows(windowMapper.listActiveWindows());
+        hotStateRepository.verifyAndRecoverActiveWindows(windowMapper.listActiveWindows());
     }
 
     public void retireSettledState(long auctionWindowId) {
@@ -87,8 +88,7 @@ public class PromotionAuctionHotStateLifecycle {
     private PromotionBidRoute route(PromotionCampaign campaign,
                                     PromotionAuctionWindow window,
                                     PromotionBidEscrowRecord escrow) {
-        PromotionBPrimeProperties.AuctionRules rules = properties.auctionRules(window.getResourceType())
-                .withBoundAntiSnipe();
+        PromotionBPrimeProperties.AuctionRules rules = properties.auctionRules(window.getResourceType());
         return new PromotionBidRoute(
                 campaign.getId(),
                 escrow.getBidderUserId(),
@@ -101,9 +101,6 @@ public class PromotionAuctionHotStateLifecycle {
                 window.getWindowEndAt(),
                 window.getSlotCount(),
                 rules.incrementCents(),
-                rules.capPriceCents(),
-                rules.extendWindowSec(),
-                rules.extendSec(),
-                rules.maxExtensions());
+                rules.capPriceCents());
     }
 }

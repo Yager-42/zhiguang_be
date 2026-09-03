@@ -102,33 +102,6 @@ public class PromotionPublicUpdateCoalescer implements SmartLifecycle {
         }
     }
 
-    /**
-     * 反狙击延长事件（低频，直接发布不合并）：携带新窗口结束时间与延长次数。
-     *
-     * @param decision 类型为 {@code AUCTION_EXTENDED} 的权威结果
-     */
-    public void publishWindowExtended(PromotionAuctionDecision decision) {
-        Objects.requireNonNull(decision, "decision must not be null");
-        PromotionAuctionDecision.ExtensionFacts facts = decision.extensionFacts();
-        long nextEventVersion = decision.decisionVersion();
-        Map<String, Object> details = new LinkedHashMap<>();
-        details.put("endAtEpochMs", facts.endAtEpochMs());
-        details.put("extendCount", facts.extendCount());
-        publisher.publishPublic(new PromotionAuctionRealtimeEvent(
-                "decision-" + decision.decisionId() + ":public:" + nextEventVersion,
-                PromotionAuctionRealtimeEvent.AUCTION_EXTENDED,
-                String.valueOf(decision.auctionWindowId()),
-                decision.decisionId(),
-                decision.decisionVersion(),
-                nextEventVersion,
-                decision.decisionVersion(),
-                decision.decisionVersion(),
-                "OPEN",
-                List.of(),
-                List.of(),
-                details,
-                decision.decidedAt()));
-    }
 
     /** 启动基础 tick；各窗口按订阅数与待写槽压力决定实际刷新周期。 */
     @Override

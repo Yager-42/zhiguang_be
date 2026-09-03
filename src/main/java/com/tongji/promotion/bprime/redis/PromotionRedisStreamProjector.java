@@ -1,5 +1,6 @@
 package com.tongji.promotion.bprime.redis;
 
+import com.tongji.promotion.bprime.availability.PromotionAuctionAvailabilityGate;
 import com.tongji.promotion.bprime.service.PromotionAuctionHotStateLifecycle;
 import com.tongji.promotion.bprime.service.PromotionDecisionStreamConsumer;
 import org.slf4j.Logger;
@@ -25,14 +26,17 @@ public class PromotionRedisStreamProjector implements MessageListener {
     private final StringRedisTemplate redisTemplate;
     private final PromotionDecisionStreamConsumer streamConsumer;
     private final PromotionAuctionHotStateLifecycle hotStateLifecycle;
+    private final PromotionAuctionAvailabilityGate availabilityGate;
     private final AtomicBoolean registryRecovered = new AtomicBoolean();
 
     public PromotionRedisStreamProjector(StringRedisTemplate redisTemplate,
                                          PromotionDecisionStreamConsumer streamConsumer,
-                                         PromotionAuctionHotStateLifecycle hotStateLifecycle) {
+                                         PromotionAuctionHotStateLifecycle hotStateLifecycle,
+                                         PromotionAuctionAvailabilityGate availabilityGate) {
         this.redisTemplate = redisTemplate;
         this.streamConsumer = streamConsumer;
         this.hotStateLifecycle = hotStateLifecycle;
+        this.availabilityGate = availabilityGate;
     }
 
     @Override
@@ -48,6 +52,9 @@ public class PromotionRedisStreamProjector implements MessageListener {
             fixedDelayString = "${promotion.bprime.stream-sweep-interval-ms:2000}",
             initialDelayString = "${promotion.bprime.stream-sweep-initial-delay-ms:0}")
     public void sweep() {
+        if (!availabilityGate.allowsProjection()) {
+            return;
+        }
         try {
             recoverRegistryOnce();
             Set<String> activeWindowIds = redisTemplate.opsForSet().members(
@@ -69,7 +76,9 @@ public class PromotionRedisStreamProjector implements MessageListener {
     }
 
     public void processWindow(long auctionWindowId) {
-        streamConsumer.consumeWindow(auctionWindowId);
+        if (availabilityGate.allowsProjection()) {
+            streamConsumer.consumeWindow(auctionWindowId);
+        }
     }
 
     private void recoverRegistryOnce() {

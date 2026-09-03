@@ -79,10 +79,6 @@ public class PromotionDecisionProjectionService {
 
     private void applyDecision(PromotionAuctionDecision decision) {
         String type = decision.decisionType();
-        if ("AUCTION_EXTENDED".equals(type)) {
-            // 信息事件：反狙击延长只推进 checkpoint，不落 MySQL（Go AUCTION_EXTENDED 同构）。
-            return;
-        }
         if ("AUCTION_SOLD".equals(type) || "AUCTION_NO_BID".equals(type)) {
             settleWindow(decision);
             return;

@@ -3,6 +3,7 @@ package com.tongji.promotion.bprime.service;
 import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.promotion.api.dto.SubmitPromotionBidCommandResponse;
+import com.tongji.promotion.bprime.availability.PromotionAuctionAvailabilityGate;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.metrics.PromotionPerformanceMetrics;
 import com.tongji.promotion.bprime.model.PromotionAuctionCommand;
@@ -31,6 +32,7 @@ public class PromotionCommandSubmissionService {
     private final PromotionBidRouteRepository routeRepository;
     private final PromotionPerformanceMetrics performanceMetrics;
     private final PromotionBPrimeProperties properties;
+    private final PromotionAuctionAvailabilityGate availabilityGate;
     private final PromotionBidAdmissionState admissionState;
     private final PromotionWindowBidCombiner combiner;
 
@@ -38,11 +40,13 @@ public class PromotionCommandSubmissionService {
                                              PromotionRedisDecisionAdapter decisionAdapter,
                                              PromotionPerformanceMetrics performanceMetrics,
                                              PromotionBPrimeProperties properties,
+                                             PromotionAuctionAvailabilityGate availabilityGate,
                                              @Qualifier("promotionBidDrainerExecutor") TaskExecutor drainerExecutor,
                                              PromotionBidAdmissionState admissionState) {
         this.routeRepository = routeRepository;
         this.performanceMetrics = performanceMetrics;
         this.properties = properties;
+        this.availabilityGate = availabilityGate;
         this.admissionState = admissionState;
         this.combiner = new PromotionWindowBidCombiner(decisionAdapter, drainerExecutor, properties,
                 performanceMetrics, admissionState, this::response, this::unavailable);
@@ -74,6 +78,7 @@ public class PromotionCommandSubmissionService {
         if (!properties.isEnabled()) {
             throw new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED);
         }
+        availabilityGate.requireAvailable();
         if (bidAmount <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "bidAmount must be greater than 0");
         }

@@ -4,6 +4,7 @@ import com.tongji.common.exception.BusinessException;
 import com.tongji.common.exception.ErrorCode;
 import com.tongji.common.id.IdNamespace;
 import com.tongji.common.id.IdService;
+import com.tongji.promotion.bprime.availability.PromotionAuctionAvailabilityGate;
 import com.tongji.promotion.bprime.config.PromotionBPrimeProperties;
 import com.tongji.promotion.bprime.mapper.PromotionBidEscrowMapper;
 import com.tongji.promotion.bprime.model.PromotionBidEscrowRecord;
@@ -36,6 +37,7 @@ public class PromotionBidEscrowTransactionService {
     private final IdService idService;
     private final ReconciliationService reconciliationService;
     private final PromotionBPrimeProperties properties;
+    private final PromotionAuctionAvailabilityGate availabilityGate;
 
     public PromotionBidEscrowTransactionService(PromotionCampaignMapper campaignMapper,
                                                 PromotionAuctionWindowMapper windowMapper,
@@ -43,7 +45,8 @@ public class PromotionBidEscrowTransactionService {
                                                 WalletService walletService,
                                                 IdService idService,
                                                 ReconciliationService reconciliationService,
-                                                PromotionBPrimeProperties properties) {
+                                                PromotionBPrimeProperties properties,
+                                                PromotionAuctionAvailabilityGate availabilityGate) {
         this.campaignMapper = campaignMapper;
         this.windowMapper = windowMapper;
         this.escrowMapper = escrowMapper;
@@ -51,6 +54,7 @@ public class PromotionBidEscrowTransactionService {
         this.idService = idService;
         this.reconciliationService = reconciliationService;
         this.properties = properties;
+        this.availabilityGate = availabilityGate;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -58,6 +62,7 @@ public class PromotionBidEscrowTransactionService {
         if (!properties.isEnabled()) {
             throw new BusinessException(ErrorCode.PROMOTION_AUCTION_PAUSED);
         }
+        availabilityGate.requireAvailable();
         if (requestedAmount <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "amount must be greater than 0");
         }
