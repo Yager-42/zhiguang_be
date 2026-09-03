@@ -25,7 +25,7 @@ The system SHALL collect bids into explicit auction windows through the B' order
 
 ### Requirement: Slot auctions SHALL run shared-price English ascending auction
 
-The system SHALL run each slot auction window as an English ascending-price auction over a single shared price ladder. The window starts with `currentPriceCents` equal to the configured start price (`reservePrice`); every accepted bid SHALL clear `currentPriceCents + incrementCents` (or reach the optional buy-now cap), and acceptance SHALL raise the shared current price to the accepted amount. The bidder holding the highest accepted bid when the window ends wins the single slot and pays their own final bid (first-price settlement). No second-price or multi-slot ranking applies.
+The system SHALL run each slot auction window as an English ascending-price auction over a single shared price ladder and a fixed deadline. The window starts with `currentPriceCents` equal to the configured start price (`reservePrice`); every accepted bid SHALL clear `currentPriceCents + incrementCents` (or reach the optional buy-now cap), and acceptance SHALL raise the shared current price to the accepted amount without changing the deadline. The bidder holding the highest accepted bid when the window ends wins the single slot and pays their own final bid (first-price settlement). No second-price or multi-slot ranking applies.
 
 #### Scenario: Bid below the shared ladder is rejected
 - **WHEN** creator submits a bid below `currentPriceCents + incrementCents` while the window is open
@@ -51,12 +51,11 @@ The system SHALL run each slot auction window as an English ascending-price auct
 - **AND** a different request hash for that current command id returns `IDEMPOTENCY_CONFLICT`
 - **AND** after a higher valid bid replaces the winner, retrying the old command is adjudicated against current state and does not replay historical acceptance
 
-#### Scenario: Anti-snipe extension
-- **WHEN** an accepted bid arrives within `extendWindowSec` of the window end
-- **AND** the configured extension budget (`maxExtensions`) is not exhausted
-- **THEN** the window end is extended by `extendSec`
-- **AND** an `AUCTION_EXTENDED` realtime event notifies clients of the new end time
-- **AND** the allocation period start remains the original window end (fixed allocation-window contract)
+#### Scenario: Bid at or after the fixed deadline
+- **WHEN** a bid reaches Redis Lua at or after the window deadline
+- **THEN** the bid is rejected with `WINDOW_CLOSED`
+- **AND** the rejection does not write a terminal event or advance the decision version
+- **AND** only the deadline closer may emit the terminal decision
 
 #### Scenario: Buy-now cap is reached
 - **WHEN** `capPriceCents` is configured
@@ -74,6 +73,32 @@ The system SHALL run each slot auction window as an English ascending-price auct
 - **WHEN** the auction window ends with no accepted bid
 - **THEN** the window terminates as `AUCTION_NO_BID`
 - **AND** no slot allocation is produced
+
+### Requirement: B' fixed-deadline recovery SHALL fail closed
+
+For single-instance B' deployments, a bprime-enabled process SHALL begin paused and reject every bid and escrow ingress. Before it may accept traffic, startup SHALL read every MySQL `OPEN` window and verify that its Redis hot state already exists and that `windowEndAtEpochMs` strictly equals MySQL `window_end_at`. A missing state or unequal deadline SHALL raise `PromotionAuctionUnavailableException` and fail startup; the process SHALL NOT reset, recreate, or extend the state.
+
+Only after the complete migration fence succeeds SHALL startup recover the `active-streams` registry and every fixed Deadline Timer. The process SHALL become accepting only after all timer recovery and registration succeeds. Any unrecoverable initialization, recovery, timer registration, or registered-task `NOT_DUE` requeue failure SHALL atomically return the process to paused/refusing traffic for its remaining lifetime; only a full restart and successful recovery may reopen it. This failure path SHALL preserve Redis hot state and `active-streams`; the latter SHALL retire only after the terminal Stream settlement has reached its MySQL checkpoint.
+
+This migration fence rejects legacy anti-snipe data; it SHALL NOT restore compatibility with `AUCTION_EXTENDED`, a closing ZSET, or closing scans. Redis `TIME` remains the final deadline authority, and a cap hit remains an immediate `AUCTION_SOLD` terminal decision.
+
+#### Scenario: Legacy hot state has an extended or missing deadline
+- **WHEN** an MySQL `OPEN` window has no Redis hot state or its `windowEndAtEpochMs` differs from `window_end_at`
+- **THEN** startup fails with `PromotionAuctionUnavailableException`
+- **AND** B' remains paused and rejects bid and escrow ingress
+- **AND** the existing Redis state and `active-streams` membership are not reset or removed
+
+#### Scenario: Fixed-deadline recovery succeeds
+- **WHEN** every MySQL `OPEN` window has an existing Redis hot state with the same fixed deadline
+- **AND** `active-streams` recovery and all Deadline Timer registrations succeed
+- **THEN** the B' process becomes accepting
+
+#### Scenario: Registered deadline task cannot be requeued
+- **WHEN** a registered deadline task receives `NOT_DUE` from Redis `TIME` evaluation
+- **AND** its required requeue fails unrecoverably
+- **THEN** the B' process atomically becomes paused and rejects all bid and escrow ingress
+- **AND** it does not reopen in the current process
+- **AND** Redis hot state and `active-streams` remain available for a later restart
 
 ### Requirement: Promotion bids SHALL reserve wallet funds up to submitted bid
 
